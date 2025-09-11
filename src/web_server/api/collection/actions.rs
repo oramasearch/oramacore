@@ -9,7 +9,7 @@ use axum::{
 use serde::Deserialize;
 
 use crate::{
-    collection_manager::sides::read::ReadSide,
+    collection_manager::sides::read::{ReadSide, SearchRequest},
     types::{ApiKey, CollectionId, ExecuteActionPayload, ExecuteActionPayloadName, SearchParams},
 };
 
@@ -41,9 +41,15 @@ async fn execute_action_v0(
 
     match name {
         ExecuteActionPayloadName::Search => {
-            let search_context: SearchParams = serde_json::from_str(&context).unwrap(); // @todo: handle error
+            let search_params: SearchParams = serde_json::from_str(&context).unwrap(); // @todo: handle error
             read_side
-                .search(read_api_key, collection_id, search_context, None)
+                .search(read_api_key, collection_id, 
+                    SearchRequest {
+                        search_params,
+                        analytics_metadata: None,
+                        interaction_id: None,
+                        search_analytics_event_origin: None,
+                    })
                 .await
                 .map(Json)
         }

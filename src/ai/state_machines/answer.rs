@@ -18,7 +18,7 @@ use crate::ai::run_hooks::{run_before_answer, run_before_retrieval};
 use crate::ai::state_machines::advanced_autoquery::{
     AdvancedAutoqueryConfig, AdvancedAutoqueryStateMachine,
 };
-use crate::collection_manager::sides::read::SearchAnalyticEventOrigin;
+use crate::collection_manager::sides::read::{SearchAnalyticEventOrigin, SearchRequest};
 use crate::collection_manager::sides::{read::ReadSide, system_prompts::SystemPrompt};
 use crate::types::{
     ApiKey, CollectionId, IndexId, Interaction, InteractionLLMConfig, Limit, Properties,
@@ -1425,8 +1425,12 @@ impl AnswerStateMachine {
                 .search(
                     read_api_key,
                     collection_id,
-                    params,
-                    Some(SearchAnalyticEventOrigin::RAG),
+                    SearchRequest {
+                        search_params: params,
+                        search_analytics_event_origin: Some(SearchAnalyticEventOrigin::RAG),
+                        analytics_metadata: None,
+                        interaction_id: None,
+                    },
                 )
                 .await
                 .map_err(|e| AnswerError::SearchError(e.to_string()))?;
@@ -1562,23 +1566,27 @@ impl AnswerStateMachine {
             .search(
                 self.read_api_key,
                 self.collection_id,
-                SearchParams {
-                    mode: SearchMode::Vector(VectorMode {
-                        term: interaction.query.clone(),
-                        similarity: Similarity(component.threshold),
-                    }),
-                    limit: Limit(component.max_documents),
-                    offset: SearchOffset(0),
-                    where_filter: Default::default(),
-                    boost: HashMap::new(),
-                    facets: HashMap::new(),
-                    properties: Properties::Star,
-                    indexes: Some(index_ids),
-                    sort_by: None,
-                    user_id: None, // @todo: handle user_id if needed
-                    group_by: None,
+                SearchRequest {
+                    search_params: SearchParams {
+                        mode: SearchMode::Vector(VectorMode {
+                            term: interaction.query.clone(),
+                            similarity: Similarity(component.threshold),
+                        }),
+                        limit: Limit(component.max_documents),
+                        offset: SearchOffset(0),
+                        where_filter: Default::default(),
+                        boost: HashMap::new(),
+                        facets: HashMap::new(),
+                        properties: Properties::Star,
+                        indexes: Some(index_ids),
+                        sort_by: None,
+                        user_id: None, // @todo: handle user_id if needed
+                        group_by: None,
+                    },
+                    search_analytics_event_origin: Some(SearchAnalyticEventOrigin::RAG),
+                    analytics_metadata: None,
+                    interaction_id: None,
                 },
-                Some(SearchAnalyticEventOrigin::RAG),
             )
             .map_err(|_| GeneralRagAtError::ReadError)
             .await?;

@@ -19,7 +19,7 @@ use crate::{
         run_hooks::{run_before_answer, run_before_retrieval},
     },
     collection_manager::sides::{
-        read::{ReadError, ReadSide, SearchAnalyticEventOrigin},
+        read::{ReadError, ReadSide, SearchAnalyticEventOrigin, SearchRequest},
         system_prompts::SystemPrompt,
     },
     types::{
@@ -217,8 +217,12 @@ impl Answer {
                 .search(
                     self.read_api_key,
                     self.collection_id,
-                    params,
-                    Some(SearchAnalyticEventOrigin::RAG),
+                    SearchRequest {
+                        search_params: params,
+                        search_analytics_event_origin: Some(SearchAnalyticEventOrigin::RAG),
+                        analytics_metadata: None,
+                        interaction_id: None,
+                    },
                 )
                 .await?;
             result.hits
@@ -581,8 +585,12 @@ impl Answer {
             .search(
                 self.read_api_key,
                 self.collection_id,
-                params,
-                Some(SearchAnalyticEventOrigin::RAG),
+                SearchRequest {
+                    search_params: params,
+                    search_analytics_event_origin: Some(SearchAnalyticEventOrigin::RAG),
+                    analytics_metadata: None,
+                    interaction_id: None,
+                },
             )
             .await
         {
@@ -728,23 +736,27 @@ impl Answer {
             .search(
                 self.read_api_key,
                 self.collection_id,
-                SearchParams {
-                    mode: SearchMode::Vector(VectorMode {
-                        term: interaction.query.clone(),
-                        similarity: Similarity(component.threshold),
-                    }),
-                    limit: Limit(component.max_documents),
-                    offset: SearchOffset(0),
-                    where_filter: Default::default(),
-                    boost: HashMap::new(),
-                    facets: HashMap::new(),
-                    properties: Properties::Star,
-                    indexes: Some(index_ids),
-                    sort_by: None,
-                    user_id: None, // @todo: handle user_id if needed
-                    group_by: None,
-                },
-                Some(SearchAnalyticEventOrigin::RAG),
+                SearchRequest {
+                    search_params: SearchParams {
+                        mode: SearchMode::Vector(VectorMode {
+                            term: interaction.query.clone(),
+                            similarity: Similarity(component.threshold),
+                        }),
+                        limit: Limit(component.max_documents),
+                        offset: SearchOffset(0),
+                        where_filter: Default::default(),
+                        boost: HashMap::new(),
+                        facets: HashMap::new(),
+                        properties: Properties::Star,
+                        indexes: Some(index_ids),
+                        sort_by: None,
+                        user_id: None, // @todo: handle user_id if needed
+                        group_by: None,
+                    },
+                    analytics_metadata: None,
+                    interaction_id: None,
+                    search_analytics_event_origin: Some(SearchAnalyticEventOrigin::RAG),
+                }
             )
             .map_err(|_| GeneralRagAtError::ReadError)
             .await?;

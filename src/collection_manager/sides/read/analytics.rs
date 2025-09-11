@@ -1,4 +1,4 @@
-use std::{collections::HashMap, path::PathBuf, time::Duration};
+use std::{collections::HashMap, path::PathBuf, sync::Arc, time::Duration};
 
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
@@ -8,21 +8,31 @@ use serde::{Deserialize, Serialize};
 use crate::types::{ApiKey, CollectionId, SearchMode, SearchParams, SearchResult};
 
 #[derive(Deserialize, Clone)]
-pub struct OramaCoreAnalyticConfig {
-    pub api_key: ApiKey,
+pub struct MetadataFfromHeadersPair {
+    pub header: String,
+    pub metadata_key: String,
 }
 
+#[derive(Deserialize, Clone)]
+pub struct OramaCoreAnalyticConfig {
+    pub api_key: ApiKey,
+    pub metadata_from_headers: Vec<MetadataFfromHeadersPair>,
+}
+
+#[derive(Clone)]
 pub struct OramaCoreAnalytics {
     api_key: ApiKey,
-    inner: AnalyticsStorage<AnalyticEvent>,
+    inner: Arc<AnalyticsStorage<AnalyticEvent>>,
+    metadata_from_headers: Vec<MetadataFfromHeadersPair>,
 }
 
 impl OramaCoreAnalytics {
     pub fn try_new(data_dir: PathBuf, config: OramaCoreAnalyticConfig) -> Result<Self> {
         let inner = AnalyticsStorage::try_new(AnalyticConfig { data_dir })?;
         Ok(Self {
-            inner,
+            inner: Arc::new(inner),
             api_key: config.api_key,
+            metadata_from_headers: config.metadata_from_headers,
         })
     }
 
@@ -35,6 +45,10 @@ impl OramaCoreAnalytics {
             return Err(anyhow::anyhow!("Invalid analytics API key"));
         }
         self.inner.get_and_erase().await
+    }
+
+    pub fn get_metadata_from_headers(&self) -> &[MetadataFfromHeadersPair] {
+        &self.metadata_from_headers
     }
 }
 
@@ -74,6 +88,8 @@ pub struct SearchAnalyticEventV1 {
     pub search_type: SearchAnalyticEventSearchType,
     #[serde(rename = "v_id", skip_serializing_if = "Option::is_none")]
     pub visitor_id: Option<String>,
+    #[serde(rename = "i_id", skip_serializing_if = "Option::is_none")]
+    pub interaction_id: Option<String>,
     #[serde(rename = "rst")]
     pub raw_search_term: String,
     #[serde(rename = "rq")]
@@ -97,7 +113,19 @@ pub struct SearchAnalyticEventV1 {
     #[serde(rename = "r")]
     pub results: String,
     #[serde(rename = "md", skip_serializing_if = "HashMap::is_empty")]
-    pub metadata: HashMap<String, String>,
+    pub metadata: HashMap<String, String>
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct AnalyticsMetadataFromRequest {
+    #[serde(flatten)]
+    pub headers: HashMap<String, String>,
+}
+
+impl AnalyticsMetadataFromRequest {
+    pub fn is_empty(&self) -> bool {
+        self.headers.is_empty()
+    }
 }
 
 impl SearchAnalyticEventV1 {
@@ -109,6 +137,8 @@ impl SearchAnalyticEventV1 {
         search_duration: Duration,
         has_pins_rules: bool,
         has_pinned_results: bool,
+        analytics_metadata: Option<AnalyticsMetadataFromRequest>,
+        interaction_id: Option<String>,
     ) -> Result<Self> {
         let has_filters = search_params.where_filter.is_empty();
         let has_facets = !search_params.facets.is_empty();
@@ -130,6 +160,8 @@ impl SearchAnalyticEventV1 {
             SearchMode::FullText(f) => (f.term.clone(), SearchAnalyticEventSearchType::Fulltext),
         };
 
+        let metadata = analytics_metadata.map(|a| a.headers).unwrap_or_default();
+
         Ok(Self {
             timestamp: Utc::now(),
             collection_id,
@@ -147,7 +179,8 @@ impl SearchAnalyticEventV1 {
             results,
             search_type,
             visitor_id: search_params.user_id.clone(),
-            metadata: HashMap::new(),
+            interaction_id,
+            metadata,
         })
     }
 }

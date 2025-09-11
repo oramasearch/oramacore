@@ -22,7 +22,7 @@ use crate::types::{
 
 use crate::ai::run_hooks::run_before_retrieval;
 use crate::collection_manager::sides::read::{
-    CollectionStats, ReadSide, SearchAnalyticEventOrigin,
+    CollectionStats, ReadSide, SearchAnalyticEventOrigin, SearchRequest,
 };
 
 // ==== SSE Event Types ====
@@ -1491,8 +1491,12 @@ impl AdvancedAutoqueryStateMachine {
             .search(
                 read_api_key,
                 collection_id,
-                search_params,
-                Some(SearchAnalyticEventOrigin::RAG),
+                SearchRequest {
+                    search_params,
+                    search_analytics_event_origin: Some(SearchAnalyticEventOrigin::RAG),
+                    analytics_metadata: None,
+                    interaction_id: None,
+                },
             )
             .await
             .map_err(|e| AdvancedAutoqueryError::ExecuteSearchesError(e.to_string()))?;

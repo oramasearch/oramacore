@@ -10,6 +10,7 @@ use thiserror::Error;
 mod context;
 pub mod jwt_manager;
 
+use std::borrow::Cow;
 use std::{
     collections::HashMap,
     ops::Deref,
@@ -45,6 +46,7 @@ use embedding::{start_calculate_embedding_loop, MultiEmbeddingCalculationRequest
 
 pub use context::WriteSideContext;
 
+use crate::collection_manager::sides::write::document_storage::ZeboDocument;
 use crate::{
     ai::{
         automatic_embeddings_selector::AutomaticEmbeddingsSelector,
@@ -988,12 +990,18 @@ impl WriteSide {
 
         let mut insert_document_batch = Vec::with_capacity(document_count);
         let mut doc_ids = Vec::with_capacity(document_count);
+        let mut docs = Vec::with_capacity(batch_size);
         for (index, doc) in document_list.0.iter_mut().enumerate() {
             if index % 100 == 0 {
                 trace!("Processing document {}/{}", index, document_count);
             }
 
             if index % batch_size == 0 && !batch.is_empty() {
+                self.document_storage.insert_docs(
+                    &docs,
+                );
+                docs.clear();
+
                 insert_document_batch.push(WriteOperation::DocumentStorage(
                     DocumentStorageWriteOperation::InsertDocuments(batch),
                 ));
@@ -1025,11 +1033,6 @@ impl WriteSide {
             let doc_id = DocumentId(doc_id);
             doc_ids.push(doc_id);
 
-            self.document_storage
-                .insert(doc_id, doc_id_str.clone(), doc.clone())
-                .await
-                .context("Cannot inser document into document storage")?;
-
             batch.push((
                 doc_id,
                 DocumentToInsert(
@@ -1038,6 +1041,10 @@ impl WriteSide {
                         .expect("Cannot get raw document"),
                 ),
             ));
+
+            let document = serde_json::to_string(&doc.inner)
+                .context("Cannot serialize document")?;
+            docs.push((doc_id, ZeboDocument::new(Cow::Owned(doc_id_str), Cow::Owned(document))));
         }
 
         if !batch.is_empty() {

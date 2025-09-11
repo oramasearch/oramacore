@@ -345,6 +345,18 @@ impl zebo::Document for ZeboDocument<'_> {
             }
         }
     }
+
+    fn len(&self) -> usize {
+        match self {
+            Self::Split(id, json) => {
+                id.len() + ZERO.len() + json.len()
+            },
+            Self::FromJSONDoc(a) => {
+                let id_len = a.id.as_ref().map_or(0, |id| id.len());
+                id_len + ZERO.len() + a.inner.get().len()
+            }
+        }
+    }
 }
 
 impl ZeboDocument<'_> {

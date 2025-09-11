@@ -6,6 +6,7 @@ use oramacore_lib::generic_kv::KV;
 use std::{collections::HashMap, sync::Arc};
 use strum_macros::Display;
 
+use crate::collection_manager::sides::read::SearchRequest;
 use crate::types::{
     InteractionLLMConfig, InteractionMessage, TrainingSetQueriesOptimizerQuerySet,
     TrainingSetsQueriesOptimizerResponse,
@@ -323,7 +324,13 @@ impl TrainingSet {
 
         let random_search_results = self
             .read_side
-            .search(self.read_api_key, self.collection_id, search_params, None)
+            .search(self.read_api_key, self.collection_id, 
+                SearchRequest {
+                    search_params,
+                    analytics_metadata: None,
+                    interaction_id: None,
+                    search_analytics_event_origin: None,
+                })
             .await?;
 
         let as_json_docs = random_search_results

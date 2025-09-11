@@ -26,7 +26,12 @@ use std::time::Duration;
 use std::{collections::HashMap, path::PathBuf};
 use tokio::time::{Instant, MissedTickBehavior};
 
-pub use analytics::{OramaCoreAnalyticConfig, SearchAnalyticEventOrigin};
+pub use analytics::{
+    OramaCoreAnalyticConfig,
+    SearchAnalyticEventOrigin,
+    OramaCoreAnalytics,
+    AnalyticsMetadataFromRequest,
+};
 
 use anyhow::{Context, Result};
 pub use collection::{IndexFieldStats, IndexFieldStatsType};
@@ -42,16 +47,16 @@ use crate::ai::llms::{self, KnownPrompts, LLMService};
 use crate::ai::tools::{CollectionToolsRuntime, ToolError, ToolsRuntime};
 use crate::ai::training_sets::{TrainingDestination, TrainingSetInterface};
 use crate::ai::RemoteLLMProvider;
-use crate::collection_manager::sides::read::analytics::OramaCoreAnalytics;
 pub use crate::collection_manager::sides::read::context::ReadSideContext;
 use crate::collection_manager::sides::read::logs::HookLogs;
 use crate::collection_manager::sides::read::notify::Notifier;
 use crate::collection_manager::sides::read::search::Search;
+pub use search::SearchRequest;
 use crate::metrics::operations::OPERATION_COUNT;
 use crate::metrics::Empty;
 use crate::types::{
     ApiKey, CollectionStatsRequest, InteractionLLMConfig, SearchMode, SearchModeResult,
-    SearchParams, SearchResult,
+    SearchResult,
 };
 use crate::types::{IndexId, NLPSearchRequest};
 use crate::{ai::AIService, types::CollectionId};
@@ -433,8 +438,7 @@ impl ReadSide {
         &self,
         read_api_key: ApiKey,
         collection_id: CollectionId,
-        search_params: SearchParams,
-        search_analytics_event_origin: Option<SearchAnalyticEventOrigin>,
+        request: SearchRequest,
     ) -> Result<SearchResult, ReadError> {
         let collection = self
             .collections
@@ -447,8 +451,7 @@ impl ReadSide {
             &collection,
             &self.document_storage,
             self.analytics_storage.as_ref(),
-            search_params,
-            search_analytics_event_origin,
+            request,
         );
 
         search.execute().await
@@ -681,8 +684,8 @@ impl ReadSide {
         &self.hook_logs
     }
 
-    pub fn get_analytics_logs(&self) -> Option<&OramaCoreAnalytics> {
-        self.analytics_storage.as_ref()
+    pub fn get_analytics_logs(&self) -> Option<OramaCoreAnalytics> {
+        self.analytics_storage.clone()
     }
 
     pub async fn get_default_system_prompt(

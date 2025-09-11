@@ -6,13 +6,9 @@ use oramacore_lib::pin_rules::Consequence;
 
 use crate::{
     collection_manager::sides::read::{
-        analytics::{OramaCoreAnalytics, SearchAnalyticEventOrigin, SearchAnalyticEventV1},
-        collection::ReadIndexesLockGuard,
-        document_storage::DocumentStorage,
-        sort::sort_documents_in_groups,
-        GroupValue, ReadError, SortContext,
+        GroupValue, ReadError, SortContext, analytics::{AnalyticsMetadataFromRequest, OramaCoreAnalytics, SearchAnalyticEventOrigin, SearchAnalyticEventV1}, collection::ReadIndexesLockGuard, document_storage::DocumentStorage, sort::sort_documents_in_groups
     },
-    metrics::{search::SEARCH_CALCULATION_TIME, SearchCollectionLabels},
+    metrics::{SearchCollectionLabels, search::SEARCH_CALCULATION_TIME},
     types::{
         DocumentId, FacetResult, GroupByConfig, GroupedResult, SearchMode, SearchParams,
         SearchResult, SearchResultHit, SortBy, TokenScore, WhereFilter,
@@ -23,12 +19,18 @@ use super::collection::CollectionReader;
 
 use tracing::{error, info, trace};
 
+pub struct SearchRequest {
+    pub search_params: SearchParams,
+    pub search_analytics_event_origin: Option<SearchAnalyticEventOrigin>,
+    pub analytics_metadata: Option<AnalyticsMetadataFromRequest>,
+    pub interaction_id: Option<String>,
+}
+
 pub struct Search<'collection, 'document_storage, 'analytics_storage> {
     collection: &'collection CollectionReader,
     document_storage: &'document_storage DocumentStorage,
     analytics_storage: Option<&'analytics_storage OramaCoreAnalytics>,
-    search_params: SearchParams,
-    search_analytics_event_origin: Option<SearchAnalyticEventOrigin>,
+    request: SearchRequest,
 }
 
 impl<'collection, 'document_storage, 'analytics_storage>
@@ -38,15 +40,13 @@ impl<'collection, 'document_storage, 'analytics_storage>
         collection: &'collection CollectionReader,
         document_storage: &'document_storage DocumentStorage,
         analytics_storage: Option<&'analytics_storage OramaCoreAnalytics>,
-        search_params: SearchParams,
-        search_analytics_event_origin: Option<SearchAnalyticEventOrigin>,
+        request: SearchRequest,
     ) -> Self {
         Self {
             collection,
             document_storage,
             analytics_storage,
-            search_params,
-            search_analytics_event_origin,
+            request,
         }
     }
 
@@ -57,9 +57,14 @@ impl<'collection, 'document_storage, 'analytics_storage>
             collection,
             document_storage,
             analytics_storage,
+            request,
+        } = self;
+        let SearchRequest {
             search_params,
             search_analytics_event_origin,
-        } = self;
+            analytics_metadata,
+            interaction_id
+        } = request;
 
         let collection_id = collection.id();
 
@@ -249,6 +254,8 @@ impl<'collection, 'document_storage, 'analytics_storage>
                     search_duration,
                     !pin_rules.is_empty(),
                     false,
+                    analytics_metadata,
+                    interaction_id,
                 ) {
                     Ok(ev) => {
                         if let Err(e) = analytics_storage.add_event(ev) {

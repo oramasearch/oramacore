@@ -12,7 +12,7 @@ use tokio_stream::wrappers::ReceiverStream;
 
 use super::llms::{KnownPrompts, LLMService};
 use crate::ai::run_hooks::run_before_retrieval;
-use crate::collection_manager::sides::read::SearchAnalyticEventOrigin;
+use crate::collection_manager::sides::read::{SearchAnalyticEventOrigin, SearchRequest};
 use crate::{
     collection_manager::sides::read::{CollectionStats, ReadSide},
     types::{
@@ -651,8 +651,12 @@ impl AdvancedAutoQuery {
                     .search(
                         read_api_key,
                         collection_id,
-                        search_params,
-                        Some(invocation_origin),
+                        SearchRequest {
+                            search_params,
+                            search_analytics_event_origin: Some(invocation_origin),
+                            analytics_metadata: None,
+                            interaction_id: None,
+                        },
                     )
                     .await
                     .context("Failed to execute search")?;

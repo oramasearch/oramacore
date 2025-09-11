@@ -42,6 +42,24 @@ impl DocumentStorage {
         })
     }
 
+    pub async fn insert_docs(
+        &self,
+        docs: &[(DocumentId, ZeboDocument<'_>)],
+    ) -> Result<()> {
+        if docs.is_empty() {
+            return Ok(());
+        }
+
+        let mut zebo = self.zebo.write().await;
+        let space = zebo.reserve_space_for(docs)
+            .context("Cannot reserve space for docs")?;
+        drop(zebo);
+        space.write_all()
+            .context("Cannot write documents to zebo")?;
+
+        Ok(())
+    }
+
     pub async fn insert(
         &self,
         id: DocumentId,
@@ -53,6 +71,7 @@ impl DocumentStorage {
         let document = document.get();
 
         let mut zebo = self.zebo.write().await;
+
         zebo.add_documents(vec![(
             id,
             ZeboDocument(Cow::Owned(doc_id_str), Cow::Borrowed(document)),
@@ -249,7 +268,7 @@ pub async fn migrate_to_zebo(data_dir: &PathBuf) -> Result<Zebo<1_000_000, PAGE_
 
 static ZERO: &[u8] = b"\0";
 
-struct ZeboDocument<'s>(Cow<'s, str>, Cow<'s, str>);
+pub struct ZeboDocument<'s>(Cow<'s, str>, Cow<'s, str>);
 
 impl zebo::Document for ZeboDocument<'_> {
     fn as_bytes(&self, v: &mut Vec<u8>) {
@@ -257,9 +276,17 @@ impl zebo::Document for ZeboDocument<'_> {
         v.extend(ZERO);
         v.extend(self.1.as_bytes());
     }
+
+    fn len(&self) -> usize {
+        self.0.len() + 1 + self.1.len()
+    }
 }
 
-impl ZeboDocument<'_> {
+impl<'s> ZeboDocument<'s> {
+    pub fn new(id: Cow<'s, str>, content: Cow<'s, str>) -> Self {
+        Self(id, content)
+    }
+
     fn from_bytes(bytes: Vec<u8>) -> Result<Self> {
         let mut parts = bytes.split(|b| *b == b'\0');
         let id = parts

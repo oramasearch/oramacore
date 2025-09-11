@@ -16,6 +16,7 @@ async fn test_analytics_search() {
     let mut config: OramacoreConfig = create_oramacore_config();
     config.reader_side.analytics = Some(OramaCoreAnalyticConfig {
         api_key: ApiKey::try_new("test_analytics_api_key").unwrap(),
+        metadata_from_headers: vec![],
     });
 
     let test_context = TestContext::new_with_config(config.clone()).await;
