@@ -42,22 +42,14 @@ impl DocumentStorage {
         })
     }
 
-    pub async fn insert(
-        &self,
-        id: DocumentId,
-        doc_id_str: String,
-        document: Document,
-    ) -> Result<()> {
-        let document = serde_json::value::to_raw_value(&document.inner)
-            .context("Cannot serialize document")?;
-        let document = document.get();
-
+    pub async fn insert_many(&self, docs: &[(DocumentId, ZeboDocument<'_>)]) -> Result<()> {
         let mut zebo = self.zebo.write().await;
-        zebo.add_documents(vec![(
-            id,
-            ZeboDocument(Cow::Owned(doc_id_str), Cow::Borrowed(document)),
-        )])
-        .context("Cannot add document to zebo")?;
+        let space = zebo
+            .reserve_space_for(docs)
+            .context("Cannot reserve space in zebo")?;
+        drop(zebo);
+
+        space.write_all().context("Cannot write documents")?;
 
         Ok(())
     }
@@ -237,10 +229,12 @@ pub async fn migrate_to_zebo(data_dir: &PathBuf) -> Result<Zebo<1_000_000, PAGE_
         let doc_id_str = data.0.id.unwrap_or_default();
         let doc = data.0.inner.get();
 
-        zebo.add_documents(vec![(
+        zebo.reserve_space_for(&[(
             doc_id,
             ZeboDocument(Cow::Owned(doc_id_str), Cow::Borrowed(doc)),
         )])
+        .unwrap()
+        .write_all()
         .unwrap();
     }
 
@@ -249,7 +243,7 @@ pub async fn migrate_to_zebo(data_dir: &PathBuf) -> Result<Zebo<1_000_000, PAGE_
 
 static ZERO: &[u8] = b"\0";
 
-struct ZeboDocument<'s>(Cow<'s, str>, Cow<'s, str>);
+pub struct ZeboDocument<'s>(Cow<'s, str>, Cow<'s, str>);
 
 impl zebo::Document for ZeboDocument<'_> {
     fn as_bytes(&self, v: &mut Vec<u8>) {
@@ -257,9 +251,17 @@ impl zebo::Document for ZeboDocument<'_> {
         v.extend(ZERO);
         v.extend(self.1.as_bytes());
     }
+
+    fn len(&self) -> usize {
+        self.0.len() + ZERO.len() + self.1.len()
+    }
 }
 
-impl ZeboDocument<'_> {
+impl<'s> ZeboDocument<'s> {
+    pub fn new(id: Cow<'s, str>, data: Cow<'s, str>) -> Self {
+        ZeboDocument(id, data)
+    }
+
     fn from_bytes(bytes: Vec<u8>) -> Result<Self> {
         let mut parts = bytes.split(|b| *b == b'\0');
         let id = parts

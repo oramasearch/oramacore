@@ -1,10 +1,12 @@
 use anyhow::Result;
 use serde_json::json;
 
-use crate::tests::utils::TestContext;
+use crate::tests::utils::{init_log, TestContext};
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 10)]
 async fn test_list_documents() -> Result<()> {
+    init_log();
+
     let test_context = TestContext::new().await;
     let collection_client = test_context.create_collection().await.unwrap();
     let index_client = collection_client.create_index().await.unwrap();
