@@ -114,14 +114,16 @@ impl CommittedDiskDocumentStorage {
                     .await;
             }
         };
-        zebo.add_documents_batch(
-            new_docs
-                .into_iter()
-                .map(|(doc_id, doc)| (doc_id, ZeboDocument::FromJSONDoc(doc))),
-            200,  // 200 at the time
-            1024, // each document is 1kb
-        )
-        .context("Cannot add documents")?;
+        let docs: Vec<_> = new_docs
+            .into_iter()
+            .map(|(doc_id, doc)| (doc_id, ZeboDocument::FromJSONDoc(doc)))
+            .collect();
+        if !docs.is_empty() {
+            zebo.reserve_space_for(&docs)
+                .context("Cannot reserve space for documents")?
+                .write_all()
+                .context("Cannot write documents")?;
+        }
 
         zebo.remove_documents(to_delete, false)
             .context("Cannot remove documents")?;
@@ -311,10 +313,12 @@ pub async fn migrate_to_zebo(data_dir: &PathBuf) -> Result<Zebo<1_000_000, PAGE_
         let doc_id_str = data.0.id.clone().unwrap_or_default();
         let doc = data.0.inner.get();
 
-        zebo.add_documents(vec![(
+        zebo.reserve_space_for(&[(
             doc_id,
             ZeboDocument::Split(Cow::Owned(doc_id_str), Cow::Borrowed(doc)),
         )])
+        .unwrap()
+        .write_all()
         .unwrap();
     }
 
@@ -342,6 +346,16 @@ impl zebo::Document for ZeboDocument<'_> {
                 };
                 v.extend(ZERO);
                 v.extend(a.inner.get().as_bytes());
+            }
+        }
+    }
+
+    fn len(&self) -> usize {
+        match self {
+            Self::Split(id, json) => id.len() + ZERO.len() + json.len(),
+            Self::FromJSONDoc(a) => {
+                let id_len = a.id.as_ref().map_or(0, |id| id.len());
+                id_len + ZERO.len() + a.inner.get().len()
             }
         }
     }
