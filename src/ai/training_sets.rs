@@ -324,13 +324,16 @@ impl TrainingSet {
 
         let random_search_results = self
             .read_side
-            .search(self.read_api_key, self.collection_id, 
+            .search(
+                self.read_api_key,
+                self.collection_id,
                 SearchRequest {
                     search_params,
                     analytics_metadata: None,
                     interaction_id: None,
                     search_analytics_event_origin: None,
-                })
+                },
+            )
             .await?;
 
         let as_json_docs = random_search_results

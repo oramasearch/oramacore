@@ -27,10 +27,8 @@ use std::{collections::HashMap, path::PathBuf};
 use tokio::time::{Instant, MissedTickBehavior};
 
 pub use analytics::{
-    OramaCoreAnalyticConfig,
+    AnalyticsMetadataFromRequest, OramaCoreAnalyticConfig, OramaCoreAnalytics,
     SearchAnalyticEventOrigin,
-    OramaCoreAnalytics,
-    AnalyticsMetadataFromRequest,
 };
 
 use anyhow::{Context, Result};
@@ -51,7 +49,6 @@ pub use crate::collection_manager::sides::read::context::ReadSideContext;
 use crate::collection_manager::sides::read::logs::HookLogs;
 use crate::collection_manager::sides::read::notify::Notifier;
 use crate::collection_manager::sides::read::search::Search;
-pub use search::SearchRequest;
 use crate::metrics::operations::OPERATION_COUNT;
 use crate::metrics::Empty;
 use crate::types::{
@@ -63,6 +60,7 @@ use crate::{ai::AIService, types::CollectionId};
 use oramacore_lib::fs::BufferedFile;
 use oramacore_lib::generic_kv::{KVConfig, KV};
 use oramacore_lib::nlp::NLPService;
+pub use search::SearchRequest;
 
 use super::system_prompts::{SystemPrompt, SystemPromptInterface};
 use super::{

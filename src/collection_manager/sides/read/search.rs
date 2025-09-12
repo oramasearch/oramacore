@@ -6,9 +6,16 @@ use oramacore_lib::pin_rules::Consequence;
 
 use crate::{
     collection_manager::sides::read::{
-        GroupValue, ReadError, SortContext, analytics::{AnalyticsMetadataFromRequest, OramaCoreAnalytics, SearchAnalyticEventOrigin, SearchAnalyticEventV1}, collection::ReadIndexesLockGuard, document_storage::DocumentStorage, sort::sort_documents_in_groups
+        analytics::{
+            AnalyticsMetadataFromRequest, OramaCoreAnalytics, SearchAnalyticEventOrigin,
+            SearchAnalyticEventV1,
+        },
+        collection::ReadIndexesLockGuard,
+        document_storage::DocumentStorage,
+        sort::sort_documents_in_groups,
+        GroupValue, ReadError, SortContext,
     },
-    metrics::{SearchCollectionLabels, search::SEARCH_CALCULATION_TIME},
+    metrics::{search::SEARCH_CALCULATION_TIME, SearchCollectionLabels},
     types::{
         DocumentId, FacetResult, GroupByConfig, GroupedResult, SearchMode, SearchParams,
         SearchResult, SearchResultHit, SortBy, TokenScore, WhereFilter,
@@ -63,7 +70,7 @@ impl<'collection, 'document_storage, 'analytics_storage>
             search_params,
             search_analytics_event_origin,
             analytics_metadata,
-            interaction_id
+            interaction_id,
         } = request;
 
         let collection_id = collection.id();

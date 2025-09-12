@@ -756,7 +756,7 @@ impl Answer {
                     analytics_metadata: None,
                     interaction_id: None,
                     search_analytics_event_origin: Some(SearchAnalyticEventOrigin::RAG),
-                }
+                },
             )
             .map_err(|_| GeneralRagAtError::ReadError)
             .await?;

@@ -10,15 +10,22 @@ use tokio::time::sleep;
 use tracing::{level_filters::LevelFilter, warn};
 
 use oramacore::{
-    LogConfig, OramacoreConfig, ai::{AIServiceConfig, AIServiceLLMConfig, OramaModel}, build_orama, collection_manager::sides::{
-        InputSideChannelType, OutputSideChannelType, read::{IndexesConfig, OffloadFieldConfig, ReadSideConfig, SearchRequest}, write::{
+    ai::{AIServiceConfig, AIServiceLLMConfig, OramaModel},
+    build_orama,
+    collection_manager::sides::{
+        read::{IndexesConfig, OffloadFieldConfig, ReadSideConfig, SearchRequest},
+        write::{
             CollectionsWriterConfig, OramaModelSerializable, TempIndexCleanupConfig,
             WriteSideConfig,
-        }
-    }, types::{
+        },
+        InputSideChannelType, OutputSideChannelType,
+    },
+    types::{
         ApiKey, CollectionId, CreateCollection, CreateIndexRequest, DeleteDocuments, DocumentList,
         IndexEmbeddingsCalculation, IndexId, LanguageDTO, SearchParams, WriteApiKey,
-    }, web_server::HttpConfig
+    },
+    web_server::HttpConfig,
+    LogConfig, OramacoreConfig,
 };
 
 // Configuration constants
@@ -313,12 +320,16 @@ async fn main() -> Result<()> {
             .context("Failed to create search params")?;
 
             read_side
-                .search(read_api_key, collection_id, SearchRequest {
-                    search_params,
-                    analytics_metadata: None,
-                    interaction_id: None,
-                    search_analytics_event_origin: None,
-                })
+                .search(
+                    read_api_key,
+                    collection_id,
+                    SearchRequest {
+                        search_params,
+                        analytics_metadata: None,
+                        interaction_id: None,
+                        search_analytics_event_origin: None,
+                    },
+                )
                 .await
                 .unwrap();
         }
@@ -345,12 +356,16 @@ async fn main() -> Result<()> {
             let search_start = Instant::now();
 
             match read_side
-                .search(read_api_key, collection_id, SearchRequest {
-                    search_params,
-                    analytics_metadata: None,
-                    interaction_id: None,
-                    search_analytics_event_origin: None,
-                })
+                .search(
+                    read_api_key,
+                    collection_id,
+                    SearchRequest {
+                        search_params,
+                        analytics_metadata: None,
+                        interaction_id: None,
+                        search_analytics_event_origin: None,
+                    },
+                )
                 .await
             {
                 Ok(results) => {

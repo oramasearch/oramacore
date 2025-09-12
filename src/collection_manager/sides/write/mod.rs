@@ -832,8 +832,13 @@ impl WriteSide {
                         let doc_id = self.document_count.fetch_add(1, Ordering::Relaxed);
                         let doc_id = DocumentId(doc_id);
 
+                        let doc_str = serde_json::to_string(&doc.inner)
+                            .context("Cannot serialize document")?;
                         self.document_storage
-                            .insert(doc_id, doc_id_str.clone(), new_document.clone())
+                            .insert_many(&[(
+                                doc_id,
+                                ZeboDocument::new(Cow::Borrowed(doc_id_str), Cow::Owned(doc_str)),
+                            )])
                             .await
                             .context("Cannot insert document into document storage")?;
 
@@ -997,15 +1002,19 @@ impl WriteSide {
             }
 
             if index % batch_size == 0 && !batch.is_empty() {
-                self.document_storage.insert_docs(
-                    &docs,
-                );
+                self.document_storage.insert_many(&docs);
                 docs.clear();
 
                 insert_document_batch.push(WriteOperation::DocumentStorage(
                     DocumentStorageWriteOperation::InsertDocuments(batch),
                 ));
                 batch = Vec::with_capacity(batch_size);
+
+                self.document_storage
+                    .insert_many(&docs)
+                    .await
+                    .context("Cannot inser document into document storage")?;
+                docs.clear();
             }
 
             let doc_id = self.document_count.fetch_add(1, Ordering::Relaxed);
@@ -1042,15 +1051,22 @@ impl WriteSide {
                 ),
             ));
 
-            let document = serde_json::to_string(&doc.inner)
-                .context("Cannot serialize document")?;
-            docs.push((doc_id, ZeboDocument::new(Cow::Owned(doc_id_str), Cow::Owned(document))));
+            let doc_str = serde_json::to_string(&doc.inner).context("Cannot serialize document")?;
+            docs.push((
+                doc_id,
+                ZeboDocument::new(Cow::Owned(doc_id_str), Cow::Owned(doc_str)),
+            ));
         }
 
         if !batch.is_empty() {
             insert_document_batch.push(WriteOperation::DocumentStorage(
                 DocumentStorageWriteOperation::InsertDocuments(batch),
             ));
+
+            self.document_storage
+                .insert_many(&docs)
+                .await
+                .context("Cannot inser document into document storage")?;
         }
 
         trace!("Sending documents");

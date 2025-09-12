@@ -11,7 +11,8 @@ use tracing::info;
 
 use crate::{
     collection_manager::sides::{
-        ReplaceIndexReason, write::{WriteSide, jwt_manager::JwtManager}
+        write::{jwt_manager::JwtManager, WriteSide},
+        ReplaceIndexReason,
     },
     types::{
         ApiKey, CollectionId, CreateCollection, CreateIndexRequest, DeleteCollection,

@@ -9,7 +9,7 @@ use zebo::Zebo;
 use anyhow::{Context, Result};
 use tracing::{error, info, warn};
 
-use crate::types::{Document, DocumentId, RawJSONDocument};
+use crate::types::{DocumentId, RawJSONDocument};
 use oramacore_lib::fs::{create_if_not_exists, read_file};
 
 // 1GB
@@ -42,41 +42,18 @@ impl DocumentStorage {
         })
     }
 
-    pub async fn insert_docs(
-        &self,
-        docs: &[(DocumentId, ZeboDocument<'_>)],
-    ) -> Result<()> {
+    pub async fn insert_many(&self, docs: &[(DocumentId, ZeboDocument<'_>)]) -> Result<()> {
         if docs.is_empty() {
             return Ok(());
         }
 
         let mut zebo = self.zebo.write().await;
-        let space = zebo.reserve_space_for(docs)
-            .context("Cannot reserve space for docs")?;
+        let space = zebo
+            .reserve_space_for(docs)
+            .context("Cannot reserve space in zebo")?;
         drop(zebo);
-        space.write_all()
-            .context("Cannot write documents to zebo")?;
 
-        Ok(())
-    }
-
-    pub async fn insert(
-        &self,
-        id: DocumentId,
-        doc_id_str: String,
-        document: Document,
-    ) -> Result<()> {
-        let document = serde_json::value::to_raw_value(&document.inner)
-            .context("Cannot serialize document")?;
-        let document = document.get();
-
-        let mut zebo = self.zebo.write().await;
-
-        zebo.add_documents(vec![(
-            id,
-            ZeboDocument(Cow::Owned(doc_id_str), Cow::Borrowed(document)),
-        )])
-        .context("Cannot add document to zebo")?;
+        space.write_all().context("Cannot write documents")?;
 
         Ok(())
     }
@@ -256,10 +233,12 @@ pub async fn migrate_to_zebo(data_dir: &PathBuf) -> Result<Zebo<1_000_000, PAGE_
         let doc_id_str = data.0.id.unwrap_or_default();
         let doc = data.0.inner.get();
 
-        zebo.add_documents(vec![(
+        zebo.reserve_space_for(&[(
             doc_id,
             ZeboDocument(Cow::Owned(doc_id_str), Cow::Borrowed(doc)),
         )])
+        .unwrap()
+        .write_all()
         .unwrap();
     }
 
@@ -278,7 +257,7 @@ impl zebo::Document for ZeboDocument<'_> {
     }
 
     fn len(&self) -> usize {
-        self.0.len() + 1 + self.1.len()
+        self.0.len() + ZERO.len() + self.1.len()
     }
 }
 

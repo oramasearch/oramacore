@@ -4,7 +4,9 @@ use futures::StreamExt;
 use serde_json::json;
 use tokio::time::sleep;
 
-use crate::collection_manager::sides::read::{OramaCoreAnalyticConfig, SearchAnalyticEventOrigin};
+use crate::collection_manager::sides::read::{
+    OramaCoreAnalyticConfig, SearchAnalyticEventOrigin, SearchRequest,
+};
 use crate::tests::utils::{create_oramacore_config, init_log, TestContext};
 use crate::types::ApiKey;
 use crate::OramacoreConfig;
@@ -42,12 +44,16 @@ async fn test_analytics_search() {
         .search(
             collection_client.read_api_key,
             collection_client.collection_id,
-            json!({
-                "term": "text",
-            })
-            .try_into()
-            .unwrap(),
-            Some(SearchAnalyticEventOrigin::Direct),
+            SearchRequest {
+                search_params: json!({
+                    "term": "text",
+                })
+                .try_into()
+                .unwrap(),
+                analytics_metadata: None,
+                interaction_id: None,
+                search_analytics_event_origin: Some(SearchAnalyticEventOrigin::Direct),
+            },
         )
         .await
         .unwrap();

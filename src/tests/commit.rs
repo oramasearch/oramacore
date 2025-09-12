@@ -104,10 +104,12 @@ async fn test_empty_collection_reload() {
         )
         .unwrap();
 
-    collection_client
+    let stats = collection_client
         .reader_stats()
         .await
         .expect("Collection must exists");
+
+    assert_eq!(stats.indexes_stats.len(), 0, "Expected no indexes");
 
     drop(test_context);
 }

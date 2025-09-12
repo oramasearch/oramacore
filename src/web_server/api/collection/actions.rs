@@ -43,13 +43,16 @@ async fn execute_action_v0(
         ExecuteActionPayloadName::Search => {
             let search_params: SearchParams = serde_json::from_str(&context).unwrap(); // @todo: handle error
             read_side
-                .search(read_api_key, collection_id, 
+                .search(
+                    read_api_key,
+                    collection_id,
                     SearchRequest {
                         search_params,
                         analytics_metadata: None,
                         interaction_id: None,
                         search_analytics_event_origin: None,
-                    })
+                    },
+                )
                 .await
                 .map(Json)
         }

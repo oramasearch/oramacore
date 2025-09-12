@@ -21,7 +21,8 @@ use crate::{
     collection_manager::sides::{
         read::{AnalyticsMetadataFromRequest, OramaCoreAnalytics, ReadError, ReadSide},
         write::{
-            WriteError, jwt_manager::{JwtError, JwtManager}
+            jwt_manager::{JwtError, JwtManager},
+            WriteError,
         },
     },
     types::{ApiKey, CollectionId, IndexId, TrainingSetId, WriteApiKey},
@@ -531,12 +532,9 @@ where
             Default::default()
         };
 
-        Ok(AnalyticsMetadataFromRequest {
-            headers,
-        })
+        Ok(AnalyticsMetadataFromRequest { headers })
     }
 }
-
 
 pub struct OramaCoreAnalyticsOption(pub Option<OramaCoreAnalytics>);
 

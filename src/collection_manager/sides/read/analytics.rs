@@ -113,7 +113,7 @@ pub struct SearchAnalyticEventV1 {
     #[serde(rename = "r")]
     pub results: String,
     #[serde(rename = "md", skip_serializing_if = "HashMap::is_empty")]
-    pub metadata: HashMap<String, String>
+    pub metadata: HashMap<String, String>,
 }
 
 #[derive(Serialize, Deserialize)]

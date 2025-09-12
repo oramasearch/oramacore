@@ -8,7 +8,9 @@ use axum::{
 };
 use serde::Deserialize;
 
-use crate::collection_manager::sides::read::{AnalyticsMetadataFromRequest, SearchAnalyticEventOrigin, SearchRequest};
+use crate::collection_manager::sides::read::{
+    AnalyticsMetadataFromRequest, SearchAnalyticEventOrigin, SearchRequest,
+};
 use crate::{
     collection_manager::sides::read::ReadSide,
     types::{ApiKey, CollectionId, CollectionStatsRequest, SearchParams},
@@ -32,7 +34,7 @@ async fn search(
     read_side: State<Arc<ReadSide>>,
     analytics_metadata: AnalyticsMetadataFromRequest,
     Query(query): Query<SearchQueryParams>,
-    Json(search_params,): Json<SearchParams>,
+    Json(search_params): Json<SearchParams>,
 ) -> impl IntoResponse {
     let read_api_key = query.api_key;
 
@@ -41,11 +43,11 @@ async fn search(
             read_api_key,
             collection_id,
             SearchRequest {
-                    search_params,
-                    analytics_metadata: Some(analytics_metadata),
-                    interaction_id: None,
-                    search_analytics_event_origin: Some(SearchAnalyticEventOrigin::Direct)
-                },
+                search_params,
+                analytics_metadata: Some(analytics_metadata),
+                interaction_id: None,
+                search_analytics_event_origin: Some(SearchAnalyticEventOrigin::Direct),
+            },
         )
         .await
         .map(Json)

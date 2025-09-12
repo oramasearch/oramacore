@@ -61,7 +61,7 @@ impl StructuredOutputServer {
                     search_params,
                     analytics_metadata: None,
                     interaction_id: None,
-                    search_analytics_event_origin: Some(SearchAnalyticEventOrigin::MCP)
+                    search_analytics_event_origin: Some(SearchAnalyticEventOrigin::MCP),
                 },
             )
             .await
