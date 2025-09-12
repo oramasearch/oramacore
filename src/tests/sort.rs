@@ -1,5 +1,6 @@
 use serde_json::json;
 
+use crate::collection_manager::sides::read::ReadError;
 use crate::tests::utils::init_log;
 use crate::tests::utils::TestContext;
 
@@ -341,11 +342,11 @@ async fn tests_sort_on_unknown_field() {
         )
         .await;
 
-    let err = output.unwrap_err();
+    let ReadError::SortFieldNotFound(k) = output.unwrap_err() else {
+        panic!("Expected ReadError::SortFieldNotFound");
+    };
 
-    assert!(
-        format!("{err:?}").contains("Cannot sort by \"unknown_field\": no index has that field")
-    );
+    assert_eq!(k, "unknown_field",);
 
     drop(test_context);
 }
@@ -397,8 +398,14 @@ async fn tests_sort_on_unsupported_field() {
         )
         .await;
 
-    let err = output.unwrap_err();
-    assert!(format!("{err:?}").contains("Only number, date or boolean fields are supported for sorting, but got GeoPoint for property \"position\""));
+    println!("Output: {output:?}");
+
+    let ReadError::InvalidSortField(k, t) = output.unwrap_err() else {
+        panic!("Expected ReadError::InvalidSortField");
+    };
+
+    assert_eq!(k, "position",);
+    assert_eq!(t, "GeoPoint",);
 
     drop(test_context);
 }

@@ -1002,6 +1002,9 @@ impl WriteSide {
             }
 
             if index % batch_size == 0 && !batch.is_empty() {
+                self.document_storage.insert_many(&docs);
+                docs.clear();
+
                 insert_document_batch.push(WriteOperation::DocumentStorage(
                     DocumentStorageWriteOperation::InsertDocuments(batch),
                 ));

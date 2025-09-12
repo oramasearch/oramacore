@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::Arc};
 
 use axum::{
     extract::{FromRef, FromRequestParts, Path},
@@ -19,7 +19,7 @@ use crate::{
         tools::ToolError,
     },
     collection_manager::sides::{
-        read::ReadError,
+        read::{AnalyticsMetadataFromRequest, OramaCoreAnalytics, ReadError, ReadSide},
         write::{
             jwt_manager::{JwtError, JwtManager},
             WriteError,
@@ -400,7 +400,7 @@ impl IntoResponse for ToolError {
 impl IntoResponse for ReadError {
     fn into_response(self) -> Response {
         match self {
-            ReadError::Generic(e) => {
+            Self::Generic(e) => {
                 print_error(&e, "Unhandled error in read side");
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
@@ -408,7 +408,7 @@ impl IntoResponse for ReadError {
                 )
                     .into_response()
             }
-            ReadError::NotFound(collection_id) => (
+            Self::NotFound(collection_id) => (
                 StatusCode::BAD_REQUEST,
                 format!("Collection {collection_id} not found"),
             )
@@ -419,6 +419,21 @@ impl IntoResponse for ReadError {
             Self::IndexNotFound(collection_id, index_id) => (
                 StatusCode::BAD_REQUEST,
                 format!("Index {index_id:?} not found in Collection {collection_id:?}"),
+            )
+                .into_response(),
+            Self::FilterFieldNotFound(field_name) => (
+                StatusCode::BAD_REQUEST,
+                format!("Cannot filter by \"{field_name}\": unknown field"),
+            )
+                .into_response(),
+            Self::InvalidSortField(field_name, field_type) => (
+                StatusCode::BAD_REQUEST,
+                format!("Cannot sort by \"{field_name}\": only number, date or boolean fields are supported for sorting, but got {field_type}"),
+            )
+                .into_response(),
+            Self::SortFieldNotFound(field_name) => (
+                StatusCode::BAD_REQUEST,
+                format!("Cannot sort by \"{field_name}\": no index has that field"),
             )
                 .into_response(),
         }
@@ -486,5 +501,45 @@ impl IntoResponse for SuggestionsError {
             )
                 .into_response(),
         }
+    }
+}
+
+impl<S> FromRequestParts<S> for AnalyticsMetadataFromRequest
+where
+    OramaCoreAnalyticsOption: FromRef<S>,
+    S: Send + Sync,
+{
+    type Rejection = (StatusCode, Json<serde_json::Value>);
+
+    async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
+        let manager = OramaCoreAnalyticsOption::from_ref(state);
+
+        let headers = if let Some(manager) = &manager.0 {
+            let headers = manager
+                .get_metadata_from_headers()
+                .iter()
+                .filter_map(|pair| {
+                    let header_value = parts
+                        .headers
+                        .get(&pair.header)
+                        .and_then(|v| v.to_str().ok())?;
+                    Some((pair.metadata_key.clone(), header_value.to_string()))
+                })
+                .collect();
+
+            headers
+        } else {
+            Default::default()
+        };
+
+        Ok(AnalyticsMetadataFromRequest { headers })
+    }
+}
+
+pub struct OramaCoreAnalyticsOption(pub Option<OramaCoreAnalytics>);
+
+impl FromRef<Arc<ReadSide>> for OramaCoreAnalyticsOption {
+    fn from_ref(app_state: &Arc<ReadSide>) -> OramaCoreAnalyticsOption {
+        OramaCoreAnalyticsOption(app_state.get_analytics_logs())
     }
 }

@@ -26,14 +26,13 @@ use tokio_stream::wrappers::ReceiverStream;
 use tonic::{transport::Server, Status};
 use tracing::warn;
 
-use crate::types::SearchResultHit;
 use crate::{
     ai::{AIServiceConfig, AIServiceLLMConfig, OramaModel},
     build_orama,
     collection_manager::sides::{
         read::{
-            AnalyticSearchEventInvocationType, CollectionStats, IndexesConfig, OffloadFieldConfig,
-            ReadSide, ReadSideConfig,
+            CollectionStats, IndexesConfig, OffloadFieldConfig, ReadSide, ReadSideConfig,
+            SearchRequest,
         },
         write::{
             CollectionsWriterConfig, OramaModelSerializable, TempIndexCleanupConfig, WriteError,
@@ -50,6 +49,7 @@ use crate::{
     web_server::HttpConfig,
     OramacoreConfig,
 };
+use crate::{collection_manager::sides::read::ReadError, types::SearchResultHit};
 use anyhow::Context;
 use oramacore_lib::pin_rules::PinRule;
 
@@ -725,16 +725,19 @@ impl TestCollectionClient {
             .context("")
     }
 
-    pub async fn search(&self, search_params: SearchParams) -> Result<SearchResult> {
+    pub async fn search(&self, search_params: SearchParams) -> Result<SearchResult, ReadError> {
         self.reader
             .search(
                 self.read_api_key,
                 self.collection_id,
-                search_params,
-                AnalyticSearchEventInvocationType::Direct,
+                SearchRequest {
+                    search_params,
+                    analytics_metadata: None,
+                    interaction_id: None,
+                    search_analytics_event_origin: None,
+                },
             )
             .await
-            .context("")
     }
 
     pub async fn rebuild_index(&self, language: LanguageDTO) -> Result<()> {

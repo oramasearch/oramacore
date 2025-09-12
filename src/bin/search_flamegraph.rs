@@ -13,7 +13,7 @@ use oramacore::{
     ai::{AIServiceConfig, AIServiceLLMConfig, OramaModel},
     build_orama,
     collection_manager::sides::{
-        read::{IndexesConfig, OffloadFieldConfig, ReadSideConfig},
+        read::{IndexesConfig, OffloadFieldConfig, ReadSideConfig, SearchRequest},
         write::{
             CollectionsWriterConfig, OramaModelSerializable, TempIndexCleanupConfig,
             WriteSideConfig,
@@ -323,10 +323,15 @@ async fn main() -> Result<()> {
                 .search(
                     read_api_key,
                     collection_id,
-                    search_params,
-                    oramacore::collection_manager::sides::read::AnalyticSearchEventInvocationType::Direct,
+                    SearchRequest {
+                        search_params,
+                        analytics_metadata: None,
+                        interaction_id: None,
+                        search_analytics_event_origin: None,
+                    },
                 )
-                .await.unwrap();
+                .await
+                .unwrap();
         }
 
         println!("Warmup completed");
@@ -354,8 +359,12 @@ async fn main() -> Result<()> {
                 .search(
                     read_api_key,
                     collection_id,
-                    search_params,
-                    oramacore::collection_manager::sides::read::AnalyticSearchEventInvocationType::Direct,
+                    SearchRequest {
+                        search_params,
+                        analytics_metadata: None,
+                        interaction_id: None,
+                        search_analytics_event_origin: None,
+                    },
                 )
                 .await
             {
@@ -365,8 +374,13 @@ async fn main() -> Result<()> {
                     successful_searches += 1;
 
                     if i % 100 == 0 {
-                        println!("Completed {} searches, found {} results for '{}' in {:?}", 
-                            i + 1, results.count, search_term, search_duration);
+                        println!(
+                            "Completed {} searches, found {} results for '{}' in {:?}",
+                            i + 1,
+                            results.count,
+                            search_term,
+                            search_duration
+                        );
                     }
                 }
                 Err(e) => {

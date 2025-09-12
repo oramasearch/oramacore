@@ -17,10 +17,7 @@ use oramacore::{
     ai::{AIServiceConfig, AIServiceLLMConfig, OramaModel},
     build_orama,
     collection_manager::sides::{
-        read::{
-            AnalyticSearchEventInvocationType, IndexesConfig, OffloadFieldConfig, ReadSide,
-            ReadSideConfig,
-        },
+        read::{IndexesConfig, OffloadFieldConfig, ReadSide, ReadSideConfig, SearchRequest},
         write::{
             CollectionsWriterConfig, OramaModelSerializable, TempIndexCleanupConfig, WriteSide,
             WriteSideConfig,
@@ -253,8 +250,12 @@ impl BenchContext {
             .search(
                 self.read_api_key,
                 self.collection_id,
-                search_params,
-                AnalyticSearchEventInvocationType::Direct,
+                SearchRequest {
+                    search_params,
+                    analytics_metadata: None,
+                    interaction_id: None,
+                    search_analytics_event_origin: None,
+                },
             )
             .await
             .map_err(|e| anyhow::anyhow!("Search failed: {}", e))

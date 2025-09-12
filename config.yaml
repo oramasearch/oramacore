@@ -100,8 +100,23 @@ reader_side:
             slot_size_exp: 4
 
     # Uncomment to allow analytics
-    # analytics:
-    #     api_key: my-analytics-api-key
+    analytics:
+        api_key: my-analytics-api-key
+        metadata_from_headers:
+            -   header: user-agent
+                metadata_key: ua
+            -   header: CF-Connecting-IP
+                metadata_key: ip
+            -   header: CF-IPCountry
+                metadata_key: country
+            -   header: continent
+                metadata_key: continent
+            -   header: colo
+                metadata_key: colo
+            -   header: latitude
+                metadata_key: latitude
+            -   header: longitude
+                metadata_key: longitude
 
 ai_server:
     scheme: http
