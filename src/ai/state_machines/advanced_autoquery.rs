@@ -15,8 +15,9 @@ use tokio_stream::wrappers::UnboundedReceiverStream;
 use tracing::{error, info, warn};
 
 use crate::ai::llms::{KnownPrompts, LLMService};
+use crate::ai::RemoteLLMProvider;
 use crate::types::{
-    ApiKey, CollectionId, IndexId, InteractionLLMConfig, InteractionMessage, SearchParams,
+    ApiKey, CollectionId, IndexId, InteractionLLMConfig, InteractionMessage, Role, SearchParams,
     SearchResult,
 };
 
@@ -252,7 +253,6 @@ pub struct AdvancedAutoqueryStateMachine {
     llm_config: Option<InteractionLLMConfig>,
     collection_stats: CollectionStats,
     read_side: Arc<ReadSide>,
-    original_conversation: Arc<Mutex<Vec<InteractionMessage>>>,
     event_sender: Option<mpsc::UnboundedSender<AdvancedAutoqueryEvent>>,
 }
 
@@ -278,17 +278,8 @@ impl AdvancedAutoqueryStateMachine {
             llm_config,
             collection_stats,
             read_side,
-            original_conversation: Arc::new(Mutex::new(vec![])),
             event_sender: None,
         }
-    }
-
-    pub fn with_event_sender(
-        mut self,
-        event_sender: mpsc::UnboundedSender<AdvancedAutoqueryEvent>,
-    ) -> Self {
-        self.event_sender = Some(event_sender);
-        self
     }
 
     /// Send an event if the event sender is available
@@ -429,12 +420,6 @@ impl AdvancedAutoqueryStateMachine {
             data: None,
         })
         .await;
-
-        // Store the original conversation
-        {
-            let mut conv = self.original_conversation.lock().await;
-            *conv = conversation.clone();
-        }
 
         // Initialize state
         {

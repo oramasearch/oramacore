@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use backoff::{backoff::Backoff, ExponentialBackoffBuilder};
@@ -18,7 +18,9 @@ use crate::ai::run_hooks::{run_before_answer, run_before_retrieval};
 use crate::ai::state_machines::advanced_autoquery::{
     AdvancedAutoqueryConfig, AdvancedAutoqueryStateMachine,
 };
-use crate::collection_manager::sides::read::{SearchAnalyticEventOrigin, SearchRequest};
+use crate::collection_manager::sides::read::{
+    AnalyticsHolder, SearchAnalyticEventOrigin, SearchRequest,
+};
 use crate::collection_manager::sides::{read::ReadSide, system_prompts::SystemPrompt};
 use crate::types::{
     ApiKey, CollectionId, IndexId, Interaction, InteractionLLMConfig, Limit, Properties,
@@ -246,6 +248,7 @@ pub struct AnswerStateMachine {
     collection_id: CollectionId,
     read_api_key: ApiKey,
     event_sender: Option<mpsc::UnboundedSender<AnswerEvent>>,
+    analytics_holder: Option<Arc<Mutex<AnalyticsHolder>>>,
 }
 
 impl AnswerStateMachine {
@@ -255,6 +258,7 @@ impl AnswerStateMachine {
         read_side: Arc<ReadSide>,
         collection_id: CollectionId,
         read_api_key: ApiKey,
+        analytics_holder: Option<Arc<Mutex<AnalyticsHolder>>>,
     ) -> Self {
         Self {
             config,
@@ -267,6 +271,7 @@ impl AnswerStateMachine {
             collection_id,
             read_api_key,
             event_sender: None,
+            analytics_holder,
         }
     }
 
@@ -1495,6 +1500,13 @@ impl AnswerStateMachine {
             ("context".to_string(), search_result_str.clone()),
         ];
 
+        if let Some(system_prompt) = &system_prompt {
+            if let Some(ana) = self.analytics_holder.as_ref() {
+                let mut lock = ana.lock().await;
+                lock.set_system_prompt_id(system_prompt.id.clone());
+            }
+        }
+
         let answer_stream = self
             .llm_service
             .run_known_prompt_stream(
@@ -1510,7 +1522,18 @@ impl AnswerStateMachine {
         let mut answer_stream = answer_stream;
         let mut answer = String::new();
 
+        let start_time_to_first_token = Instant::now();
+        let mut start_first_token = None;
         while let Some(resp) = answer_stream.next().await {
+            if start_first_token.is_none() {
+                start_first_token = Some(Instant::now());
+
+                if let Some(ana) = self.analytics_holder.as_ref() {
+                    let mut lock = ana.lock().await;
+                    lock.set_time_to_first_token(start_time_to_first_token.elapsed());
+                }
+            }
+
             match resp {
                 Ok(chunk) => {
                     answer.push_str(&chunk);
@@ -1522,6 +1545,16 @@ impl AnswerStateMachine {
                     return Err(AnswerError::AnswerGenerationError(e.to_string()));
                 }
             }
+        }
+
+        if let Some(ana) = self.analytics_holder.as_ref() {
+            let mut lock = ana.lock().await;
+            let delta = if let Some(start_first_token) = start_first_token {
+                start_first_token.elapsed()
+            } else {
+                Default::default()
+            };
+            lock.set_assistant_response(answer.clone(), delta);
         }
 
         Ok(answer)

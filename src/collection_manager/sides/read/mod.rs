@@ -27,8 +27,8 @@ use std::{collections::HashMap, path::PathBuf};
 use tokio::time::{Instant, MissedTickBehavior};
 
 pub use analytics::{
-    AnalyticsMetadataFromRequest, OramaCoreAnalyticConfig, OramaCoreAnalytics,
-    SearchAnalyticEventOrigin,
+    AnalyticsHolder, AnalyticsMetadataFromRequest, InteractionAnalyticEventV1,
+    OramaCoreAnalyticConfig, OramaCoreAnalytics, SearchAnalyticEventOrigin,
 };
 
 use anyhow::{Context, Result};

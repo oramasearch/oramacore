@@ -2,7 +2,9 @@ use crate::ai::state_machines::advanced_autoquery::{
     AdvancedAutoqueryConfig, AdvancedAutoqueryEvent, AdvancedAutoqueryStateMachine,
 };
 use crate::ai::state_machines::answer::{AnswerConfig, AnswerEvent, AnswerStateMachine};
-use crate::collection_manager::sides::read::{ReadError, ReadSide};
+use crate::collection_manager::sides::read::{
+    AnalyticsHolder, AnalyticsMetadataFromRequest, ReadError, ReadSide,
+};
 use crate::types::{
     ApiKey, CollectionId, GetSystemPromptQueryParams, Interaction, InteractionLLMConfig,
 };
@@ -18,7 +20,7 @@ use serde_json::json;
 use std::convert::Infallible;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, Mutex};
 use tokio_stream::wrappers::ReceiverStream;
 
 pub fn apis(read_side: Arc<ReadSide>) -> Router {
@@ -139,6 +141,7 @@ async fn nlp_query_v1(
 
 async fn answer_v1(
     collection_id: CollectionId,
+    analytics_metadata: AnalyticsMetadataFromRequest,
     State(read_side): State<Arc<ReadSide>>,
     Query(query_params): Query<AnswerQueryParams>,
     Json(interaction): Json<Interaction>,
@@ -147,6 +150,15 @@ async fn answer_v1(
     let rx_stream = ReceiverStream::new(event_receiver);
 
     tokio::spawn(async move {
+        let analytics_holder = AnalyticsHolder::new(
+            read_side.clone(),
+            collection_id,
+            &interaction,
+            analytics_metadata,
+        );
+
+        let analytics_holder = Arc::new(Mutex::new(analytics_holder));
+
         let llm_service = read_side.get_llm_service();
 
         let state_machine = AnswerStateMachine::new(
@@ -155,6 +167,7 @@ async fn answer_v1(
             read_side.clone(),
             collection_id,
             query_params.api_key,
+            Some(analytics_holder.clone()),
         );
 
         let log_sender = read_side.get_hook_logs().get_sender(&collection_id);
@@ -179,6 +192,31 @@ async fn answer_v1(
 
         let mut event_stream = event_stream;
         while let Some(event) = event_stream.next().await {
+            match &event {
+                AnswerEvent::RelatedQueries { queries } => {
+                    if let Ok(rq) = serde_json::to_string(queries) {
+                        let mut lock = analytics_holder.lock().await;
+                        lock.set_generated_related_queries(rq);
+                    }
+                }
+                AnswerEvent::SelectedLLM { provider, model } => {
+                    let mut lock = analytics_holder.lock().await;
+                    lock.set_llm_info(provider.to_string(), model.to_string());
+                }
+                AnswerEvent::SearchResults { results } => {
+                    match serde_json::to_string(results) {
+                        Ok(r) => {
+                            let mut lock = analytics_holder.lock().await;
+                            lock.set_full_context(r);
+                        }
+                        Err(err) => {
+                            tracing::error!(error = ?err, "Cannot set full context");
+                        }
+                    };
+                }
+                _ => {}
+            }
+
             let event_json = serde_json::to_string(&event).unwrap();
             let sse_event = Event::default().data(event_json);
 
@@ -186,6 +224,8 @@ async fn answer_v1(
                 break;
             }
         }
+
+        drop(analytics_holder);
     });
 
     Sse::new(rx_stream).keep_alive(
