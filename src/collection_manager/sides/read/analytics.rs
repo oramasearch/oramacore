@@ -126,7 +126,7 @@ pub struct SearchAnalyticEventV1 {
     pub metadata: HashMap<String, String>,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Default)]
 pub struct AnalyticsMetadataFromRequest {
     #[serde(flatten)]
     pub headers: HashMap<String, String>,
@@ -283,7 +283,7 @@ pub struct AnalyticsHolder {
     system_prompt_id: Option<String>,
     assistant_response: Option<String>,
     full_context: Option<String>,
-    rag_steps: Vec<String>,
+    rag_steps: Vec<serde_json::Value>,
     output_tokens: Option<u32>,
     user_input_tokens: Option<u32>,
     tokens_per_second: Option<f32>,
@@ -376,13 +376,12 @@ impl AnalyticsHolder {
         self.full_context = Some(full_context);
     }
 
-    //// MISSING
-
-    pub(crate) fn add_rag_step(&mut self, rag_step: String) {
-        self.rag_steps.push(rag_step);
+    pub(crate) fn set_rag_steps(&mut self, rag_steps: Vec<serde_json::Value>) {
+        self.rag_steps.extend(rag_steps);
     }
 
-    pub(crate) fn set_interaction_error(&mut self, interaction_error: String) {
+    //// MISSING
+    pub(crate) fn set_error(&mut self, interaction_error: String) {
         self.interaction_error = Some(interaction_error);
     }
 }

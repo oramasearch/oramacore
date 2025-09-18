@@ -443,6 +443,7 @@ impl AdvancedAutoqueryStateMachine {
 
             // Send progress event
             let current_step_json = self.state_to_json(&current_state);
+            info!("Current step {:?}", current_step_json);
             self.send_event(AdvancedAutoqueryEvent::Progress {
                 current_step: current_step_json,
                 total_steps,
@@ -1172,6 +1173,8 @@ impl AdvancedAutoqueryStateMachine {
             )
             .await
             .map_err(|e| AdvancedAutoqueryError::LLMServiceError(e.to_string()))?;
+
+        tracing::trace!(">> result {result}");
 
         let cleaned = repair_json(&result, &Default::default())
             .map_err(|e| AdvancedAutoqueryError::JsonParsingError(e.to_string()))?;
