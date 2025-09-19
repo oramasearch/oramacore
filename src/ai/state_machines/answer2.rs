@@ -9,7 +9,10 @@ use std::{
 use backoff::{backoff::Backoff, ExponentialBackoffBuilder};
 use orama_js_pool::ExecOption;
 use serde::Serialize;
-use tokio::{sync::mpsc, time::sleep};
+use tokio::{
+    sync::{mpsc, Mutex},
+    time::sleep,
+};
 use tokio_stream::StreamExt;
 use tracing::{error, info, warn};
 
@@ -162,6 +165,11 @@ async fn next<'context>(
             });
             context.send_event(PublicAnswerEvent::Acknowledged);
 
+            if let Some(analytics_holder) = context.analytics_holder.as_mut() {
+                analytics_holder
+                    .set_llm_info(llm_config.provider.to_string(), llm_config.model.clone());
+            }
+
             Ok(AnswerStateMachineState::LLMConfigGot(LLMConfigGotState {
                 context,
                 llm_config,
@@ -239,7 +247,7 @@ async fn next<'context>(
             // I don't understand how this "run autoquery"
             // impacts the context
             // TODO: Ask to michele because it seems it doens't anything
-            run_advanced_autoquery(&context).await?;
+            run_advanced_autoquery(context).await?;
 
             Ok(AnswerStateMachineState::AdvancedAutoqueryRun(
                 AdvancedAutoqueryRunState(context),
@@ -315,7 +323,7 @@ async fn next<'context>(
 
             let search_results = execute_search(
                 &context.run,
-                context.config.hook_timeout.clone(),
+                context.config.hook_timeout,
                 optimized_query.clone(),
             )
             .await?;
@@ -332,6 +340,12 @@ async fn next<'context>(
                     "results": search_results
                 })),
             });
+
+            if let Some(analytics_holder) = context.analytics_holder.as_mut() {
+                if let Ok(r) = serde_json::to_string(&search_results) {
+                    analytics_holder.set_full_context(r);
+                }
+            }
 
             // TODO: execute After Retrieval Hook
             context.send_event(PublicAnswerEvent::StateChanged {
@@ -350,7 +364,7 @@ async fn next<'context>(
         }
         (
             AnswerStateMachineState::SearchExecuted(SearchExecutedAnswerState {
-                context,
+                mut context,
                 search_results,
                 ..
             }),
@@ -377,18 +391,12 @@ async fn next<'context>(
                 })),
             });
 
-            let hook_timeout = context.config.hook_timeout.clone();
+            let hook_timeout = context.config.hook_timeout;
             let (variables, processed_system_prompt) = retry(
                 &mut context.config.retry_config,
                 "execute_before_answer_hook",
                 &mut (),
-                |_| {
-                    execute_before_answer_hook(
-                        &context.run,
-                        hook_timeout.clone(),
-                        system_prompt.as_ref(),
-                    )
-                },
+                |_| execute_before_answer_hook(&context.run, hook_timeout, system_prompt.as_ref()),
             )
             .await?;
 
@@ -401,47 +409,31 @@ async fn next<'context>(
                 })),
             });
 
+            let AnswerStateMachineContext {
+                config,
+                analytics_holder,
+                run,
+                ..
+            } = &mut context;
+            let analytics_holder = Arc::new(Mutex::new(analytics_holder));
+
             let search_result_str = serde_json::to_string(&search_results)
                 .map_err(|e| AnswerError::JsonParsingError(e.to_string()))?;
-            let answer = retry(
-                &mut context.config.retry_config,
+            let _ = retry(
+                &mut config.retry_config,
                 "execute_before_answer_hook",
-                &mut context.analytics_holder,
-                |analytics_holder| {
+                &mut (),
+                |_| {
                     generate_answer(
-                        &context.run,
-                        analytics_holder,
+                        run,
+                        analytics_holder.clone(),
                         &search_result_str,
                         processed_system_prompt.as_ref(),
                     )
                 },
             )
             .await?;
-
-            // if let Some(ana) = self.analytics_holder.as_ref() {
-            //     let mut lock = ana.lock().await;
-            //     let delta = if let Some(start_first_token) = start_first_token {
-            //         start_first_token.elapsed()
-            //     } else {
-            //         Default::default()
-            //     };
-            //     lock.set_assistant_response(answer.clone(), delta);
-            // }
-
-            let bpe = tiktoken_rs::get_bpe_from_model("gpt-4o");
-            let token_count = match bpe {
-                Ok(bpe) => bpe.encode_with_special_tokens(&answer).len(),
-                Err(_) => 0,
-            };
-
-            context.send_event(PublicAnswerEvent::StateChanged {
-                state: "generate_answer".to_string(),
-                message: "Generating answer".to_string(),
-                data: Some(serde_json::json!({
-                    "answer": answer,
-                    "answer_token_count": token_count
-                })),
-            });
+            drop(analytics_holder);
 
             Ok(AnswerStateMachineState::AnswerGenerated(
                 AnswerGeneratedState {
@@ -743,6 +735,12 @@ impl AnswerStateMachineContext {
 
 pub struct AnswerStateMachine {}
 
+impl Default for AnswerStateMachine {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl AnswerStateMachine {
     pub fn new() -> Self {
         Self {}
@@ -758,21 +756,19 @@ impl AnswerStateMachine {
         event_sender: Option<mpsc::UnboundedSender<PublicAnswerEvent>>,
         analytics_metadata: Option<AnalyticsMetadataFromRequest>,
     ) -> Result<(), AnswerError> {
-        let analytics_holder = if let Some(analytics_metadata) = analytics_metadata {
-            Some(AnalyticsHolder::new(
+        let analytics_holder = analytics_metadata.map(|analytics_metadata| {
+            AnalyticsHolder::new(
                 read_side.clone(),
                 collection_id,
                 &interaction,
                 analytics_metadata,
-            ))
-        } else {
-            None
-        };
+            )
+        });
 
         let mut context = AnswerStateMachineContext {
             run: AnswerStateMachineRunContext {
                 read_side,
-                collection_id: collection_id,
+                collection_id,
                 read_api_key,
                 interaction,
                 event_sender,
@@ -815,11 +811,6 @@ impl AnswerStateMachine {
                 if let Some(analytics_holder) = context.analytics_holder.as_mut() {
                     analytics_holder.set_rag_steps(rag_steps);
                 }
-                context.send_event(PublicAnswerEvent::StateChanged {
-                    state: "finished".to_string(),
-                    message: "Answer generation finished".to_string(),
-                    data: None,
-                });
             }
             AnswerStateMachineState::Error(ErrorState { error }) => {
                 let error_str = error.to_string();
@@ -857,16 +848,19 @@ impl QueryStrategy {
 }
 
 /// Retry logic
-async fn retry<'param, 'output, 'config, F, P, Fut, T>(
+async fn retry<'config, 'param, 'fn_param, 'output, F, P, Fut, T>(
     config: &'config mut RetryConfig,
-    operation_name: &str,
-    param: &'param mut P,
+    operation_name: &'static str,
+    param: &mut P,
     mut operation: F,
 ) -> Result<T, AnswerError>
 where
     F: FnMut(&mut P) -> Fut + Send + Sync,
     Fut: Future<Output = Result<T, AnswerError>> + Send + 'output,
+    'config: 'output,
     'param: 'output,
+    'fn_param: 'output,
+    'param: 'fn_param,
 {
     let mut backoff = ExponentialBackoffBuilder::new()
         .with_initial_interval(config.initial_backoff)
@@ -876,7 +870,8 @@ where
 
     let mut retry_count = 0;
     loop {
-        match operation(param).await {
+        let ret = operation(param).await;
+        match ret {
             Ok(result) => {
                 if retry_count > 0 {
                     info!(
@@ -954,7 +949,7 @@ async fn calculate_query_strategy(
             }
             Err(_) => {
                 // If JSON parsing fails, try to extract the code from the response
-                // This commonly happen with LLM because it could return the response
+                // This commonly happens with LLM because it could return the response
                 // with ` or " or ' or other wraps.
                 let cleaned_result = result.trim();
                 if cleaned_result.contains("000") {
@@ -1328,15 +1323,12 @@ async fn execute_before_answer_hook(
     Ok((variables, system_prompt))
 }
 
-async fn generate_answer<'context, 'other>(
-    context: &'context AnswerStateMachineRunContext,
-    analytics_holder: &'context mut Option<AnalyticsHolder>,
+async fn generate_answer(
+    context: &AnswerStateMachineRunContext,
+    analytics_holder: Arc<Mutex<&mut Option<AnalyticsHolder>>>,
     search_result_str: &str,
-    processed_system_prompt: Option<&'other SystemPrompt>,
-) -> Result<String, AnswerError>
-where
-    'context: 'other,
-{
+    processed_system_prompt: Option<&SystemPrompt>,
+) -> Result<String, AnswerError> {
     let variables = vec![
         ("question".to_string(), context.interaction.query.clone()),
         ("context".to_string(), search_result_str.to_string()),
@@ -1362,9 +1354,11 @@ where
         if start_first_token.is_none() {
             start_first_token = Some(Instant::now());
 
-            if let Some(analytics_holder) = analytics_holder.as_mut() {
+            let mut lock = analytics_holder.lock().await;
+            if let Some(analytics_holder) = lock.as_mut() {
                 analytics_holder.set_time_to_first_token(start_time_to_first_token.elapsed());
             }
+            drop(lock);
         }
 
         match resp {
@@ -1378,6 +1372,31 @@ where
             }
         }
     }
+
+    let mut lock = analytics_holder.lock().await;
+    if let Some(ana) = lock.as_mut() {
+        let delta = if let Some(start_first_token) = start_first_token {
+            start_first_token.elapsed()
+        } else {
+            Default::default()
+        };
+        ana.set_assistant_response(answer.clone(), delta);
+    }
+
+    let bpe = tiktoken_rs::get_bpe_from_model("gpt-4o");
+    let token_count = match bpe {
+        Ok(bpe) => bpe.encode_with_special_tokens(&answer).len(),
+        Err(_) => 0,
+    };
+
+    context.send_event(PublicAnswerEvent::StateChanged {
+        state: "generate_answer".to_string(),
+        message: "Generating answer".to_string(),
+        data: Some(serde_json::json!({
+            "answer": answer,
+            "answer_token_count": token_count
+        })),
+    });
 
     Ok(answer)
 }

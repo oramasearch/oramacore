@@ -1,10 +1,9 @@
 use crate::ai::state_machines::advanced_autoquery::{
     AdvancedAutoqueryConfig, AdvancedAutoqueryEvent, AdvancedAutoqueryStateMachine,
 };
-use crate::ai::state_machines::answer::{AnswerConfig, AnswerEvent, AnswerStateMachine};
-use crate::collection_manager::sides::read::{
-    AnalyticsHolder, AnalyticsMetadataFromRequest, ReadError, ReadSide,
-};
+// use crate::ai::state_machines::answer::{AnswerConfig, AnswerEvent};
+use crate::ai::state_machines::answer2::{AnswerStateMachine, PublicAnswerEvent};
+use crate::collection_manager::sides::read::{AnalyticsMetadataFromRequest, ReadError, ReadSide};
 use crate::types::{
     ApiKey, CollectionId, GetSystemPromptQueryParams, Interaction, InteractionLLMConfig,
 };
@@ -20,7 +19,7 @@ use serde_json::json;
 use std::convert::Infallible;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::{mpsc, Mutex};
+use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 
 pub fn apis(read_side: Arc<ReadSide>) -> Router {
@@ -149,74 +148,38 @@ async fn answer_v1(
     let (event_sender, event_receiver) = mpsc::channel(100);
     let rx_stream = ReceiverStream::new(event_receiver);
 
+    let (answer_sender, mut event_stream) = mpsc::unbounded_channel();
+
+    let event_sender2 = event_sender.clone();
     tokio::spawn(async move {
-        let analytics_holder = AnalyticsHolder::new(
-            read_side.clone(),
-            collection_id,
-            &interaction,
-            analytics_metadata,
-        );
+        let state_machine = AnswerStateMachine::new();
 
-        let analytics_holder = Arc::new(Mutex::new(analytics_holder));
+        let res = state_machine
+            .execute(
+                read_side,
+                collection_id,
+                query_params.api_key,
+                interaction,
+                None,
+                Some(answer_sender),
+                Some(analytics_metadata),
+            )
+            .await;
 
-        let llm_service = read_side.get_llm_service();
+        if let Err(e) = res {
+            let error_event = PublicAnswerEvent::Error {
+                error: e.to_string(),
+                state: "state_machine_init_error".to_string(),
+                is_terminal: Some(true),
+            };
+            let event_json = serde_json::to_string(&error_event).unwrap();
+            let sse_event = Event::default().data(event_json);
+            let _ = event_sender2.send(Ok(sse_event)).await;
+        }
+    });
 
-        let state_machine = AnswerStateMachine::new(
-            AnswerConfig::default(),
-            llm_service,
-            read_side.clone(),
-            collection_id,
-            query_params.api_key,
-            Some(analytics_holder.clone()),
-        );
-
-        let log_sender = read_side.get_hook_logs().get_sender(&collection_id);
-
-        let event_stream = match state_machine
-            .run_stream(interaction, collection_id, query_params.api_key, log_sender)
-            .await
-        {
-            Ok(stream) => stream,
-            Err(e) => {
-                let error_event = AnswerEvent::Error {
-                    error: e.to_string(),
-                    state: "state_machine_init_error".to_string(),
-                    is_terminal: Some(true),
-                };
-                let event_json = serde_json::to_string(&error_event).unwrap();
-                let sse_event = Event::default().data(event_json);
-                let _ = event_sender.send(Ok(sse_event)).await;
-                return;
-            }
-        };
-
-        let mut event_stream = event_stream;
-        while let Some(event) = event_stream.next().await {
-            match &event {
-                AnswerEvent::RelatedQueries { queries } => {
-                    if let Ok(rq) = serde_json::to_string(queries) {
-                        let mut lock = analytics_holder.lock().await;
-                        lock.set_generated_related_queries(rq);
-                    }
-                }
-                AnswerEvent::SelectedLLM { provider, model } => {
-                    let mut lock = analytics_holder.lock().await;
-                    lock.set_llm_info(provider.to_string(), model.to_string());
-                }
-                AnswerEvent::SearchResults { results } => {
-                    match serde_json::to_string(results) {
-                        Ok(r) => {
-                            let mut lock = analytics_holder.lock().await;
-                            lock.set_full_context(r);
-                        }
-                        Err(err) => {
-                            tracing::error!(error = ?err, "Cannot set full context");
-                        }
-                    };
-                }
-                _ => {}
-            }
-
+    tokio::spawn(async move {
+        while let Some(event) = event_stream.recv().await {
             let event_json = serde_json::to_string(&event).unwrap();
             let sse_event = Event::default().data(event_json);
 
@@ -224,8 +187,6 @@ async fn answer_v1(
                 break;
             }
         }
-
-        drop(analytics_holder);
     });
 
     Sse::new(rx_stream).keep_alive(

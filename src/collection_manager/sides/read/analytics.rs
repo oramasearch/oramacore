@@ -1,6 +1,5 @@
 use std::{
     collections::HashMap,
-    fmt::format,
     path::PathBuf,
     sync::Arc,
     time::{Duration, Instant},
@@ -8,7 +7,6 @@ use std::{
 
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
-use itertools::Itertools;
 use oramacore_lib::analytics::{AnalyticConfig, AnalyticLogStream, AnalyticsStorage};
 use serde::{Deserialize, Serialize};
 
@@ -402,7 +400,7 @@ impl Drop for AnalyticsHolder {
 
             if let Err(err) = analytics_logs.add_event(InteractionAnalyticEventV1 {
                 timestamp: self.start_time,
-                collection_id: self.collection_id.clone(),
+                collection_id: self.collection_id,
                 conversation_id: self.conversation_id.clone(),
                 interaction_id: self.interaction_id.clone(),
                 visitor_id: Some(self.visitor_id.clone()),
