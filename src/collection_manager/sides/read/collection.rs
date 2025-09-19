@@ -1,6 +1,5 @@
 use anyhow::{anyhow, bail, Context, Result};
 use std::{
-    collections::HashMap,
     io::ErrorKind,
     ops::{Deref, DerefMut},
     path::PathBuf,
@@ -20,29 +19,26 @@ use crate::{
     ai::advanced_autoquery::{AdvancedAutoQuery, AdvancedAutoQuerySteps, QueryMappedSearchResult},
     collection_manager::sides::{
         read::{
-            context::ReadSideContext, AnalyticSearchEventInvocationType, CommittedDateFieldStats,
-            CommittedGeoPointFieldStats, ReadError, UncommittedDateFieldStats,
-            UncommittedGeoPointFieldStats,
+            analytics::SearchAnalyticEventOrigin, context::ReadSideContext,
+            CommittedDateFieldStats, CommittedGeoPointFieldStats, ReadError,
+            UncommittedDateFieldStats, UncommittedGeoPointFieldStats,
         },
         CollectionWriteOperation, Offset, ReplaceIndexReason,
     },
     types::{
-        ApiKey, CollectionId, CollectionStatsRequest, DocumentId, FacetResult, FieldId, IndexId,
-        InteractionMessage, Limit, Role, SearchOffset, SearchParams, TokenScore,
+        ApiKey, CollectionId, CollectionStatsRequest, FieldId, IndexId, InteractionMessage, Role,
     },
 };
 
-use super::sort::{extract_term_from_search_mode, sort_documents_in_groups};
 use super::{
     index::{Index, IndexStats},
-    sort_with_context, CommittedBoolFieldStats, CommittedNumberFieldStats,
-    CommittedStringFieldStats, CommittedStringFilterFieldStats, CommittedVectorFieldStats,
-    DeletionReason, GroupValue, OffloadFieldConfig, ReadSide, SortContext,
-    UncommittedBoolFieldStats, UncommittedNumberFieldStats, UncommittedStringFieldStats,
+    CommittedBoolFieldStats, CommittedNumberFieldStats, CommittedStringFieldStats,
+    CommittedStringFilterFieldStats, CommittedVectorFieldStats, DeletionReason, OffloadFieldConfig,
+    ReadSide, UncommittedBoolFieldStats, UncommittedNumberFieldStats, UncommittedStringFieldStats,
     UncommittedStringFilterFieldStats, UncommittedVectorFieldStats,
 };
 
-use crate::types::{GroupByConfig, NLPSearchRequest, SortBy};
+use crate::types::NLPSearchRequest;
 use oramacore_lib::fs::*;
 use oramacore_lib::nlp::locales::Locale;
 
@@ -342,6 +338,11 @@ impl CollectionReader {
         self.deleted = true;
     }
 
+    pub fn get_document_count_estimation(&self) -> u64 {
+        self.document_count_estimation
+            .load(std::sync::atomic::Ordering::Relaxed)
+    }
+
     #[inline]
     #[allow(clippy::result_large_err)]
     pub fn check_read_api_key(
@@ -409,7 +410,7 @@ impl CollectionReader {
                 collection_id,
                 conversation,
                 log_sender,
-                AnalyticSearchEventInvocationType::NLPSearch,
+                SearchAnalyticEventOrigin::NLP,
                 search_params.user_id.clone(),
             )
             .await?;
@@ -443,186 +444,75 @@ impl CollectionReader {
                 collection_id,
                 conversation,
                 log_sender,
-                AnalyticSearchEventInvocationType::NLPSearch,
+                SearchAnalyticEventOrigin::NLP,
                 search_params.user_id.clone(),
             )
             .await)
     }
 
-    pub async fn search(
-        &self,
-        search_params: &SearchParams,
-    ) -> Result<HashMap<DocumentId, f32>, anyhow::Error> {
-        let document_count_estimation = self
-            .document_count_estimation
-            .load(std::sync::atomic::Ordering::Relaxed);
+    pub async fn get_all_index_ids(&self) -> Result<Vec<IndexId>> {
+        let lock = self.indexes.read().await;
+        let all_indexes = lock
+            .iter()
+            .filter(|index| !index.is_deleted())
+            .map(|i| i.id())
+            .collect::<Vec<_>>();
+        Ok(all_indexes)
+    }
 
-        // Let's suppose the number of matching document is 1/3 of the total number of documents
-        // This is a very rough estimation, but it is better than nothing
-        // This allows us to avoid reallocation of the result map
-        let mut result: HashMap<DocumentId, f32> =
-            HashMap::with_capacity((document_count_estimation / 3) as usize);
-        let indexes_lock = self.indexes.read().await;
+    pub async fn get_indexes_lock<'collection, 'search>(
+        &'collection self,
+        index_ids: &'search [IndexId],
+    ) -> Result<ReadIndexesLockGuard<'collection, 'search>> {
+        let lock = self.indexes.read().await;
 
-        let indexes_to_search_on =
-            calculate_index_to_search_on(&indexes_lock, search_params.indexes.as_ref())?;
-
-        for index in indexes_lock.iter() {
-            if index.is_deleted() {
-                continue;
-            }
-            if !indexes_to_search_on.contains(&index.id()) {
-                continue;
-            }
-            index.search(search_params, &mut result).await?;
-        }
-
-        if result.is_empty() && !search_params.where_filter.is_empty() {
-            // We want to return an error if there's some filter on unknown field
-            // It is checked in this way because:
-            // - we don't want to affect the performance of the search
-            // - we want to return a meaningful error message
-            let fields_in_filter = search_params.where_filter.get_all_keys();
-
-            // We don't handle the case when the field type is different in different indexes
-            // We should dedicate a message error for that
-            // TODO: do it
-
-            for field_in_filter in fields_in_filter {
-                if indexes_lock
+        let unknown_index = index_ids
+            .iter()
+            .filter(|id| {
+                !lock
                     .iter()
-                    .all(|index| !index.has_field(&field_in_filter))
-                {
-                    return Err(anyhow!(
-                        "Cannot filter by \"{}\": unknown field",
-                        field_in_filter
-                    ));
-                }
-            }
+                    .any(|index| !index.is_deleted() && index.id() == **id)
+            })
+            .next();
+        if let Some(unknown_index) = unknown_index {
+            bail!("Unknown index: {:?}", unknown_index);
         }
 
-        Ok(result)
+        Ok(ReadIndexesLockGuard::new(lock, index_ids))
     }
 
-    pub async fn sort_and_truncate(
+    pub async fn get_index_ids(
         &self,
-        token_scores: &HashMap<DocumentId, f32>,
-        limit: Limit,
-        offset: SearchOffset,
-        search_params: &SearchParams,
-    ) -> Result<Vec<TokenScore>> {
-        let indexes_lock = self.indexes.read().await;
-
-        let context = SortContext {
-            indexes: &indexes_lock,
-            token_scores,
-            search_params,
-            limit,
-            offset,
+        indexes_from_user: Option<&Vec<IndexId>>,
+    ) -> Result<Vec<IndexId>> {
+        let all_indexes = self.get_all_index_ids().await?;
+        // No indexes from user -> search on all indexes
+        let Some(indexes_from_user) = indexes_from_user else {
+            return Ok(all_indexes);
         };
-
-        let result = sort_with_context(context).await;
-
-        drop(indexes_lock);
-        result
-    }
-
-    pub async fn calculate_facets(
-        &self,
-        token_scores: &HashMap<DocumentId, f32>,
-        search_params: &SearchParams,
-    ) -> Result<HashMap<String, FacetResult>> {
-        let mut result: HashMap<String, FacetResult> = HashMap::new();
-        let indexes_lock = self.indexes.read().await;
-
-        let indexes_to_search_on =
-            calculate_index_to_search_on(&indexes_lock, search_params.indexes.as_ref())?;
-
-        for index in indexes_lock.iter() {
-            if index.is_deleted() {
-                continue;
-            }
-            if !indexes_to_search_on.contains(&index.id()) {
-                continue;
-            }
-
-            index
-                .calculate_facets(token_scores, &search_params.facets, &mut result)
-                .await?;
+        // Empty indexes from user -> search on all indexes
+        // It doens't make sense to search on empty indexes list
+        if indexes_from_user.is_empty() {
+            return Ok(all_indexes);
         }
 
-        let expected_facets_count = search_params.facets.len();
-        if result.len() != expected_facets_count {
-            // The user asked for some facets that are not present in the collection
-            let present_facet_fields: Vec<&String> = result.keys().collect();
-            let requested_facet_fields: Vec<&String> = search_params.facets.keys().collect();
-            let missing_facet_fields: Vec<&&String> = requested_facet_fields
-                .iter()
-                .filter(|f| !present_facet_fields.contains(f))
-                .collect();
+        let unknown_indexes = indexes_from_user
+            .iter()
+            .filter(|index| !all_indexes.contains(index))
+            .collect::<Vec<_>>();
+        if !unknown_indexes.is_empty() {
             bail!(
-                "Some fields are not present in the collection for facets: {:?}",
-                missing_facet_fields
-            );
+                "Unknown indexes: {:?}. Available indexes: {:?}",
+                unknown_indexes,
+                all_indexes
+            )
         }
 
-        Ok(result)
-    }
-
-    pub async fn calculate_groups(
-        &self,
-        token_scores: &HashMap<DocumentId, f32>,
-        user_index: Option<&Vec<IndexId>>,
-        group_by_config: &GroupByConfig,
-        sort_by: Option<&SortBy>,
-        search_params: &SearchParams,
-    ) -> Result<HashMap<Vec<GroupValue>, Vec<DocumentId>>> {
-        let indexes_lock = self.indexes.read().await;
-        let indexes_to_search_on = calculate_index_to_search_on(&indexes_lock, user_index)?;
-
-        let mut results = HashMap::new();
-        for index in indexes_lock.iter() {
-            if index.is_deleted() {
-                continue;
-            }
-            if !indexes_to_search_on.contains(&index.id()) {
-                continue;
-            }
-
-            index
-                .calculate_groups(&group_by_config.properties, &mut results)
-                .await?
-        }
-
-        // Extract pin rules from relevant indexes
-        let term = extract_term_from_search_mode(search_params);
-        let mut pin_rules = Vec::new();
-        for index in indexes_lock.iter() {
-            if index.is_deleted() {
-                continue;
-            }
-            if !indexes_to_search_on.contains(&index.id()) {
-                continue;
-            }
-            let pin_rules_reader = index.get_read_lock_on_pin_rules().await;
-            pin_rules.extend(pin_rules_reader.apply(term));
-        }
-
-        // Sort documents within each group
-        let sorted_results = sort_documents_in_groups(
-            results,
-            token_scores,
-            sort_by,
-            &indexes_lock
-                .iter()
-                .filter(|index| !index.is_deleted() && indexes_to_search_on.contains(&index.id()))
-                .collect::<Vec<_>>(),
-            group_by_config.max_results,
-            &pin_rules,
-        )
-        .await?;
-
-        Ok(sorted_results)
+        let res = all_indexes
+            .into_iter()
+            .filter(|index| indexes_from_user.contains(index))
+            .collect();
+        Ok(res)
     }
 
     pub async fn get_index(&self, index_id: IndexId) -> Option<IndexReadLock<'_>> {
@@ -994,40 +884,6 @@ fn get_index_in_vector(vec: &[Index], wanted: IndexId) -> Option<usize> {
     None
 }
 
-fn calculate_index_to_search_on(
-    indexes: &[Index],
-    indexes_from_user: Option<&Vec<IndexId>>,
-) -> Result<Vec<IndexId>> {
-    let all_indexes = indexes.iter().map(|i| i.id()).collect::<Vec<_>>();
-    // No indexes from user -> search on all indexes
-    let Some(indexes_from_user) = indexes_from_user else {
-        return Ok(all_indexes);
-    };
-    // Empty indexes from user -> search on all indexes
-    // It doens't make sense to search on empty indexes list
-    if indexes_from_user.is_empty() {
-        return Ok(all_indexes);
-    }
-
-    let unknown_indexes = indexes_from_user
-        .iter()
-        .filter(|index| !all_indexes.contains(index))
-        .collect::<Vec<_>>();
-    if !unknown_indexes.is_empty() {
-        bail!(
-            "Unknown indexes: {:?}. Available indexes: {:?}",
-            unknown_indexes,
-            all_indexes
-        )
-    }
-
-    let res = all_indexes
-        .into_iter()
-        .filter(|index| indexes_from_user.contains(index))
-        .collect();
-    Ok(res)
-}
-
 #[derive(Debug, Serialize, Deserialize)]
 struct DumpV1 {
     id: CollectionId,
@@ -1044,4 +900,46 @@ struct DumpV1 {
 #[derive(Debug, Serialize, Deserialize)]
 enum Dump {
     V1(DumpV1),
+}
+
+pub struct ReadIndexesLockGuard<'collection, 'search> {
+    lock: RwLockReadGuard<'collection, Vec<Index>>,
+    index_ids: &'search [IndexId],
+}
+impl<'collection, 'search> ReadIndexesLockGuard<'collection, 'search> {
+    pub fn new(
+        lock: RwLockReadGuard<'collection, Vec<Index>>,
+        index_ids: &'search [IndexId],
+    ) -> Self {
+        Self { lock, index_ids }
+    }
+
+    pub fn len(&self) -> usize {
+        self.index_ids.len()
+    }
+
+    pub fn get_index(&self, index_id: IndexId) -> Option<&Index> {
+        if !self.index_ids.contains(&index_id) {
+            debug_panic!(
+                "Index id {} not in the requested index ids {:?}",
+                index_id,
+                self.index_ids
+            );
+            warn!(
+                "Index id {} not in the requested index ids {:?}",
+                index_id, self.index_ids
+            );
+            return None;
+        }
+
+        self.lock
+            .iter()
+            .find(|index| !index.is_deleted() && index.id() == index_id)
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = &Index> {
+        self.lock
+            .iter()
+            .filter(|index| !index.is_deleted() && self.index_ids.contains(&index.id()))
+    }
 }

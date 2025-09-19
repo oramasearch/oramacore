@@ -14,7 +14,7 @@ use tracing::{debug, error};
 
 use crate::{
     ai::advanced_autoquery::QueryMappedSearchResult,
-    collection_manager::sides::read::AnalyticSearchEventInvocationType,
+    collection_manager::sides::read::{SearchAnalyticEventOrigin, SearchRequest},
     types::{HybridMode, Similarity, Threshold, VectorMode},
 };
 
@@ -57,8 +57,12 @@ impl StructuredOutputServer {
             .search(
                 self.read_api_key,
                 self.collection_id,
-                search_params,
-                AnalyticSearchEventInvocationType::Action,
+                SearchRequest {
+                    search_params,
+                    analytics_metadata: None,
+                    interaction_id: None,
+                    search_analytics_event_origin: Some(SearchAnalyticEventOrigin::MCP),
+                },
             )
             .await
     }

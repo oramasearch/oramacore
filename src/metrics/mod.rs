@@ -52,6 +52,8 @@ create_label_struct!(SearchCollectionLabels, {
     mode: &'static str,
     has_filter: &'static str,
     has_facet: &'static str,
+    has_group: &'static str,
+    has_sorting: &'static str,
 });
 create_label_struct!(JSOperationLabels, {
     operation: &'static str,

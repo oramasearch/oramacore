@@ -1,6 +1,7 @@
 use serde_json::json;
 
 use crate::{
+    collection_manager::sides::read::ReadError,
     tests::utils::{init_log, TestContext},
     types::SearchParams,
 };
@@ -30,11 +31,9 @@ async fn test_search_on_unknown_field() {
         )
         .await;
 
-    println!("result: {result:?}");
+    let error = result.unwrap_err();
 
-    assert!(result.is_err());
-    assert!(format!("{:?}", result.unwrap_err())
-        .contains("Cannot filter by \"unknown_field\": unknown field",));
+    assert!(matches!(error, ReadError::FilterFieldNotFound(_)));
 
     drop(test_context);
 }
