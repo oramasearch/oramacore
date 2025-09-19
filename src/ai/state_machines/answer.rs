@@ -70,11 +70,37 @@ pub enum AnswerEvent {
     ResultAction { action: String, result: String },
 }
 
+/**
+ *
+ *
+ * Initialize
+ *  -> HandleGPUOverload
+ *  -> GetLLMConfig
+ *   
+ *  if advanced_autoquery
+ *      (Run advanced query)
+ *      -> ExecuteBeforeRetrievalHook
+ *      -> OptimizeQuery
+ *      -> ExecuteSearch
+ *      -> ExecuteAfterRetrievalHook
+ *      -> HandleSystemPrompt
+ *      -> ExecuteBeforeAnswerHook
+ *      -> GenerateAnswer
+ *  
+ *  if simple_rag
+ *      -> OptimizeQuery
+ *      -> ExecuteSearch
+ *      -> ExecuteAfterRetrievalHook
+ *      -> HandleSystemPrompt
+ *      -> ExecuteBeforeAnswerHook
+ *      -> GenerateAnswer
+ */
+
 // ==== Data Models ====
 
 #[derive(Debug, Clone)]
 pub struct ComponentResult {
-    hits: Vec<SearchResultHit>,
+    pub hits: Vec<SearchResultHit>,
 }
 
 #[derive(Debug, Clone)]
@@ -122,6 +148,8 @@ pub enum AnswerError {
     JsonParsingError(String),
     #[error("Advanced autoquery error: {0}")]
     AdvancedAutoqueryError(String),
+    #[error("Invalid command {1} on state {0}")]
+    InvalidCommandOnState(String, String),
 }
 
 // ==== State Machine States ====
@@ -1652,5 +1680,320 @@ impl AnswerStateMachine {
     pub async fn retry_stats(&self) -> HashMap<String, usize> {
         let counts = self.retry_count.lock().await;
         counts.clone()
+    }
+}
+
+#[cfg(test)]
+mod tests_answer1 {
+    use itertools::Itertools;
+    use std::sync::Arc;
+    use std::time::Duration;
+    use tokio::sync::{Mutex, RwLock};
+    use tokio::time::sleep;
+    use tokio_stream::StreamExt;
+
+    use crate::collection_manager::sides::read::AnalyticsHolder;
+    use crate::{
+        tests::utils::{create_ai_server_mock, create_oramacore_config, init_log, TestContext},
+        types::{Document, DocumentList, Interaction},
+    };
+
+    use super::*;
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_answer_state_machine_simple_rag() {
+        init_log();
+
+        let completition_mock = Arc::new(RwLock::new(vec![
+            vec!["000".to_string()], // SIMPLE RAG
+            vec![
+                "I'm Tommaso, a ".to_string(),
+                " software developer".to_string(),
+                " bla bla bla".to_string(),
+            ],
+        ]));
+        let completition_req = Arc::new(RwLock::new(vec![]));
+
+        let output = create_ai_server_mock(completition_mock, completition_req.clone())
+            .await
+            .unwrap();
+        let mut config = create_oramacore_config();
+        config.ai_server.llm.port = Some(output.port());
+
+        let test_context = TestContext::new_with_config(config).await;
+
+        let collection_client = test_context.create_collection().await.unwrap();
+        let index_client = collection_client.create_index().await.unwrap();
+
+        let docs = r#" [
+            {"id":"1","name":"I'm Tommaso, a software developer"}
+        ]"#;
+        let docs = serde_json::from_str::<Vec<Document>>(docs).unwrap();
+        index_client
+            .insert_documents(DocumentList(docs))
+            .await
+            .unwrap();
+
+        sleep(Duration::from_millis(1_000)).await;
+
+        let analytics_holder = AnalyticsHolder::new(
+            test_context.reader.clone(),
+            collection_client.collection_id,
+            &Interaction {
+                conversation_id: "the-conversation-id".to_string(),
+                interaction_id: "the-interaction-id".to_string(),
+                llm_config: None,
+                max_documents: None,
+                messages: vec![],
+                min_similarity: None,
+                query: "Who is Tommaso?".to_string(),
+                system_prompt_id: None,
+                ragat_notation: None,
+                related: None,
+                search_mode: None,
+                visitor_id: "the-visitor-id".to_string(),
+            },
+            Default::default(),
+        );
+
+        let state_machine = AnswerStateMachine::new(
+            AnswerConfig::default(),
+            test_context.reader.get_llm_service(),
+            test_context.reader.clone(),
+            collection_client.collection_id,
+            collection_client.read_api_key,
+            Some(Arc::new(Mutex::new(analytics_holder))),
+        );
+
+        let answer_stream = state_machine
+            .run_stream(
+                Interaction {
+                    conversation_id: "the-conversation-id".to_string(),
+                    interaction_id: "the-interaction-id".to_string(),
+                    llm_config: None,
+                    max_documents: None,
+                    messages: vec![],
+                    min_similarity: None,
+                    query: "Who is Tommaso?".to_string(),
+                    system_prompt_id: None,
+                    ragat_notation: None,
+                    related: None,
+                    search_mode: None,
+                    visitor_id: "the-visitor-id".to_string(),
+                },
+                collection_client.collection_id,
+                collection_client.read_api_key,
+                None,
+            )
+            .await
+            .unwrap();
+
+        let mut buffer = vec![];
+        let mut answer_stream = answer_stream;
+        while let Some(event) = answer_stream.next().await {
+            buffer.push(event);
+        }
+
+        let expected_state_changed = vec![
+            "initializing",
+            "handle_gpu_overload",
+            "get_llm_config",
+            "determine_query_strategy",
+            "simple_rag",
+            "execute_before_retrieval_hook",
+            "execute_search",
+            "execute_after_retrieval_hook",
+            "handle_system_prompt",
+            "execute_before_answer_hook",
+            "generate_answer",
+            "completed",
+        ];
+
+        let state_changed: Vec<_> = buffer
+            .iter()
+            .filter_map(|s| {
+                if let AnswerEvent::StateChanged { state, .. } = s {
+                    Some(state)
+                } else {
+                    None
+                }
+            })
+            .collect();
+        assert_eq!(state_changed, expected_state_changed);
+
+        let answer = buffer
+            .iter()
+            .filter_map(|s| {
+                if let AnswerEvent::AnswerToken { token } = s {
+                    Some(token)
+                } else {
+                    None
+                }
+            })
+            .join("");
+        assert_eq!(answer, "I'm Tommaso, a  software developer bla bla bla");
+
+        drop(test_context);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_answer_state_machine_advance_autoquery() {
+        init_log();
+
+        let completition_mock = Arc::new(RwLock::new(vec![
+            vec!["001".to_string()], // ADVANCE AUTOQUERY
+            vec![r#"["Tommaso", "software", "developer"]"#.to_string()],
+            // For each term, list of interesting properties
+            vec![r#"{}"#.to_string()],
+            vec![r#"{}"#.to_string()],
+            vec![r#"{}"#.to_string()],
+            // For each term, generate the search params
+            vec![r#"{"term": "Tommaso"}"#.to_string()],
+            vec![r#"{"term": "software"}"#.to_string()],
+            vec![r#"{"term": "developer"}"#.to_string()],
+            // optimize query
+            vec![r#"Tommaso software developer"#.to_string()],
+            // Real answer
+            vec![r#"Yes, Tommaso is a software developer"#.to_string()],
+        ]));
+        let completition_req = Arc::new(RwLock::new(vec![]));
+
+        let output = create_ai_server_mock(completition_mock, completition_req.clone())
+            .await
+            .unwrap();
+        let mut config = create_oramacore_config();
+        config.ai_server.llm.port = Some(output.port());
+
+        let test_context = TestContext::new_with_config(config).await;
+
+        let collection_client = test_context.create_collection().await.unwrap();
+        let index_client = collection_client.create_index().await.unwrap();
+
+        let docs = r#" [
+            {"id":"1","content":"I'm Tommaso, a software developer"}
+        ]"#;
+        let docs = serde_json::from_str::<Vec<Document>>(docs).unwrap();
+        index_client
+            .insert_documents(DocumentList(docs))
+            .await
+            .unwrap();
+
+        sleep(Duration::from_millis(1_000)).await;
+
+        let analytics_holder = AnalyticsHolder::new(
+            test_context.reader.clone(),
+            collection_client.collection_id,
+            &Interaction {
+                conversation_id: "the-conversation-id".to_string(),
+                interaction_id: "the-interaction-id".to_string(),
+                llm_config: None,
+                max_documents: None,
+                messages: vec![],
+                min_similarity: None,
+                query: "Is Tommaso be a software developer?".to_string(),
+                system_prompt_id: None,
+                ragat_notation: None,
+                related: None,
+                search_mode: None,
+                visitor_id: "the-visitor-id".to_string(),
+            },
+            Default::default(),
+        );
+
+        let state_machine = AnswerStateMachine::new(
+            AnswerConfig::default(),
+            test_context.reader.get_llm_service(),
+            test_context.reader.clone(),
+            collection_client.collection_id,
+            collection_client.read_api_key,
+            Some(Arc::new(Mutex::new(analytics_holder))),
+        );
+
+        let answer_stream = state_machine
+            .run_stream(
+                Interaction {
+                    conversation_id: "the-conversation-id".to_string(),
+                    interaction_id: "the-interaction-id".to_string(),
+                    llm_config: None,
+                    max_documents: None,
+                    messages: vec![],
+                    min_similarity: None,
+                    query: "Is Tommaso be a software developer?".to_string(),
+                    system_prompt_id: None,
+                    ragat_notation: None,
+                    related: None,
+                    search_mode: None,
+                    visitor_id: "the-visitor-id".to_string(),
+                },
+                collection_client.collection_id,
+                collection_client.read_api_key,
+                None,
+            )
+            .await
+            .unwrap();
+
+        let mut buffer = vec![];
+        let mut answer_stream = answer_stream;
+        while let Some(event) = answer_stream.next().await {
+            buffer.push(event);
+        }
+
+        let expected_state_changed = vec![
+            "handle_gpu_overload",
+            "determine_query_strategy",
+            "advanced_autoquery",
+            "advanced_autoquery_initializing",
+            "advanced_autoquery_analyzing_input",
+            "advanced_autoquery_query_optimized",
+            "advanced_autoquery_query_optimized",
+            "advanced_autoquery_select_properties",
+            "advanced_autoquery_properties_selected",
+            "advanced_autoquery_combine_queries",
+            "advanced_autoquery_combine_queries",
+            "advanced_autoquery_queries_combined",
+            "advanced_autoquery_queries_combined",
+            "advanced_autoquery_generate_tracked_queries",
+            "advanced_autoquery_tracked_queries_generated",
+            "advanced_autoquery_tracked_queries_generated",
+            "advanced_autoquery_execute_before_retrieval_hook",
+            "advanced_autoquery_hooks_executed",
+            "advanced_autoquery_hooks_executed",
+            "advanced_autoquery_execute_searches",
+            "advanced_autoquery_search_results",
+            "advanced_autoquery_search_results",
+            "advanced_autoquery_completed",
+            "optimize_query",
+            "execute_search",
+            "execute_after_retrieval_hook",
+            "handle_system_prompt",
+            "execute_before_answer_hook",
+            "generate_answer",
+            "completed",
+        ];
+        let state_changed: Vec<_> = buffer
+            .iter()
+            .filter_map(|s| {
+                if let AnswerEvent::StateChanged { state, .. } = s {
+                    Some(state)
+                } else {
+                    None
+                }
+            })
+            .collect();
+        assert_eq!(state_changed, expected_state_changed);
+
+        let answer = buffer
+            .iter()
+            .filter_map(|s| {
+                if let AnswerEvent::AnswerToken { token } = s {
+                    Some(token)
+                } else {
+                    None
+                }
+            })
+            .join("");
+        assert_eq!(answer, "Yes, Tommaso is a software developer");
+
+        drop(test_context);
     }
 }
