@@ -1,6 +1,5 @@
 use std::{
     collections::HashMap,
-    fmt::format,
     path::PathBuf,
     sync::Arc,
     time::{Duration, Instant},
@@ -8,7 +7,6 @@ use std::{
 
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
-use itertools::Itertools;
 use oramacore_lib::analytics::{AnalyticConfig, AnalyticLogStream, AnalyticsStorage};
 use serde::{Deserialize, Serialize};
 
@@ -283,7 +281,7 @@ pub struct AnalyticsHolder {
     system_prompt_id: Option<String>,
     assistant_response: Option<String>,
     full_context: Option<String>,
-    rag_steps: Vec<String>,
+    rag_steps: Vec<serde_json::Value>,
     output_tokens: Option<u32>,
     user_input_tokens: Option<u32>,
     tokens_per_second: Option<f32>,
@@ -378,7 +376,7 @@ impl AnalyticsHolder {
 
     //// MISSING
 
-    pub(crate) fn add_rag_step(&mut self, rag_step: String) {
+    pub(crate) fn add_rag_step(&mut self, rag_step: serde_json::Value) {
         self.rag_steps.push(rag_step);
     }
 
@@ -403,7 +401,7 @@ impl Drop for AnalyticsHolder {
 
             if let Err(err) = analytics_logs.add_event(InteractionAnalyticEventV1 {
                 timestamp: self.start_time,
-                collection_id: self.collection_id.clone(),
+                collection_id: self.collection_id,
                 conversation_id: self.conversation_id.clone(),
                 interaction_id: self.interaction_id.clone(),
                 visitor_id: Some(self.visitor_id.clone()),

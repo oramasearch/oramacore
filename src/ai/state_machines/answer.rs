@@ -456,6 +456,12 @@ impl AnswerStateMachine {
 
             // Send progress event with JSON-formatted current_step
             let current_step_json = self.state_to_json(&current_state);
+
+            if let Some(analytics_holder) = self.analytics_holder.as_ref() {
+                let mut lock = analytics_holder.lock().await;
+                lock.add_rag_step(current_step_json.clone());
+            }
+
             self.send_event(AnswerEvent::Progress {
                 current_step: current_step_json,
                 total_steps,
@@ -1528,8 +1534,8 @@ impl AnswerStateMachine {
             if start_first_token.is_none() {
                 start_first_token = Some(Instant::now());
 
-                if let Some(ana) = self.analytics_holder.as_ref() {
-                    let mut lock = ana.lock().await;
+                if let Some(analytics_holder) = self.analytics_holder.as_ref() {
+                    let mut lock = analytics_holder.lock().await;
                     lock.set_time_to_first_token(start_time_to_first_token.elapsed());
                 }
             }
@@ -1547,8 +1553,8 @@ impl AnswerStateMachine {
             }
         }
 
-        if let Some(ana) = self.analytics_holder.as_ref() {
-            let mut lock = ana.lock().await;
+        if let Some(analytics_holder) = self.analytics_holder.as_ref() {
+            let mut lock = analytics_holder.lock().await;
             let delta = if let Some(start_first_token) = start_first_token {
                 start_first_token.elapsed()
             } else {

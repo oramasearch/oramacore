@@ -15,9 +15,8 @@ use tokio_stream::wrappers::UnboundedReceiverStream;
 use tracing::{error, info, warn};
 
 use crate::ai::llms::{KnownPrompts, LLMService};
-use crate::ai::RemoteLLMProvider;
 use crate::types::{
-    ApiKey, CollectionId, IndexId, InteractionLLMConfig, InteractionMessage, Role, SearchParams,
+    ApiKey, CollectionId, IndexId, InteractionLLMConfig, InteractionMessage, SearchParams,
     SearchResult,
 };
 

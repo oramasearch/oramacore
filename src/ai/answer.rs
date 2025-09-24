@@ -2,11 +2,7 @@ use futures::TryFutureExt;
 use llm_json::{repair_json, JsonRepairError};
 use orama_js_pool::{ExecOption, JSRunnerError, OutputChannel};
 use oramacore_lib::hook_storage::HookReaderError;
-use std::{
-    collections::HashMap,
-    sync::Arc,
-    time::{Duration, Instant},
-};
+use std::{collections::HashMap, sync::Arc, time::Duration};
 use thiserror::Error;
 use tokio::sync::mpsc::error::SendError;
 use tokio_stream::StreamExt;
@@ -132,8 +128,6 @@ impl Answer {
         log_sender: Option<Arc<tokio::sync::broadcast::Sender<(OutputChannel, String)>>>,
     ) -> Result<(), AnswerError> {
         info!("Answering interaction...");
-
-        let start = Instant::now();
 
         self.handle_gpu_overload(&mut interaction).await;
 
@@ -309,24 +303,6 @@ impl Answer {
         }
 
         sender.send(AnswerEvent::AnswerResponse("".to_string()))?;
-
-        if let Some(analytics_logs) = self.read_side.get_analytics_logs() {
-            panic!();
-            /*
-            if let Err(e) = analytics_logs.add_event(AnalyticAnswerEvent {
-                at: chrono::Utc::now().timestamp_millis(),
-                collection_id: self.collection_id,
-                answer_time: start.elapsed().into(),
-                context: search_results,
-                full_conversation: interaction.messages,
-                question: interaction.query,
-                response: response.unwrap_or_default(),
-                user_id: None,
-            }) {
-                error!(error = ?e, "Failed to log analytic event");
-            }
-            */
-        }
 
         Ok(())
     }
