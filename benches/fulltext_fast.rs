@@ -17,9 +17,7 @@ use oramacore::{
     ai::{AIServiceConfig, AIServiceLLMConfig, OramaModel},
     build_orama,
     collection_manager::sides::{
-        read::{
-            AnalyticSearchEventInvocationType, IndexesConfig, OffloadFieldConfig, ReadSideConfig,
-        },
+        read::{IndexesConfig, OffloadFieldConfig, ReadSideConfig, SearchRequest},
         write::{
             CollectionsWriterConfig, OramaModelSerializable, TempIndexCleanupConfig,
             WriteSideConfig,
@@ -249,8 +247,12 @@ fn bench_fulltext_fast(c: &mut Criterion) {
                 .search(
                     read_api_key,
                     collection_id,
-                    search_params,
-                    AnalyticSearchEventInvocationType::Direct,
+                    SearchRequest {
+                        search_params,
+                        analytics_metadata: None,
+                        interaction_id: None,
+                        search_analytics_event_origin: None,
+                    },
                 )
                 .await
                 .expect("Search failed");
@@ -266,8 +268,12 @@ fn bench_fulltext_fast(c: &mut Criterion) {
                 .search(
                     read_api_key,
                     collection_id,
-                    search_params,
-                    AnalyticSearchEventInvocationType::Direct,
+                    SearchRequest {
+                        search_params,
+                        analytics_metadata: None,
+                        interaction_id: None,
+                        search_analytics_event_origin: None,
+                    },
                 )
                 .await
                 .expect("Search failed");
@@ -289,8 +295,12 @@ fn bench_fulltext_fast(c: &mut Criterion) {
                 .search(
                     read_api_key,
                     collection_id,
-                    search_params,
-                    AnalyticSearchEventInvocationType::Direct,
+                    SearchRequest {
+                        search_params,
+                        analytics_metadata: None,
+                        interaction_id: None,
+                        search_analytics_event_origin: None,
+                    },
                 )
                 .await
                 .expect("Search failed");

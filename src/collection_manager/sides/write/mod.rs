@@ -1002,6 +1002,12 @@ impl WriteSide {
             }
 
             if index % batch_size == 0 && !batch.is_empty() {
+                self.document_storage
+                    .insert_many(&docs)
+                    .await
+                    .context("Cannot inser document into document storage")?;
+                docs.clear();
+
                 insert_document_batch.push(WriteOperation::DocumentStorage(
                     DocumentStorageWriteOperation::InsertDocuments(batch),
                 ));

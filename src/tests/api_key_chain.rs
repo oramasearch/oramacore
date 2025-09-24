@@ -3,7 +3,7 @@ use std::time::Duration;
 use serde_json::json;
 use tokio::time::sleep;
 
-use crate::collection_manager::sides::read::AnalyticSearchEventInvocationType;
+use crate::collection_manager::sides::read::SearchRequest;
 use crate::tests::utils::create_oramacore_config;
 use crate::tests::utils::init_log;
 use crate::tests::utils::TestContext;
@@ -73,12 +73,16 @@ async fn test_write_api_key_to_search() {
         .search(
             write_api_key,
             collection_client.collection_id,
-            json!({
-                "term": "T",
-            })
-            .try_into()
-            .unwrap(),
-            AnalyticSearchEventInvocationType::Direct,
+            SearchRequest {
+                search_params: json!({
+                    "term": "T",
+                })
+                .try_into()
+                .unwrap(),
+                analytics_metadata: None,
+                interaction_id: None,
+                search_analytics_event_origin: None,
+            },
         )
         .await
         .unwrap();
@@ -121,12 +125,16 @@ async fn test_master_api_key_to_search() {
         .search(
             test_context.master_api_key,
             collection_client.collection_id,
-            json!({
-                "term": "T",
-            })
-            .try_into()
-            .unwrap(),
-            AnalyticSearchEventInvocationType::Direct,
+            SearchRequest {
+                search_params: json!({
+                    "term": "T",
+                })
+                .try_into()
+                .unwrap(),
+                analytics_metadata: None,
+                interaction_id: None,
+                search_analytics_event_origin: None,
+            },
         )
         .await
         .unwrap();

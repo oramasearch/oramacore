@@ -1,485 +1,432 @@
-use std::{io::Write, path::PathBuf, time::Duration};
+use std::{
+    collections::HashMap,
+    path::PathBuf,
+    sync::Arc,
+    time::{Duration, Instant},
+};
 
 use anyhow::{Context, Result};
-use chrono::Utc;
-use futures::StreamExt;
-use oramacore_lib::fs::{create_if_not_exists, BufferedFile};
+use chrono::{DateTime, Utc};
+use oramacore_lib::analytics::{AnalyticConfig, AnalyticLogStream, AnalyticsStorage};
 use serde::{Deserialize, Serialize};
-use tokio::time::sleep;
-use tokio_util::io::ReaderStream;
-use tracing::{error, info};
 
-use crate::types::{
-    ApiKey, CollectionId, InteractionMessage, SearchParams, SearchResult, SearchResultHit,
+use crate::{
+    collection_manager::sides::read::ReadSide,
+    types::{ApiKey, CollectionId, Interaction, Role, SearchMode, SearchParams, SearchResult},
 };
 
 #[derive(Deserialize, Clone)]
-pub struct AnalyticConfig {
+pub struct MetadataFfromHeadersPair {
+    pub header: String,
+    pub metadata_key: String,
+}
+
+#[derive(Deserialize, Clone)]
+pub struct OramaCoreAnalyticConfig {
     pub api_key: ApiKey,
+    pub metadata_from_headers: Vec<MetadataFfromHeadersPair>,
 }
 
-#[derive(Serialize, Clone, Copy)]
-pub enum AnalyticSearchEventInvocationType {
-    #[serde(rename = "direct")]
-    Direct,
-    #[serde(rename = "action")]
-    Action,
-    #[serde(rename = "answer")]
-    Answer,
-    #[serde(rename = "nlp_search")]
-    NLPSearch,
-    #[serde(rename = "training_data_gen")]
-    TrainingDataGen,
-}
-
-#[cfg_attr(test, derive(Clone))]
-pub struct Dur {
-    duration: Duration,
-}
-impl Serialize for Dur {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        serializer.serialize_u128(self.duration.as_millis())
-    }
-}
-impl From<Duration> for Dur {
-    fn from(duration: Duration) -> Self {
-        Self { duration }
-    }
-}
-
-#[derive(Serialize)]
-#[cfg_attr(test, derive(Clone))]
-pub struct AnalyticSearchEvent {
-    pub at: i64,
-    #[serde(rename = "cid")]
-    pub collection_id: CollectionId,
-    #[serde(rename = "dms")]
-    pub search_time: Dur,
-    #[serde(rename = "sp")]
-    pub search_params: SearchParams,
-    #[serde(rename = "uid", skip_serializing_if = "Option::is_none")]
-    pub user_id: Option<String>,
-    #[serde(rename = "rc")]
-    pub results_count: usize,
-    #[serde(rename = "r", skip_serializing_if = "Option::is_none")]
-    pub full_results_json: Option<SearchResult>,
-    #[serde(rename = "from")]
-    pub invocation_type: AnalyticSearchEventInvocationType,
-}
-
-impl From<AnalyticSearchEvent> for AnalyticEvent {
-    fn from(val: AnalyticSearchEvent) -> Self {
-        AnalyticEvent::Search(Box::new(val))
-    }
-}
-
-#[derive(Serialize)]
-#[cfg_attr(test, derive(Clone))]
-pub struct AnalyticAnswerEvent {
-    pub at: i64,
-    #[serde(rename = "cid")]
-    pub collection_id: CollectionId,
-    #[serde(rename = "dms")]
-    pub answer_time: Dur,
-    #[serde(rename = "fc")]
-    pub full_conversation: Vec<InteractionMessage>,
-    #[serde(rename = "q")]
-    pub question: String,
-    #[serde(rename = "c")]
-    pub context: Vec<SearchResultHit>,
-    #[serde(rename = "r")]
-    pub response: Vec<String>,
-    #[serde(rename = "uid", skip_serializing_if = "Option::is_none")]
-    pub user_id: Option<String>,
-}
-
-impl From<AnalyticAnswerEvent> for AnalyticEvent {
-    fn from(val: AnalyticAnswerEvent) -> Self {
-        AnalyticEvent::Answer(Box::new(val))
-    }
-}
-
-#[derive(Serialize)]
-#[serde(tag = "et")]
-#[cfg_attr(test, derive(Clone))]
-pub enum AnalyticEvent {
-    #[serde(rename = "s")]
-    Search(Box<AnalyticSearchEvent>),
-    #[serde(rename = "a")]
-    Answer(Box<AnalyticAnswerEvent>),
-}
-
-pub struct AnalyticsStorage {
-    data_dir: PathBuf,
+#[derive(Clone)]
+pub struct OramaCoreAnalytics {
     api_key: ApiKey,
-    sender: tokio::sync::mpsc::Sender<InternalEvent>,
+    inner: Arc<AnalyticsStorage<AnalyticEvent>>,
+    metadata_from_headers: Vec<MetadataFfromHeadersPair>,
 }
 
-impl AnalyticsStorage {
-    pub fn try_new(data_dir: PathBuf, config: AnalyticConfig) -> Result<Self> {
-        create_if_not_exists(&data_dir)?;
-
-        let init_file_name: String =
-            if BufferedFile::exists_as_file(&data_dir.join("analytics.index")) {
-                BufferedFile::open(data_dir.join("analytics.index"))
-                    .with_context(|| {
-                        format!("Cannot open analytics file at {}", data_dir.display())
-                    })?
-                    .read_text_data()?
-            } else {
-                // Default file name is based on the current timestamp
-                let now = Utc::now().timestamp();
-                format!("analytics_{now}.log")
-            };
-
-        BufferedFile::create_or_overwrite(data_dir.join("analytics.index"))
-            .with_context(|| format!("Cannot open analytics file at {}", data_dir.display()))?
-            .write_text_data(&init_file_name)?;
-
-        let (sender, receiver) = tokio::sync::mpsc::channel::<InternalEvent>(100);
-
-        tokio::task::spawn(store_event_loop(data_dir.clone(), receiver, init_file_name));
-
+impl OramaCoreAnalytics {
+    pub fn try_new(data_dir: PathBuf, config: OramaCoreAnalyticConfig) -> Result<Self> {
+        let inner = AnalyticsStorage::try_new(AnalyticConfig { data_dir })?;
         Ok(Self {
-            data_dir,
-            sender,
+            inner: Arc::new(inner),
             api_key: config.api_key,
+            metadata_from_headers: config.metadata_from_headers,
         })
     }
 
     pub fn add_event<EV: Into<AnalyticEvent>>(&self, event: EV) -> Result<()> {
-        let internal_event = InternalEvent::NewEvent(event.into());
-        if let Err(e) = self.sender.try_send(internal_event) {
-            error!(error = ?e, "Failed to send analytic event");
-            return Err(anyhow::anyhow!("Failed to send analytic event"));
-        }
-        Ok(())
+        self.inner.add_event(event.into())
     }
 
     pub async fn get_and_erase(&self, api_key: ApiKey) -> Result<AnalyticLogStream> {
         if self.api_key != api_key {
             return Err(anyhow::anyhow!("Invalid analytics API key"));
         }
+        self.inner.get_and_erase().await
+    }
 
-        let (sender, receiver) = tokio::sync::oneshot::channel::<(PathBuf, String)>();
-        let internal_event = InternalEvent::Rotate(sender);
-        if let Err(e) = self.sender.try_send(internal_event) {
-            error!(error = ?e, "Failed to send rotate signal");
-            return Err(anyhow::anyhow!("Failed to send rotate signal"));
-        }
+    pub fn get_metadata_from_headers(&self) -> &[MetadataFfromHeadersPair] {
+        &self.metadata_from_headers
+    }
+}
 
-        let (previous_file_path, new_file_name) = receiver
-            .await
-            .map_err(|_| anyhow::anyhow!("Failed to receive rotate signal"))?;
-        let file = tokio::fs::File::open(&previous_file_path).await?;
+#[derive(Serialize, Deserialize, Clone, Copy)]
+pub enum SearchAnalyticEventOrigin {
+    #[serde(rename = "direct")]
+    Direct,
+    #[serde(rename = "rag")]
+    RAG,
+    #[serde(rename = "mcp")]
+    MCP,
+    #[serde(rename = "nlp")]
+    NLP,
+}
 
-        BufferedFile::create_or_overwrite(self.data_dir.join("analytics.index"))
-            .with_context(|| format!("Cannot open analytics file at {}", self.data_dir.display()))?
-            .write_text_data(&new_file_name)?;
+#[derive(Serialize, Deserialize)]
+pub enum SearchAnalyticEventSearchType {
+    #[serde(rename = "f")]
+    Fulltext,
+    #[serde(rename = "h")]
+    Hybrid,
+    #[serde(rename = "v")]
+    Vector,
+    #[serde(rename = "a")]
+    Auto,
+}
 
-        let stream: ReaderStream<tokio::fs::File> = ReaderStream::new(file);
-        let stream = AnalyticLogStream {
-            file_path: previous_file_path.clone(),
-            stream,
-            already_deleted: false,
+#[derive(Serialize, Deserialize)]
+pub struct SearchAnalyticEventV1 {
+    #[serde(rename = "ts")]
+    pub timestamp: DateTime<Utc>,
+    #[serde(rename = "coll")]
+    pub collection_id: CollectionId,
+    #[serde(rename = "o")]
+    pub origin: SearchAnalyticEventOrigin,
+    #[serde(rename = "st")]
+    pub search_type: SearchAnalyticEventSearchType,
+    #[serde(rename = "v_id", skip_serializing_if = "Option::is_none")]
+    pub visitor_id: Option<String>,
+    #[serde(rename = "i_id", skip_serializing_if = "Option::is_none")]
+    pub interaction_id: Option<String>,
+    #[serde(rename = "rst")]
+    pub raw_search_term: String,
+    #[serde(rename = "rq")]
+    pub raw_query: String,
+    #[serde(rename = "hflt", serialize_with = "serialize_bool_as_int")]
+    pub has_filters: bool,
+    #[serde(rename = "hg", serialize_with = "serialize_bool_as_int")]
+    pub has_groups: bool,
+    #[serde(rename = "hs", serialize_with = "serialize_bool_as_int")]
+    pub has_sorting: bool,
+    #[serde(rename = "hfct", serialize_with = "serialize_bool_as_int")]
+    pub has_facets: bool,
+    #[serde(rename = "hpr", serialize_with = "serialize_bool_as_int")]
+    pub has_pins_rules: bool,
+    #[serde(rename = "hpres", serialize_with = "serialize_bool_as_int")]
+    pub has_pinned_results: bool,
+    #[serde(rename = "rc")]
+    pub results_count: usize,
+    #[serde(rename = "sd")]
+    pub search_duration: Duration,
+    #[serde(rename = "r")]
+    pub results: String,
+    #[serde(rename = "md", skip_serializing_if = "HashMap::is_empty")]
+    pub metadata: HashMap<String, String>,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+pub struct AnalyticsMetadataFromRequest {
+    #[serde(flatten)]
+    pub headers: HashMap<String, String>,
+}
+
+impl AnalyticsMetadataFromRequest {
+    pub fn is_empty(&self) -> bool {
+        self.headers.is_empty()
+    }
+}
+
+impl SearchAnalyticEventV1 {
+    pub fn try_new(
+        collection_id: CollectionId,
+        search_params: &SearchParams,
+        search_result: &SearchResult,
+        origin: SearchAnalyticEventOrigin,
+        search_duration: Duration,
+        has_pins_rules: bool,
+        has_pinned_results: bool,
+        analytics_metadata: Option<AnalyticsMetadataFromRequest>,
+        interaction_id: Option<String>,
+    ) -> Result<Self> {
+        let has_filters = search_params.where_filter.is_empty();
+        let has_facets = !search_params.facets.is_empty();
+        let has_groups = search_params.group_by.is_some();
+        let has_sorting = search_params.sort_by.is_some();
+
+        let results_count = search_result.hits.len();
+
+        let raw_query = serde_json::to_string(&search_params)
+            .context("Cannot serialize search query for analytics")?;
+        let results = serde_json::to_string(&search_result)
+            .context("Cannot serialize search result for analytics")?;
+
+        let (raw_search_term, search_type) = match &search_params.mode {
+            SearchMode::Auto(a) => (a.term.clone(), SearchAnalyticEventSearchType::Auto),
+            SearchMode::Vector(v) => (v.term.clone(), SearchAnalyticEventSearchType::Vector),
+            SearchMode::Hybrid(h) => (h.term.clone(), SearchAnalyticEventSearchType::Hybrid),
+            SearchMode::Default(d) => (d.term.clone(), SearchAnalyticEventSearchType::Fulltext),
+            SearchMode::FullText(f) => (f.term.clone(), SearchAnalyticEventSearchType::Fulltext),
         };
 
-        Ok(stream)
+        let metadata = analytics_metadata.map(|a| a.headers).unwrap_or_default();
+
+        Ok(Self {
+            timestamp: Utc::now(),
+            collection_id,
+            origin,
+            raw_search_term,
+            raw_query,
+            has_filters,
+            has_groups,
+            has_sorting,
+            has_facets,
+            has_pins_rules,
+            has_pinned_results,
+            results_count,
+            search_duration,
+            results,
+            search_type,
+            visitor_id: search_params.user_id.clone(),
+            interaction_id,
+            metadata,
+        })
     }
 }
 
-pub struct AnalyticLogStream {
-    file_path: PathBuf,
-    stream: ReaderStream<tokio::fs::File>,
-    already_deleted: bool,
+#[derive(Serialize, Deserialize)]
+pub struct InteractionAnalyticEventV1 {
+    #[serde(rename = "ts")]
+    pub timestamp: DateTime<Utc>,
+    #[serde(rename = "coll")]
+    pub collection_id: CollectionId,
+    #[serde(rename = "conv")]
+    pub conversation_id: String,
+    #[serde(rename = "inter_id")]
+    pub interaction_id: String,
+    #[serde(rename = "v_id", skip_serializing_if = "Option::is_none")]
+    pub visitor_id: Option<String>,
+    #[serde(rename = "sysprt_id", skip_serializing_if = "Option::is_none")]
+    pub system_prompt_id: Option<String>,
+    #[serde(rename = "usr_msg")]
+    pub user_message: String,
+    #[serde(rename = "asst_res")]
+    pub assistant_response: String,
+    #[serde(rename = "mp")]
+    pub model_provider: String,
+    #[serde(rename = "mn")]
+    pub model_name: String,
+    #[serde(rename = "cxt")]
+    pub full_context: Option<String>,
+    #[serde(rename = "gq", skip_serializing_if = "Option::is_none")]
+    pub generated_related_queries: Option<String>,
+    #[serde(rename = "rs")]
+    pub rag_steps: String,
+    #[serde(rename = "uit")]
+    pub user_input_tokens: u32,
+    #[serde(rename = "uot")]
+    pub output_tokens: u32,
+    #[serde(rename = "tps")]
+    pub tokens_per_second: f32,
+    #[serde(rename = "d")]
+    pub duration: Duration,
+    #[serde(rename = "ttft")]
+    pub time_to_first_token: Duration,
+    #[serde(rename = "err", skip_serializing_if = "Option::is_none")]
+    pub interaction_error: Option<String>,
+    #[serde(rename = "md", skip_serializing_if = "HashMap::is_empty")]
+    pub metadata: HashMap<String, String>,
 }
 
-impl futures::Stream for AnalyticLogStream {
-    type Item = Result<tokio_util::bytes::Bytes, anyhow::Error>;
+#[derive(Serialize, Deserialize)]
+#[serde(tag = "t")]
+pub enum AnalyticEvent {
+    #[serde(rename = "sv1")]
+    SearchV1(SearchAnalyticEventV1),
+    #[serde(rename = "iv1")]
+    InteractionV1(InteractionAnalyticEventV1),
+}
 
-    fn poll_next(
-        mut self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Option<Self::Item>> {
-        let ret = self.as_mut().stream.poll_next_unpin(cx);
-
-        if matches!(ret, std::task::Poll::Ready(None)) && !self.already_deleted {
-            self.already_deleted = true;
-            if let Err(e) = std::fs::remove_file(&self.file_path) {
-                error!(error = ?e, "Failed to delete analytics file");
-            } else {
-                info!("Analytics file {} deleted", self.file_path.display());
-            }
-        }
-
-        ret.map(|opt| opt.map(|bytes| bytes.map_err(anyhow::Error::from)))
+impl From<SearchAnalyticEventV1> for AnalyticEvent {
+    fn from(event: SearchAnalyticEventV1) -> Self {
+        AnalyticEvent::SearchV1(event)
     }
 }
 
-async fn store_event_loop(
-    base_dir: PathBuf,
-    mut receiver: tokio::sync::mpsc::Receiver<InternalEvent>,
-    init_file_name: String,
-) -> Result<()> {
-    let mut file_path = base_dir.join(init_file_name);
-
-    let mut file = std::fs::File::options()
-        .create(true)
-        .write(true)
-        .read(true)
-        .truncate(false)
-        .open(&file_path)
-        .with_context(|| format!("Cannot open file at {file_path:?}"))?;
-
-    // 100 is an arbitrary limit for the number of events to process at once
-    let limit = 100;
-
-    let mut buffer = Vec::with_capacity(limit);
-
-    loop {
-        let rec = receiver.recv_many(&mut buffer, limit).await;
-        if rec == 0 {
-            info!("No more events to process, exiting event loop");
-            // Acording to the documentation, this means the channel is closed
-            // because the limit is greater than 0 (it is hard-coded)
-            break;
-        }
-
-        info!(count = rec, "Processing {} analytic events", rec);
-        for event in buffer.drain(..) {
-            match event {
-                InternalEvent::NewEvent(ev) => {
-                    write_to_file(&mut file, &ev)
-                        .with_context(|| format!("Cannot write event to file at {file_path:?}"))?;
-                }
-                InternalEvent::Rotate(sender) => {
-                    let previous_file_path = file_path;
-                    let (new_file_path, file_name) = loop {
-                        let now = Utc::now().timestamp();
-                        let file_name = format!("analytics_{now}.log");
-                        let new_file_path = base_dir.join(&file_name);
-                        if new_file_path != previous_file_path {
-                            break (new_file_path, file_name);
-                        }
-                        sleep(Duration::from_millis(100)).await; // Force a new timestamp
-                    };
-                    file_path = new_file_path;
-
-                    file = std::fs::File::options()
-                        .create(true)
-                        .write(true)
-                        .read(true)
-                        .truncate(false)
-                        .open(&file_path)
-                        .with_context(|| format!("Cannot open file at {file_path:?}"))?;
-
-                    info!("Analytics file rotated: old_file {previous_file_path:?} new_file {file_path:?}");
-
-                    if let Err(e) = sender.send((previous_file_path, file_name)) {
-                        error!(error = ?e, "Failed to send rotate signal");
-                    }
-                }
-            }
-
-            if let Err(e) = file.flush() {
-                error!(error = ?e, "Failed to flush file");
-            }
-            if let Err(e) = file.sync_all() {
-                error!(error = ?e, "Failed to sync file");
-            }
-        }
+impl From<InteractionAnalyticEventV1> for AnalyticEvent {
+    fn from(event: InteractionAnalyticEventV1) -> Self {
+        AnalyticEvent::InteractionV1(event)
     }
-
-    Ok(())
 }
 
-fn write_to_file<T: Serialize>(file: &mut std::fs::File, data: &T) -> Result<()> {
-    let data = serde_json::to_string(data).context("Cannot serialize data to JSON")?;
-    file.write_all(data.as_bytes())
-        .context("Cannot write data to file")?;
-    if let Err(e) = file.write(b"\n") {
-        error!(error = ?e, "Failed to write newline to file");
-    }
-    Ok(())
+fn serialize_bool_as_int<S>(b: &bool, s: S) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    s.serialize_u8(if *b { 1 } else { 0 })
 }
 
-enum InternalEvent {
-    NewEvent(AnalyticEvent),
-    Rotate(tokio::sync::oneshot::Sender<(PathBuf, String)>),
+pub struct AnalyticsHolder {
+    read_side: Arc<ReadSide>,
+    start: Instant,
+    start_time: DateTime<Utc>,
+    collection_id: CollectionId,
+    user_message: String,
+    interaction_id: String,
+    conversation_id: String,
+    visitor_id: String,
+    analytics_metadata: AnalyticsMetadataFromRequest,
+    generated_related_queries: Option<String>,
+    llm_provider: Option<String>,
+    llm_model: Option<String>,
+    system_prompt_id: Option<String>,
+    assistant_response: Option<String>,
+    full_context: Option<String>,
+    rag_steps: Vec<serde_json::Value>,
+    output_tokens: Option<u32>,
+    user_input_tokens: Option<u32>,
+    tokens_per_second: Option<f32>,
+    time_to_first_token: Option<Duration>,
+    interaction_error: Option<String>,
 }
 
-#[cfg(test)]
-mod tests {
-    use futures::FutureExt;
-    use serde_json::json;
+impl AnalyticsHolder {
+    pub fn new(
+        read_side: Arc<ReadSide>,
+        collection_id: CollectionId,
+        interaction: &Interaction,
+        analytics_metadata: AnalyticsMetadataFromRequest,
+    ) -> Self {
+        // TODO: avoid 2 different time sources
+        let start_time = chrono::Utc::now();
+        let start = Instant::now();
 
-    use crate::tests::utils::{generate_new_path, init_log, wait_for};
-
-    use super::*;
-
-    #[tokio::test]
-    async fn test_analytics_storage_lifecycle() {
-        init_log();
-
-        let analytics_api_key = ApiKey::try_new("test_api_key").unwrap();
-
-        let data_dir = generate_new_path();
-        let storage = AnalyticsStorage::try_new(
-            data_dir.clone(),
-            AnalyticConfig {
-                api_key: analytics_api_key,
-            },
-        )
-        .unwrap();
-
-        let create_event = |id: i64| {
-            AnalyticEvent::Search(Box::new(AnalyticSearchEvent {
-                at: id,
-                collection_id: CollectionId::try_new("test_collection").unwrap(),
-                search_time: Duration::from_secs(1).into(),
-                search_params: json!({
-                    "term": "test",
-                })
-                .try_into()
-                .unwrap(),
-                user_id: Some("user123".to_string()),
-                results_count: 10,
-                full_results_json: None,
-                invocation_type: AnalyticSearchEventInvocationType::Direct,
-            }))
+        let user_message = interaction
+            .messages
+            .iter()
+            .rev()
+            .find(|i| i.role == Role::User)
+            .map(|i| i.content.clone())
+            .unwrap_or_default();
+        let user_input_tokens = if let Ok(t) = tiktoken_rs::o200k_base() {
+            let len = t.encode(&user_message, Default::default()).len();
+            Some(len as u32)
+        } else {
+            None
         };
-        storage.add_event(create_event(1)).unwrap();
-        storage.add_event(create_event(2)).unwrap();
 
-        let old_file: PathBuf = wait_for(&data_dir, |data_dir| {
-            let data_dir = data_dir.clone();
-            async move {
-                let entries: Vec<_> = std::fs::read_dir(data_dir).unwrap().collect();
-                if entries.len() == 2 {
-                    // Only the new file should exist + the index file
-                    let entry = entries
-                        .into_iter()
-                        .find(|e| e.as_ref().unwrap().file_name() != "analytics.index")
-                        .ok_or_else(|| anyhow::anyhow!("No index file found"))??;
-                    return Ok(entry.path());
-                }
-                Err(anyhow::anyhow!("No file found"))
-            }
-            .boxed()
-        })
-        .await
-        .unwrap();
-        let file_content = std::fs::read_to_string(&old_file).unwrap();
-        assert_eq!(file_content.lines().count(), 2);
+        let interaction_id = interaction.interaction_id.clone();
+        let conversation_id = interaction.conversation_id.clone();
+        let visitor_id = interaction.visitor_id.clone();
 
-        let mut stream = storage.get_and_erase(analytics_api_key).await.unwrap();
-
-        storage.add_event(create_event(3)).unwrap();
-
-        wait_for(&data_dir, |data_dir| {
-            let data_dir = data_dir.clone();
-            async move {
-                let entries: Vec<_> = std::fs::read_dir(data_dir)
-                    .unwrap()
-                    .collect::<Result<Vec<_>, _>>()?;
-                if entries.len() == 3 {
-                    // The old file + new file should exist + the index file
-                    return Ok(entries[2].path());
-                }
-                Err(anyhow::anyhow!("No file found"))
-            }
-            .boxed()
-        })
-        .await
-        .unwrap();
-
-        let mut stream_content = String::new();
-        while let Some(Ok(bytes)) = stream.next().await {
-            // Process the bytes as needed
-            stream_content.push_str(&String::from_utf8_lossy(&bytes));
+        Self {
+            read_side,
+            start_time,
+            collection_id,
+            user_message,
+            interaction_id,
+            conversation_id,
+            visitor_id,
+            analytics_metadata,
+            start,
+            generated_related_queries: None,
+            llm_model: None,
+            llm_provider: None,
+            assistant_response: None,
+            full_context: None,
+            rag_steps: vec![],
+            system_prompt_id: None,
+            interaction_error: None,
+            output_tokens: None,
+            time_to_first_token: None,
+            tokens_per_second: None,
+            user_input_tokens,
         }
-        assert_eq!(
-            stream_content.split('\n').count(),
-            3,
-            "There should be two lines in the analytics log + 1 for the newline"
-        );
-        assert!(stream_content.contains("\"at\":1"));
-        assert!(stream_content.contains("\"at\":2"));
-
-        let new_file: PathBuf = wait_for(&data_dir, |data_dir| {
-            let data_dir = data_dir.clone();
-            async move {
-                let entry: Vec<_> = std::fs::read_dir(data_dir).unwrap().collect();
-                if entry.len() == 2 {
-                    // Only the new file should remain + the index file
-                    return Ok(entry[1].as_ref().unwrap().path());
-                }
-                Err(anyhow::anyhow!("No file found"))
-            }
-            .boxed()
-        })
-        .await
-        .unwrap();
-
-        assert_ne!(
-            old_file, new_file,
-            "Old file should be different from new file"
-        );
-
-        // Simulate a server restart
-        drop(storage);
-        // Reload the storage with the same data directory
-        let storage = AnalyticsStorage::try_new(
-            data_dir.clone(),
-            AnalyticConfig {
-                api_key: analytics_api_key,
-            },
-        )
-        .unwrap();
-
-        let mut stream = storage.get_and_erase(analytics_api_key).await.unwrap();
-        let mut stream_content = String::new();
-        while let Some(Ok(bytes)) = stream.next().await {
-            // Process the bytes as needed
-            stream_content.push_str(&String::from_utf8_lossy(&bytes));
-        }
-        assert_eq!(
-            stream_content.split('\n').count(),
-            2,
-            "There should be one line in the analytics log + 1 for the newline"
-        );
-        assert!(!stream_content.contains("\"at\":1"));
-        assert!(!stream_content.contains("\"at\":2"));
-        assert!(stream_content.contains("\"at\":3"));
     }
 
-    #[tokio::test]
-    async fn test_analytics_storage_inner_write() {
-        init_log();
+    pub(crate) fn get_analytics_metadata(&self) -> &AnalyticsMetadataFromRequest {
+        &self.analytics_metadata
+    }
 
-        let data_dir = generate_new_path();
-        create_if_not_exists(&data_dir).unwrap();
-        let file_name = data_dir.join("analytics.log");
+    pub(crate) fn set_generated_related_queries(&mut self, queries: String) {
+        self.generated_related_queries = Some(queries);
+    }
 
-        let mut file = std::fs::File::options()
-            .create(true)
-            .write(true)
-            .truncate(false)
-            .open(&file_name)
-            .unwrap();
+    pub(crate) fn set_llm_info(&mut self, provider: String, model: String) {
+        self.llm_provider = Some(provider);
+        self.llm_model = Some(model);
+    }
 
-        write_to_file(&mut file, &"test data").unwrap();
-        write_to_file(&mut file, &"test data2").unwrap();
+    pub(crate) fn set_system_prompt_id(&mut self, system_prompt_id: String) {
+        self.system_prompt_id = Some(system_prompt_id);
+    }
 
-        let content = std::fs::read_to_string(&file_name)
-            .map_err(|e| anyhow::anyhow!("Failed to read file {}: {}", file_name.display(), e))
-            .unwrap();
+    pub(crate) fn set_time_to_first_token(&mut self, time_to_first_token: Duration) {
+        self.time_to_first_token = Some(time_to_first_token);
+    }
 
-        assert!(content.contains("test data"));
-        assert!(content.contains("test data2"));
-        assert!(content.lines().count() == 2);
+    pub(crate) fn set_assistant_response(&mut self, assistant_response: String, delta: Duration) {
+        if let Ok(t) = tiktoken_rs::o200k_base() {
+            let len = t.encode(&assistant_response, Default::default()).len();
+            self.output_tokens = Some(len as u32);
+            self.tokens_per_second = Some(len as f32 / delta.as_secs() as f32);
+        }
+
+        self.assistant_response = Some(assistant_response);
+    }
+
+    pub(crate) fn set_full_context(&mut self, full_context: String) {
+        self.full_context = Some(full_context);
+    }
+
+    //// MISSING
+
+    pub(crate) fn add_rag_step(&mut self, rag_step: serde_json::Value) {
+        self.rag_steps.push(rag_step);
+    }
+
+    pub(crate) fn set_interaction_error(&mut self, interaction_error: String) {
+        self.interaction_error = Some(interaction_error);
+    }
+}
+
+impl Drop for AnalyticsHolder {
+    fn drop(&mut self) {
+        if let Some(analytics_logs) = self.read_side.get_analytics_logs() {
+            let duration = self.start.elapsed();
+
+            let rag_steps = std::mem::take(&mut self.rag_steps);
+            let rag_steps = match serde_json::to_string(&rag_steps) {
+                Ok(r) => r,
+                Err(e) => {
+                    tracing::error!(error = ?e, "Cannot serialize rag_steps for analytics");
+                    "[]".to_string()
+                }
+            };
+
+            if let Err(err) = analytics_logs.add_event(InteractionAnalyticEventV1 {
+                timestamp: self.start_time,
+                collection_id: self.collection_id,
+                conversation_id: self.conversation_id.clone(),
+                interaction_id: self.interaction_id.clone(),
+                visitor_id: Some(self.visitor_id.clone()),
+                user_message: self.user_message.clone(),
+                model_provider: self.llm_provider.take().unwrap_or_default(),
+                model_name: self.llm_model.take().unwrap_or_default(),
+                generated_related_queries: self.generated_related_queries.take(),
+                metadata: self.analytics_metadata.headers.clone(),
+                duration,
+                system_prompt_id: self.system_prompt_id.take(),
+                assistant_response: self.assistant_response.take().unwrap_or_default(),
+                full_context: self.full_context.take(),
+                rag_steps,
+                output_tokens: self.output_tokens.unwrap_or_default(),
+                user_input_tokens: self.user_input_tokens.unwrap_or_default(),
+                tokens_per_second: self.tokens_per_second.unwrap_or_default(),
+                time_to_first_token: self.time_to_first_token.unwrap_or_default(),
+                interaction_error: self.interaction_error.clone(),
+            }) {
+                tracing::error!(error = ?err, "Cannot log interaction analytic event");
+            }
+        }
     }
 }
