@@ -124,7 +124,7 @@ pub struct SearchAnalyticEventV1 {
     pub metadata: HashMap<String, String>,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct AnalyticsMetadataFromRequest {
     #[serde(flatten)]
     pub headers: HashMap<String, String>,
@@ -341,6 +341,10 @@ impl AnalyticsHolder {
             tokens_per_second: None,
             user_input_tokens,
         }
+    }
+
+    pub(crate) fn get_analytics_metadata(&self) -> &AnalyticsMetadataFromRequest {
+        &self.analytics_metadata
     }
 
     pub(crate) fn set_generated_related_queries(&mut self, queries: String) {

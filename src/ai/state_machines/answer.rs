@@ -1600,6 +1600,13 @@ impl AnswerStateMachine {
 
         let index_ids = index_ids?;
 
+        let analytics_metadata = if let Some(analytics_holder) = self.analytics_holder.as_ref() {
+            let lock = analytics_holder.lock().await;
+            Some(lock.get_analytics_metadata().clone())
+        } else {
+            None
+        };
+
         let search_results = self
             .read_side
             .search(
@@ -1623,8 +1630,8 @@ impl AnswerStateMachine {
                         group_by: None,
                     },
                     search_analytics_event_origin: Some(SearchAnalyticEventOrigin::RAG),
-                    analytics_metadata: None,
-                    interaction_id: None,
+                    analytics_metadata,
+                    interaction_id: Some(interaction.interaction_id.clone()),
                 },
             )
             .map_err(|_| GeneralRagAtError::ReadError)
