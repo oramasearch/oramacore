@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use backoff::{backoff::Backoff, ExponentialBackoffBuilder};
@@ -18,7 +18,9 @@ use crate::ai::run_hooks::{run_before_answer, run_before_retrieval};
 use crate::ai::state_machines::advanced_autoquery::{
     AdvancedAutoqueryConfig, AdvancedAutoqueryStateMachine,
 };
-use crate::collection_manager::sides::read::AnalyticSearchEventInvocationType;
+use crate::collection_manager::sides::read::{
+    AnalyticsHolder, SearchAnalyticEventOrigin, SearchRequest,
+};
 use crate::collection_manager::sides::{read::ReadSide, system_prompts::SystemPrompt};
 use crate::types::{
     ApiKey, CollectionId, IndexId, Interaction, InteractionLLMConfig, Limit, Properties,
@@ -246,6 +248,7 @@ pub struct AnswerStateMachine {
     collection_id: CollectionId,
     read_api_key: ApiKey,
     event_sender: Option<mpsc::UnboundedSender<AnswerEvent>>,
+    analytics_holder: Option<Arc<Mutex<AnalyticsHolder>>>,
 }
 
 impl AnswerStateMachine {
@@ -255,6 +258,7 @@ impl AnswerStateMachine {
         read_side: Arc<ReadSide>,
         collection_id: CollectionId,
         read_api_key: ApiKey,
+        analytics_holder: Option<Arc<Mutex<AnalyticsHolder>>>,
     ) -> Self {
         Self {
             config,
@@ -267,6 +271,7 @@ impl AnswerStateMachine {
             collection_id,
             read_api_key,
             event_sender: None,
+            analytics_holder,
         }
     }
 
@@ -451,6 +456,12 @@ impl AnswerStateMachine {
 
             // Send progress event with JSON-formatted current_step
             let current_step_json = self.state_to_json(&current_state);
+
+            if let Some(analytics_holder) = self.analytics_holder.as_ref() {
+                let mut lock = analytics_holder.lock().await;
+                lock.add_rag_step(current_step_json.clone());
+            }
+
             self.send_event(AnswerEvent::Progress {
                 current_step: current_step_json,
                 total_steps,
@@ -1425,8 +1436,12 @@ impl AnswerStateMachine {
                 .search(
                     read_api_key,
                     collection_id,
-                    params,
-                    AnalyticSearchEventInvocationType::Answer,
+                    SearchRequest {
+                        search_params: params,
+                        search_analytics_event_origin: Some(SearchAnalyticEventOrigin::RAG),
+                        analytics_metadata: None,
+                        interaction_id: None,
+                    },
                 )
                 .await
                 .map_err(|e| AnswerError::SearchError(e.to_string()))?;
@@ -1491,6 +1506,13 @@ impl AnswerStateMachine {
             ("context".to_string(), search_result_str.clone()),
         ];
 
+        if let Some(system_prompt) = &system_prompt {
+            if let Some(ana) = self.analytics_holder.as_ref() {
+                let mut lock = ana.lock().await;
+                lock.set_system_prompt_id(system_prompt.id.clone());
+            }
+        }
+
         let answer_stream = self
             .llm_service
             .run_known_prompt_stream(
@@ -1506,7 +1528,18 @@ impl AnswerStateMachine {
         let mut answer_stream = answer_stream;
         let mut answer = String::new();
 
+        let start_time_to_first_token = Instant::now();
+        let mut start_first_token = None;
         while let Some(resp) = answer_stream.next().await {
+            if start_first_token.is_none() {
+                start_first_token = Some(Instant::now());
+
+                if let Some(analytics_holder) = self.analytics_holder.as_ref() {
+                    let mut lock = analytics_holder.lock().await;
+                    lock.set_time_to_first_token(start_time_to_first_token.elapsed());
+                }
+            }
+
             match resp {
                 Ok(chunk) => {
                     answer.push_str(&chunk);
@@ -1518,6 +1551,16 @@ impl AnswerStateMachine {
                     return Err(AnswerError::AnswerGenerationError(e.to_string()));
                 }
             }
+        }
+
+        if let Some(analytics_holder) = self.analytics_holder.as_ref() {
+            let mut lock = analytics_holder.lock().await;
+            let delta = if let Some(start_first_token) = start_first_token {
+                start_first_token.elapsed()
+            } else {
+                Default::default()
+            };
+            lock.set_assistant_response(answer.clone(), delta);
         }
 
         Ok(answer)
@@ -1557,28 +1600,39 @@ impl AnswerStateMachine {
 
         let index_ids = index_ids?;
 
+        let analytics_metadata = if let Some(analytics_holder) = self.analytics_holder.as_ref() {
+            let lock = analytics_holder.lock().await;
+            Some(lock.get_analytics_metadata().clone())
+        } else {
+            None
+        };
+
         let search_results = self
             .read_side
             .search(
                 self.read_api_key,
                 self.collection_id,
-                SearchParams {
-                    mode: SearchMode::Vector(VectorMode {
-                        term: interaction.query.clone(),
-                        similarity: Similarity(component.threshold),
-                    }),
-                    limit: Limit(component.max_documents),
-                    offset: SearchOffset(0),
-                    where_filter: Default::default(),
-                    boost: HashMap::new(),
-                    facets: HashMap::new(),
-                    properties: Properties::Star,
-                    indexes: Some(index_ids),
-                    sort_by: None,
-                    user_id: None, // @todo: handle user_id if needed
-                    group_by: None,
+                SearchRequest {
+                    search_params: SearchParams {
+                        mode: SearchMode::Vector(VectorMode {
+                            term: interaction.query.clone(),
+                            similarity: Similarity(component.threshold),
+                        }),
+                        limit: Limit(component.max_documents),
+                        offset: SearchOffset(0),
+                        where_filter: Default::default(),
+                        boost: HashMap::new(),
+                        facets: HashMap::new(),
+                        properties: Properties::Star,
+                        indexes: Some(index_ids),
+                        sort_by: None,
+                        user_id: None, // @todo: handle user_id if needed
+                        group_by: None,
+                    },
+                    search_analytics_event_origin: Some(SearchAnalyticEventOrigin::RAG),
+                    analytics_metadata,
+                    interaction_id: Some(interaction.interaction_id.clone()),
                 },
-                AnalyticSearchEventInvocationType::Answer,
             )
             .map_err(|_| GeneralRagAtError::ReadError)
             .await?;

@@ -32,6 +32,7 @@ use crate::{
                     },
                     merge::{merge_date_field, merge_geopoint_field},
                 },
+                ReadError,
             },
             Offset,
         },
@@ -985,13 +986,10 @@ impl Index {
         &'index self,
         field_name: &str,
         order: SortOrder,
-    ) -> Result<SortedField<'index>> {
+    ) -> Result<SortedField<'index>, ReadError> {
         let Some((field_id, field_type)) = self.path_to_index_id_map.get_filter_field(field_name)
         else {
-            return Err(anyhow::anyhow!(
-                "Field {} is not a filter field",
-                field_name
-            ));
+            return Err(ReadError::SortFieldNotFound(field_name.to_string()));
         };
 
         let uncommitted_fields = self.uncommitted_fields.read().await;
@@ -1000,10 +998,10 @@ impl Index {
         match &field_type {
             FieldType::Number => {
                 if !uncommitted_fields.number_fields.contains_key(&field_id) {
-                    return Err(anyhow::anyhow!(
+                    return Err(ReadError::Generic(anyhow::anyhow!(
                         "Field {} is not a number field",
                         field_name
-                    ));
+                    )));
                 };
 
                 Ok(SortedField {
@@ -1013,13 +1011,13 @@ impl Index {
                     field_type,
                     order,
                 })
-            },
+            }
             FieldType::Bool => {
                 if !uncommitted_fields.bool_fields.contains_key(&field_id) {
-                    return Err(anyhow::anyhow!(
+                    return Err(ReadError::Generic(anyhow::anyhow!(
                         "Field {} is not a bool field",
                         field_name
-                    ));
+                    )));
                 };
 
                 Ok(SortedField {
@@ -1029,16 +1027,15 @@ impl Index {
                     field_type,
                     order,
                 })
-            },
+            }
 
             FieldType::Date => {
-                if !uncommitted_fields.date_fields.contains_key(&field_id)  {
-                    return Err(anyhow::anyhow!(
+                if !uncommitted_fields.date_fields.contains_key(&field_id) {
+                    return Err(ReadError::Generic(anyhow::anyhow!(
                         "Field {} is not a date field",
                         field_name
-                    ));
+                    )));
                 };
-
 
                 Ok(SortedField {
                     uncommitted_fields,
@@ -1047,10 +1044,10 @@ impl Index {
                     field_type,
                     order,
                 })
-            },
-            _ => Err(anyhow::anyhow!(
-                "Only number, date or boolean fields are supported for sorting, but got {:?} for property {:?}",
-                field_type, field_name
+            }
+            _ => Err(ReadError::InvalidSortField(
+                field_name.to_string(),
+                format!("{field_type:?}"),
             )),
         }
     }
@@ -1066,7 +1063,7 @@ impl Index {
             .map(|f| f.get_model())
     }
 
-    pub async fn search(
+    pub async fn calculate_token_score(
         &self,
         search_params: &SearchParams,
         results: &mut HashMap<DocumentId, f32>,

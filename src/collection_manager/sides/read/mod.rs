@@ -6,15 +6,15 @@ pub mod document_storage;
 mod index;
 mod logs;
 pub mod notify;
+mod search;
 pub mod sort;
 
 use axum::extract::State;
-use chrono::Utc;
 use duration_string::DurationString;
-use futures::{Stream, StreamExt};
+use futures::Stream;
 pub use index::*;
 use oramacore_lib::hook_storage::{HookReader, HookReaderError};
-pub use sort::{sort_with_context, SortContext};
+pub use sort::SortContext;
 
 pub use collection::CollectionStats;
 use duration_str::deserialize_duration;
@@ -25,6 +25,11 @@ use std::sync::Arc;
 use std::time::Duration;
 use std::{collections::HashMap, path::PathBuf};
 use tokio::time::{Instant, MissedTickBehavior};
+
+pub use analytics::{
+    AnalyticsHolder, AnalyticsMetadataFromRequest, InteractionAnalyticEventV1,
+    OramaCoreAnalyticConfig, OramaCoreAnalytics, SearchAnalyticEventOrigin,
+};
 
 use anyhow::{Context, Result};
 pub use collection::{IndexFieldStats, IndexFieldStatsType};
@@ -40,37 +45,34 @@ use crate::ai::llms::{self, KnownPrompts, LLMService};
 use crate::ai::tools::{CollectionToolsRuntime, ToolError, ToolsRuntime};
 use crate::ai::training_sets::{TrainingDestination, TrainingSetInterface};
 use crate::ai::RemoteLLMProvider;
-use crate::collection_manager::sides::read::analytics::{
-    AnalyticConfig, AnalyticSearchEvent, AnalyticsStorage,
-};
 pub use crate::collection_manager::sides::read::context::ReadSideContext;
 use crate::collection_manager::sides::read::logs::HookLogs;
 use crate::collection_manager::sides::read::notify::Notifier;
+use crate::collection_manager::sides::read::search::Search;
 use crate::metrics::operations::OPERATION_COUNT;
-use crate::metrics::search::SEARCH_CALCULATION_TIME;
-use crate::metrics::{Empty, SearchCollectionLabels};
+use crate::metrics::Empty;
 use crate::types::{
-    ApiKey, CollectionStatsRequest, GroupedResult, InteractionLLMConfig, SearchMode,
-    SearchModeResult, SearchParams, SearchResult, SearchResultHit, TokenScore, WhereFilter,
+    ApiKey, CollectionStatsRequest, InteractionLLMConfig, SearchMode, SearchModeResult,
+    SearchResult,
 };
 use crate::types::{IndexId, NLPSearchRequest};
 use crate::{ai::AIService, types::CollectionId};
 use oramacore_lib::fs::BufferedFile;
 use oramacore_lib::generic_kv::{KVConfig, KV};
 use oramacore_lib::nlp::NLPService;
+pub use search::SearchRequest;
 
 use super::system_prompts::{SystemPrompt, SystemPromptInterface};
 use super::{
     InputSideChannelType, Offset, OperationReceiver, OperationReceiverCreator, WriteOperation,
 };
-pub use analytics::{AnalyticAnswerEvent, AnalyticSearchEventInvocationType};
 pub use collections::CollectionReadLock;
 use thiserror::Error;
 
 #[derive(Deserialize, Clone)]
 pub struct ReadSideConfig {
     pub master_api_key: Option<ApiKey>,
-    pub analytics: Option<AnalyticConfig>,
+    pub analytics: Option<OramaCoreAnalyticConfig>,
     pub input: InputSideChannelType,
     pub config: IndexesConfig,
 }
@@ -104,6 +106,12 @@ pub enum ReadError {
     IndexNotFound(CollectionId, IndexId),
     #[error("Hook error: {0:?}")]
     Hook(#[from] HookReaderError),
+    #[error("Unknown field for filter: {0:?}")]
+    FilterFieldNotFound(String),
+    #[error("Unknown field for sort: {0:?}")]
+    SortFieldNotFound(String),
+    #[error("Cannot sort by {0:?}. Only number, date or boolean fields are supported for sorting, but got {1:?} for property {0:?}")]
+    InvalidSortField(String, String),
 }
 
 pub struct ReadSide {
@@ -125,7 +133,7 @@ pub struct ReadSide {
 
     hook_logs: HookLogs,
 
-    analytics_storage: Option<AnalyticsStorage>,
+    analytics_storage: Option<OramaCoreAnalytics>,
 
     // Handle to stop the read side
     // This is used to stop the read side when the server is shutting down
@@ -201,7 +209,7 @@ impl ReadSide {
 
         let analytics_storage = if let Some(config) = config.analytics {
             Some(
-                AnalyticsStorage::try_new(data_dir.join("analytics"), config)
+                OramaCoreAnalytics::try_new(data_dir.join("analytics_new"), config)
                     .context("Cannot create analytics storage")?,
             )
         } else {
@@ -428,17 +436,8 @@ impl ReadSide {
         &self,
         read_api_key: ApiKey,
         collection_id: CollectionId,
-        search_params: SearchParams,
-        invocation_type: AnalyticSearchEventInvocationType,
+        request: SearchRequest,
     ) -> Result<SearchResult, ReadError> {
-        let start = Instant::now();
-
-        let limit = search_params.limit;
-        let offset = search_params.offset;
-
-        let has_filter = !search_params.where_filter.is_empty();
-        let has_facets = !search_params.facets.is_empty();
-
         let collection = self
             .collections
             .get_collection(collection_id)
@@ -446,168 +445,14 @@ impl ReadSide {
             .ok_or_else(|| ReadError::NotFound(collection_id))?;
         collection.check_read_api_key(read_api_key, self.master_api_key)?;
 
-        let m = SEARCH_CALCULATION_TIME.create(SearchCollectionLabels {
-            collection: collection_id.to_string().into(),
-            mode: search_params.mode.as_str(),
-            has_filter: if has_filter { "true" } else { "false" },
-            has_facet: if has_facets { "true" } else { "false" },
-        });
+        let search = Search::new(
+            &collection,
+            &self.document_storage,
+            self.analytics_storage.as_ref(),
+            request,
+        );
 
-        let token_scores = collection.search(&search_params).await?;
-
-        let facets = if has_facets {
-            // Orama provides a UI component that shows the search results
-            // and the number of how many documents fall in each variant of field value (facets).
-            // By default, the "all" category is selected and list all the results,
-            // but if a user clicks on a category, it will see the results filtered by that category.
-            // Hence, the second call has filters.
-            // Anyway, the second call re-ask the number for each variant. That means,
-            // the call contains facets and filters, and the returned facets are affected by the chosen category.
-            // So, the user will see the facets number change when it clicks on a category.
-            // And this is weird.
-            // So, the pair (facets, filters) has to be reconsidered:
-            // - we calculate directly the facets if there are no filters
-            // - we recalculate the score without any filters and after the facets
-            // NB: This is not performant, but required for a good UI.
-            //     The FE could reuse the facets calculation of the first call
-            //     keeping the results in memory.
-            let token_scores = if search_params.where_filter.is_empty() {
-                &token_scores
-            } else {
-                let mut search_params_without_filters = search_params.clone();
-                search_params_without_filters.where_filter = WhereFilter {
-                    filter_on_fields: vec![],
-                    and: None,
-                    not: None,
-                    or: None,
-                };
-                &collection.search(&search_params_without_filters).await?
-            };
-
-            Some(
-                collection
-                    .calculate_facets(token_scores, &search_params)
-                    .await?,
-            )
-        } else {
-            None
-        };
-
-        let groups = if let Some(group_by) = &search_params.group_by {
-            let groups = collection
-                .calculate_groups(
-                    &token_scores,
-                    search_params.indexes.as_ref(),
-                    group_by,
-                    search_params.sort_by.as_ref(),
-                    &search_params,
-                )
-                .await?;
-
-            let groups: Vec<_> = futures::stream::iter(groups.into_iter())
-                .filter_map(|(k, ids)| async {
-                    if ids.is_empty() {
-                        return None;
-                    }
-
-                    let docs = self
-                        .document_storage
-                        .get_documents_by_ids(ids.clone())
-                        .await
-                        .ok()?;
-
-                    Some(GroupedResult {
-                        values: k.into_iter().map(|v| v.into()).collect(),
-                        result: docs
-                            .into_iter()
-                            .zip(ids.into_iter())
-                            .take(group_by.max_results)
-                            .map(|(document, doc_id)| {
-                                let id = document
-                                    .as_ref()
-                                    .and_then(|d| d.id.clone())
-                                    .unwrap_or_default();
-
-                                SearchResultHit {
-                                    id,
-                                    score: *token_scores.get(&doc_id).unwrap_or(&0.0),
-                                    document,
-                                }
-                            })
-                            .collect(),
-                    })
-                })
-                .collect()
-                .await;
-
-            Some(groups)
-        } else {
-            None
-        };
-
-        let count = token_scores.len();
-
-        let top_results: Vec<TokenScore> = collection
-            .sort_and_truncate(&token_scores, limit, offset, &search_params)
-            .await?;
-        trace!("Top results: {:?}", top_results);
-
-        let result = top_results
-            .into_iter()
-            .skip(offset.0)
-            .take(limit.0)
-            .collect::<Vec<_>>();
-
-        let docs = self
-            .document_storage
-            .get_documents_by_ids(result.iter().map(|m| m.document_id).collect())
-            .await?;
-
-        trace!("Calculates hits");
-        let hits: Vec<_> = result
-            .into_iter()
-            .zip(docs)
-            .map(|(token_score, document)| {
-                let id = document
-                    .as_ref()
-                    .and_then(|d| d.id.clone())
-                    .unwrap_or_default();
-                SearchResultHit {
-                    id,
-                    score: token_score.score,
-                    document,
-                }
-            })
-            .collect();
-
-        drop(m);
-
-        let result = SearchResult {
-            count,
-            hits,
-            facets,
-            groups,
-        };
-        let result_for_analytics = result.clone();
-
-        let search_time = start.elapsed();
-
-        if let Some(analytics_storage) = self.analytics_storage.as_ref() {
-            if let Err(e) = analytics_storage.add_event(AnalyticSearchEvent {
-                at: Utc::now().timestamp(),
-                collection_id,
-                full_results_json: Some(result_for_analytics),
-                invocation_type,
-                results_count: count,
-                search_time: search_time.into(),
-                user_id: search_params.user_id.clone(),
-                search_params,
-            }) {
-                error!(?e, "Failed to add search event to analytics storage");
-            }
-        }
-
-        Ok(result)
+        search.execute().await
     }
 
     pub async fn nlp_search(
@@ -837,8 +682,8 @@ impl ReadSide {
         &self.hook_logs
     }
 
-    pub fn get_analytics_logs(&self) -> Option<&AnalyticsStorage> {
-        self.analytics_storage.as_ref()
+    pub fn get_analytics_logs(&self) -> Option<OramaCoreAnalytics> {
+        self.analytics_storage.clone()
     }
 
     pub async fn get_default_system_prompt(

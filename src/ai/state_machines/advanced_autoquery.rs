@@ -21,8 +21,9 @@ use crate::types::{
 };
 
 use crate::ai::run_hooks::run_before_retrieval;
-use crate::collection_manager::sides::read::AnalyticSearchEventInvocationType;
-use crate::collection_manager::sides::read::{CollectionStats, ReadSide};
+use crate::collection_manager::sides::read::{
+    CollectionStats, ReadSide, SearchAnalyticEventOrigin, SearchRequest,
+};
 
 // ==== SSE Event Types ====
 
@@ -251,7 +252,6 @@ pub struct AdvancedAutoqueryStateMachine {
     llm_config: Option<InteractionLLMConfig>,
     collection_stats: CollectionStats,
     read_side: Arc<ReadSide>,
-    original_conversation: Arc<Mutex<Vec<InteractionMessage>>>,
     event_sender: Option<mpsc::UnboundedSender<AdvancedAutoqueryEvent>>,
 }
 
@@ -277,17 +277,8 @@ impl AdvancedAutoqueryStateMachine {
             llm_config,
             collection_stats,
             read_side,
-            original_conversation: Arc::new(Mutex::new(vec![])),
             event_sender: None,
         }
-    }
-
-    pub fn with_event_sender(
-        mut self,
-        event_sender: mpsc::UnboundedSender<AdvancedAutoqueryEvent>,
-    ) -> Self {
-        self.event_sender = Some(event_sender);
-        self
     }
 
     /// Send an event if the event sender is available
@@ -428,12 +419,6 @@ impl AdvancedAutoqueryStateMachine {
             data: None,
         })
         .await;
-
-        // Store the original conversation
-        {
-            let mut conv = self.original_conversation.lock().await;
-            *conv = conversation.clone();
-        }
 
         // Initialize state
         {
@@ -1490,8 +1475,12 @@ impl AdvancedAutoqueryStateMachine {
             .search(
                 read_api_key,
                 collection_id,
-                search_params,
-                AnalyticSearchEventInvocationType::NLPSearch,
+                SearchRequest {
+                    search_params,
+                    search_analytics_event_origin: Some(SearchAnalyticEventOrigin::RAG),
+                    analytics_metadata: None,
+                    interaction_id: None,
+                },
             )
             .await
             .map_err(|e| AdvancedAutoqueryError::ExecuteSearchesError(e.to_string()))?;

@@ -1,5 +1,6 @@
 // mod old;
 
+mod analytics;
 mod answer;
 mod api_key_chain;
 mod boost_integration;

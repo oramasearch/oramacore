@@ -9,7 +9,7 @@ use zebo::Zebo;
 use anyhow::{Context, Result};
 use tracing::{error, info, warn};
 
-use crate::types::{Document, DocumentId, RawJSONDocument};
+use crate::types::{DocumentId, RawJSONDocument};
 use oramacore_lib::fs::{create_if_not_exists, read_file};
 
 // 1GB
@@ -43,6 +43,10 @@ impl DocumentStorage {
     }
 
     pub async fn insert_many(&self, docs: &[(DocumentId, ZeboDocument<'_>)]) -> Result<()> {
+        if docs.is_empty() {
+            return Ok(());
+        }
+
         let mut zebo = self.zebo.write().await;
         let space = zebo
             .reserve_space_for(docs)
@@ -258,8 +262,8 @@ impl zebo::Document for ZeboDocument<'_> {
 }
 
 impl<'s> ZeboDocument<'s> {
-    pub fn new(id: Cow<'s, str>, data: Cow<'s, str>) -> Self {
-        ZeboDocument(id, data)
+    pub fn new(id: Cow<'s, str>, content: Cow<'s, str>) -> Self {
+        Self(id, content)
     }
 
     fn from_bytes(bytes: Vec<u8>) -> Result<Self> {

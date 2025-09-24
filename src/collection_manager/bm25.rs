@@ -111,18 +111,6 @@ fn bm25f_normalized_tf(
     tf / (1.0 - b + b * (len / avglen))
 }
 
-#[inline]
-fn bm25f_normalized_tf_cached(
-    term_occurrence_in_field: u32,
-    field_length: u32,
-    cached_params: &CachedFieldParams,
-) -> f32 {
-    let tf = term_occurrence_in_field as f32;
-    let len = field_length as f32;
-
-    tf / (cached_params.one_minus_b + cached_params.b * (len / cached_params.average_field_length))
-}
-
 /// Complete BM25F score calculation using canonical formulation
 ///
 /// # Arguments
@@ -144,14 +132,6 @@ fn bm25f_score(aggregated_score: f32, k: f32, idf: f32) -> f32 {
 struct BM25FFieldContribution {
     normalized_tf: f32,
     weight: f32,
-}
-
-#[derive(Debug, Clone, Copy)]
-struct CachedFieldParams {
-    weight: f32,
-    b: f32,
-    average_field_length: f32,
-    one_minus_b: f32, // Pre-computed (1 - b) for performance
 }
 
 pub enum BM25Scorer<K: Eq + Hash> {
