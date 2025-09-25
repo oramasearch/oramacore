@@ -411,6 +411,7 @@ impl WriteSide {
         let CreateIndexRequest {
             index_id,
             embedding,
+            type_strategy,
         } = req;
 
         let default_string_calculation = if cfg!(test) {
@@ -420,7 +421,9 @@ impl WriteSide {
         };
         let embedding: IndexEmbeddingsCalculation = embedding.unwrap_or(default_string_calculation);
 
-        collection.create_index(index_id, embedding).await?;
+        collection
+            .create_index(index_id, embedding, type_strategy.enum_strategy)
+            .await?;
 
         Ok(())
     }
@@ -608,6 +611,7 @@ impl WriteSide {
         let CreateIndexRequest {
             index_id: new_index_id,
             embedding,
+            ..
         } = req;
 
         collection

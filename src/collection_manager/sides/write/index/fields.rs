@@ -188,11 +188,21 @@ impl IndexFilterField {
     pub fn new_bool_arr(field_id: FieldId, field_path: Box<[String]>) -> Self {
         IndexFilterField::Bool(BoolFilterField::new(field_id, field_path, true))
     }
-    pub fn new_string(field_id: FieldId, field_path: Box<[String]>) -> Self {
-        IndexFilterField::String(StringFilterField::new(field_id, field_path, false))
+    pub fn new_string(
+        field_id: FieldId,
+        field_path: Box<[String]>,
+        strategy: EnumStrategy,
+    ) -> Self {
+        IndexFilterField::String(StringFilterField::new(
+            field_id, field_path, false, strategy,
+        ))
     }
-    pub fn new_string_arr(field_id: FieldId, field_path: Box<[String]>) -> Self {
-        IndexFilterField::String(StringFilterField::new(field_id, field_path, true))
+    pub fn new_string_arr(
+        field_id: FieldId,
+        field_path: Box<[String]>,
+        strategy: EnumStrategy,
+    ) -> Self {
+        IndexFilterField::String(StringFilterField::new(field_id, field_path, true, strategy))
     }
     pub fn new_date(field_id: FieldId, field_path: Box<[String]>) -> Self {
         IndexFilterField::Date(DateFilterField::new(field_id, field_path, false))
@@ -246,7 +256,7 @@ impl IndexFilterField {
         }
     }
 
-    pub fn load_from(dump: SerializedFilterFieldType) -> Self {
+    pub fn load_from(dump: SerializedFilterFieldType, enum_strategy: EnumStrategy) -> Self {
         match dump {
             SerializedFilterFieldType::Number(field) => IndexFilterField::Number(
                 NumberFilterField::new(field.field_id, field.field_path, field.is_array),
@@ -256,9 +266,14 @@ impl IndexFilterField {
                 field.field_path,
                 field.is_array,
             )),
-            SerializedFilterFieldType::String(field) => IndexFilterField::String(
-                StringFilterField::new(field.field_id, field.field_path, field.is_array),
-            ),
+            SerializedFilterFieldType::String(field) => {
+                IndexFilterField::String(StringFilterField::new(
+                    field.field_id,
+                    field.field_path,
+                    field.is_array,
+                    enum_strategy,
+                ))
+            }
             SerializedFilterFieldType::Date(field) => IndexFilterField::Date(DateFilterField::new(
                 field.field_id,
                 field.field_path,
@@ -363,18 +378,31 @@ impl BoolFilterField {
     }
 }
 
+#[derive(Debug, Serialize, Deserialize, Copy, Clone)]
+pub enum EnumStrategy {
+    Explicit,
+    StringLength(usize),
+}
+
 pub struct StringFilterField {
     field_id: FieldId,
     field_path: Box<[String]>,
     is_array: bool,
+    strategy: EnumStrategy,
 }
 
 impl StringFilterField {
-    pub fn new(field_id: FieldId, field_path: Box<[String]>, is_array: bool) -> Self {
+    pub fn new(
+        field_id: FieldId,
+        field_path: Box<[String]>,
+        is_array: bool,
+        strategy: EnumStrategy,
+    ) -> Self {
         Self {
             field_id,
             field_path,
             is_array,
+            strategy,
         }
     }
 
@@ -394,12 +422,22 @@ impl StringFilterField {
             _ => vec![],
         };
 
-        let data = data
-            .into_iter()
-            // TODO: put this "25" in the collection config
-            .filter(|s| !s.is_empty() && s.len() < 25)
-            .map(|s| IndexedValue::FilterString(self.field_id, s))
-            .collect();
+        let data = match &self.strategy {
+            EnumStrategy::StringLength(length) => data
+                .into_iter()
+                .filter(|s| !s.is_empty() && s.len() <= *length)
+                .map(|s| IndexedValue::FilterString(self.field_id, s))
+                .collect(),
+            EnumStrategy::Explicit => data
+                .into_iter()
+                .filter_map(|s| {
+                    oramacore_lib::casting::enumerative::parse(&s)
+                        .ok()
+                        .flatten()
+                })
+                .map(|s| IndexedValue::FilterString(self.field_id, s))
+                .collect(),
+        };
 
         Ok(data)
     }

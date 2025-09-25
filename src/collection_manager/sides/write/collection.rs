@@ -12,7 +12,9 @@ use crate::{
     ai::OramaModel,
     collection_manager::sides::{
         field_name_to_path,
-        write::{context::WriteSideContext, OramaModelSerializable, WriteError},
+        write::{
+            context::WriteSideContext, index::EnumStrategy, OramaModelSerializable, WriteError,
+        },
         CollectionWriteOperation, DocumentStorageWriteOperation, ReplaceIndexReason,
         WriteOperation,
     },
@@ -229,6 +231,7 @@ impl CollectionWriter {
         &self,
         index_id: IndexId,
         embedding: IndexEmbeddingsCalculation,
+        enum_strategy: EnumStrategy,
     ) -> Result<(), WriteError> {
         let mut indexes = self.indexes.write().await;
         if indexes.contains_key(&index_id) {
@@ -246,6 +249,7 @@ impl CollectionWriter {
             None,
             self.get_text_parser(default_locale),
             self.context.clone(),
+            enum_strategy,
         )
         .await
         .context("Cannot create index")?;
@@ -313,6 +317,7 @@ impl CollectionWriter {
             Some(copy_from),
             self.get_text_parser(default_locale),
             self.context.clone(),
+            copy_from_index.get_enum_strategy(),
         )
         .await
         .context("Cannot create index")?;

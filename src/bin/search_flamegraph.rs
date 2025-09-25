@@ -218,6 +218,7 @@ async fn main() -> Result<()> {
                 CreateIndexRequest {
                     index_id,
                     embedding: Some(IndexEmbeddingsCalculation::AllProperties),
+                    type_strategy: Default::default(),
                 },
             )
             .await

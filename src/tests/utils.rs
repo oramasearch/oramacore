@@ -562,6 +562,7 @@ impl TestCollectionClient {
                 CreateIndexRequest {
                     index_id,
                     embedding: None,
+                    type_strategy: Default::default(),
                 },
             )
             .await?;
@@ -604,6 +605,7 @@ impl TestCollectionClient {
                 CreateIndexRequest {
                     index_id,
                     embedding: None,
+                    type_strategy: Default::default(),
                 },
             )
             .await?;
