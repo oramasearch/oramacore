@@ -1190,7 +1190,7 @@ impl WriteSide {
         &self,
         collection_id: CollectionId,
         write_api_key: WriteApiKey,
-    ) -> Result<CollectionReadLock, WriteError> {
+    ) -> Result<CollectionReadLock<'_>, WriteError> {
         let collection = self
             .collections
             .get_collection(collection_id)
