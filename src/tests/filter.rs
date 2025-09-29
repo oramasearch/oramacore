@@ -739,7 +739,22 @@ async fn test_enum_strategy() {
 
     assert_eq!(output.count, 50);
 
+    let stats = collection_client.reader_stats().await.unwrap();
+
+    assert_eq!(
+        stats.indexes_stats[0].type_parsing_strategies.enum_strategy,
+        EnumStrategy::Explicit
+    );
+
     test_context.commit_all().await.unwrap();
+
+    let stats = collection_client.reader_stats().await.unwrap();
+
+    assert_eq!(
+        stats.indexes_stats[0].type_parsing_strategies.enum_strategy,
+        EnumStrategy::Explicit
+    );
+
     let new_test_context = test_context.reload().await;
 
     let new_collection = new_test_context
