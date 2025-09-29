@@ -34,6 +34,7 @@ use crate::{
                 },
                 ReadError,
             },
+            write::index::EnumStrategy,
             Offset,
         },
     },
@@ -44,7 +45,7 @@ use crate::{
     types::{
         DocumentId, FacetDefinition, FacetResult, Filter, FulltextMode, HybridMode, IndexId, Limit,
         Number, NumberFilter, Properties, SearchMode, SearchModeResult, SearchParams, Similarity,
-        SortOrder, Threshold, VectorMode, WhereFilter,
+        SortOrder, Threshold, TypeParsingStrategies, VectorMode, WhereFilter,
     },
 };
 use oramacore_lib::fs::{create_if_not_exists, BufferedFile};
@@ -149,6 +150,7 @@ pub struct Index {
     updated_at: DateTime<Utc>,
 
     pin_rules_reader: RwLock<PinRulesReader<DocumentId>>,
+    enum_strategy: EnumStrategy,
 }
 
 impl Index {
@@ -157,6 +159,7 @@ impl Index {
         text_parser: Arc<TextParser>,
         context: ReadSideContext,
         offload_config: OffloadFieldConfig,
+        enum_strategy: EnumStrategy,
     ) -> Self {
         Self {
             id,
@@ -182,6 +185,8 @@ impl Index {
             updated_at: Utc::now(),
 
             pin_rules_reader: RwLock::new(PinRulesReader::empty()),
+
+            enum_strategy,
         }
     }
 
@@ -309,6 +314,7 @@ impl Index {
             updated_at: dump.updated_at,
 
             pin_rules_reader: RwLock::new(PinRulesReader::try_new(data_dir.join("pin_rules"))?),
+            enum_strategy: dump.enum_strategy,
         })
     }
 
@@ -726,6 +732,7 @@ impl Index {
             path_to_index_id_map: Vec::new(),
             created_at: self.created_at,
             updated_at: self.updated_at,
+            enum_strategy: self.enum_strategy,
         });
 
         drop(uncommitted_fields);
@@ -1365,6 +1372,9 @@ impl Index {
             fields_stats,
             created_at: self.created_at,
             updated_at: self.updated_at,
+            type_parsing_strategies: TypeParsingStrategies {
+                enum_strategy: self.enum_strategy,
+            },
         })
     }
 
@@ -2318,6 +2328,7 @@ pub struct IndexStats {
     pub fields_stats: Vec<IndexFieldStats>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+    pub type_parsing_strategies: TypeParsingStrategies,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
@@ -2349,7 +2360,10 @@ struct DumpV1 {
     path_to_index_id_map: Vec<(Box<[String]>, (FieldId, FieldType))>,
     created_at: DateTime<Utc>,
     updated_at: DateTime<Utc>,
+    #[serde(default)]
+    enum_strategy: EnumStrategy,
 }
+
 #[derive(Debug, Serialize, Deserialize)]
 enum Dump {
     V1(DumpV1),

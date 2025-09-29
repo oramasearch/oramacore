@@ -258,9 +258,10 @@ impl CollectionWriter {
             .op_sender
             .send(WriteOperation::Collection(
                 self.id,
-                CollectionWriteOperation::CreateIndex2 {
+                CollectionWriteOperation::CreateIndex3 {
                     index_id,
                     locale: default_locale,
+                    enum_strategy,
                 },
             ))
             .await
@@ -326,9 +327,10 @@ impl CollectionWriter {
             .op_sender
             .send(WriteOperation::Collection(
                 self.id,
-                CollectionWriteOperation::CreateTemporaryIndex2 {
+                CollectionWriteOperation::CreateTemporaryIndex3 {
                     index_id: new_index_id,
                     locale: default_locale,
+                    enum_strategy: copy_from_index.get_enum_strategy(),
                 },
             ))
             .await

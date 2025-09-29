@@ -1,5 +1,8 @@
 use crate::{
-    collection_manager::sides::write::{index::IndexedValue, OramaModelSerializable},
+    collection_manager::sides::write::{
+        index::{EnumStrategy, IndexedValue},
+        OramaModelSerializable,
+    },
     types::{
         ApiKey, CollectionId, DocumentFields, DocumentId, FieldId, IndexId, Number, RawJSONDocument,
     },
@@ -200,9 +203,19 @@ pub enum CollectionWriteOperation {
         index_id: IndexId,
         locale: Locale,
     },
+    CreateIndex3 {
+        index_id: IndexId,
+        locale: Locale,
+        enum_strategy: EnumStrategy,
+    },
     CreateTemporaryIndex2 {
         index_id: IndexId,
         locale: Locale,
+    },
+    CreateTemporaryIndex3 {
+        index_id: IndexId,
+        locale: Locale,
+        enum_strategy: EnumStrategy,
     },
     ReplaceIndex {
         reason: ReplaceIndexReason,
@@ -362,6 +375,9 @@ impl WriteOperation {
             WriteOperation::Collection(_, CollectionWriteOperation::CreateIndex2 { .. }) => {
                 "create_index"
             }
+            WriteOperation::Collection(_, CollectionWriteOperation::CreateIndex3 { .. }) => {
+                "create_index"
+            }
             WriteOperation::Collection(
                 _,
                 CollectionWriteOperation::Hook(HookOperation::Delete(_)),
@@ -373,6 +389,10 @@ impl WriteOperation {
             WriteOperation::Collection(
                 _,
                 CollectionWriteOperation::CreateTemporaryIndex2 { .. },
+            ) => "create_temp_index",
+            WriteOperation::Collection(
+                _,
+                CollectionWriteOperation::CreateTemporaryIndex3 { .. },
             ) => "create_temp_index",
             WriteOperation::Collection(_, CollectionWriteOperation::ReplaceIndex { .. }) => {
                 "substitute_collection"

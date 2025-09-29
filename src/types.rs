@@ -1747,7 +1747,7 @@ impl<'de> Deserialize<'de> for IndexEmbeddingsCalculation {
     }
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct TypeParsingStrategies {
     pub enum_strategy: EnumStrategy,
 }

@@ -378,10 +378,16 @@ impl BoolFilterField {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, Copy, Clone)]
+#[derive(Debug, Serialize, Deserialize, Copy, Clone, PartialEq)]
 pub enum EnumStrategy {
     Explicit,
     StringLength(usize),
+}
+
+impl Default for EnumStrategy {
+    fn default() -> Self {
+        EnumStrategy::StringLength(25) // made for backward compatibility
+    }
 }
 
 pub struct StringFilterField {
