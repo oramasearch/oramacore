@@ -23,10 +23,12 @@ use crate::{
             CommittedDateFieldStats, CommittedGeoPointFieldStats, ReadError,
             UncommittedDateFieldStats, UncommittedGeoPointFieldStats,
         },
+        write::index::EnumStrategy,
         CollectionWriteOperation, Offset, ReplaceIndexReason,
     },
     types::{
         ApiKey, CollectionId, CollectionStatsRequest, FieldId, IndexId, InteractionMessage, Role,
+        TypeParsingStrategies,
     },
 };
 
@@ -533,6 +535,29 @@ impl CollectionReader {
                     self.context.nlp_service.get(locale),
                     self.context.clone(),
                     self.offload_config,
+                    EnumStrategy::default(),
+                );
+                let contains = get_index_in_vector(&indexes_lock, index_id).is_some();
+                if contains {
+                    warn!("Index {} already exists", index_id);
+                    debug_panic!("Index {} already exists", index_id);
+                } else {
+                    indexes_lock.push(index);
+                }
+                drop(indexes_lock);
+            }
+            CollectionWriteOperation::CreateIndex3 {
+                index_id,
+                locale,
+                enum_strategy,
+            } => {
+                let mut indexes_lock = self.indexes.write().await;
+                let index = Index::new(
+                    index_id,
+                    self.context.nlp_service.get(locale),
+                    self.context.clone(),
+                    self.offload_config,
+                    enum_strategy,
                 );
                 let contains = get_index_in_vector(&indexes_lock, index_id).is_some();
                 if contains {
@@ -550,6 +575,29 @@ impl CollectionReader {
                     self.context.nlp_service.get(locale),
                     self.context.clone(),
                     self.offload_config,
+                    EnumStrategy::default(),
+                );
+                let contains = get_index_in_vector(&temp_indexes_lock, index_id).is_some();
+                if contains {
+                    warn!("Temp index {} already exists", index_id);
+                    debug_panic!("Temp index {} already exists", index_id);
+                } else {
+                    temp_indexes_lock.push(index);
+                }
+                drop(temp_indexes_lock);
+            }
+            CollectionWriteOperation::CreateTemporaryIndex3 {
+                index_id,
+                locale,
+                enum_strategy,
+            } => {
+                let mut temp_indexes_lock = self.temp_indexes.write().await;
+                let index = Index::new(
+                    index_id,
+                    self.context.nlp_service.get(locale),
+                    self.context.clone(),
+                    self.offload_config,
+                    enum_strategy,
                 );
                 let contains = get_index_in_vector(&temp_indexes_lock, index_id).is_some();
                 if contains {

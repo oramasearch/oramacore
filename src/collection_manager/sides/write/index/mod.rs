@@ -36,7 +36,7 @@ use crate::{
 use oramacore_lib::fs::BufferedFile;
 use oramacore_lib::nlp::{locales::Locale, TextParser};
 
-pub use fields::{FieldType, GeoPoint, IndexedValue, OramaModelSerializable};
+pub use fields::{EnumStrategy, FieldType, GeoPoint, IndexedValue, OramaModelSerializable};
 use oramacore_lib::pin_rules::{PinRuleOperation, PinRulesWriter};
 
 #[derive(Clone)]
@@ -66,6 +66,8 @@ pub struct Index {
     runtime_index_id: Option<IndexId>,
 
     pin_rules_writer: RwLock<PinRulesWriter>,
+
+    enum_strategy: EnumStrategy,
 }
 
 impl Index {
@@ -75,6 +77,7 @@ impl Index {
         runtime_index_id: Option<IndexId>,
         text_parser: Arc<TextParser>,
         context: WriteSideContext,
+        enum_strategy: EnumStrategy,
     ) -> Result<Self> {
         let field_id = 0;
         let score_fields = vec![];
@@ -101,6 +104,8 @@ impl Index {
             runtime_index_id,
 
             pin_rules_writer: RwLock::new(PinRulesWriter::empty()?),
+
+            enum_strategy,
         })
     }
 
@@ -123,6 +128,7 @@ impl Index {
                 score_fields: dump.score_fields,
                 created_at: dump.created_at,
                 runtime_index_id: None,
+                enum_strategy: get_default_enum_strategy(),
             },
             IndexDump::V2(dump) => dump,
         };
@@ -130,7 +136,7 @@ impl Index {
         let filter_fields = dump
             .filter_fields
             .into_iter()
-            .map(IndexFilterField::load_from)
+            .map(|field| IndexFilterField::load_from(field, dump.enum_strategy))
             .collect();
         let score_fields = dump
             .score_fields
@@ -160,6 +166,8 @@ impl Index {
             runtime_index_id: dump.runtime_index_id,
 
             pin_rules_writer: RwLock::new(PinRulesWriter::try_new(data_dir.join("pin_rules"))?),
+
+            enum_strategy: dump.enum_strategy,
         })
     }
 
@@ -181,6 +189,10 @@ impl Index {
 
     pub fn created_at(&self) -> DateTime<Utc> {
         self.created_at
+    }
+
+    pub fn get_enum_strategy(&self) -> EnumStrategy {
+        self.enum_strategy
     }
 
     pub async fn get_embedding_field(
@@ -285,6 +297,7 @@ impl Index {
             filter_fields: filter_fields.iter().map(|f| f.serialize()).collect(),
             score_fields: score_fields.iter().map(|f| f.serialize()).collect(),
             created_at: self.created_at,
+            enum_strategy: self.enum_strategy,
         });
         drop(filter_fields);
         drop(score_fields);
@@ -674,7 +687,13 @@ impl Index {
             let (filter, score) = match f {
                 F::AlreadyInserted => continue,
                 F::Bool(v) | F::Number(v) | F::String(v) | F::Array(v) | F::GeoPoint(v) => {
-                    calculate_fields_for(&k, &v, &self.text_parser, &self.field_id_generator)
+                    calculate_fields_for(
+                        &k,
+                        &v,
+                        &self.text_parser,
+                        &self.field_id_generator,
+                        self.enum_strategy,
+                    )
                 }
             };
 
@@ -755,6 +774,7 @@ fn calculate_fields_for(
     value: &Value,
     text_parser: &Arc<TextParser>,
     field_id_generator: &AtomicU16,
+    enum_strategy: EnumStrategy,
 ) -> (Option<IndexFilterField>, Option<IndexScoreField>) {
     let mut filter_field = None;
     let mut score_field = None;
@@ -784,7 +804,8 @@ fn calculate_fields_for(
                 let field = IndexFilterField::new_date(generate_id(), field_path.clone());
                 filter_field = Some(field);
             } else {
-                let field = IndexFilterField::new_string(generate_id(), field_path.clone());
+                let field =
+                    IndexFilterField::new_string(generate_id(), field_path.clone(), enum_strategy);
                 filter_field = Some(field);
             }
 
@@ -810,7 +831,11 @@ fn calculate_fields_for(
                     filter_field = Some(field);
                 }
                 Value::String(_) => {
-                    let field = IndexFilterField::new_string_arr(generate_id(), field_path.clone());
+                    let field = IndexFilterField::new_string_arr(
+                        generate_id(),
+                        field_path.clone(),
+                        enum_strategy,
+                    );
                     filter_field = Some(field);
 
                     let field = IndexScoreField::new_string_arr(
@@ -917,6 +942,9 @@ struct IndexDumpV1 {
     score_fields: Vec<SerializedScoreFieldType>,
 
     created_at: DateTime<Utc>,
+
+    #[serde(default = "get_default_enum_strategy")]
+    enum_strategy: EnumStrategy,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -930,6 +958,9 @@ struct IndexDumpV2 {
     created_at: DateTime<Utc>,
 
     runtime_index_id: Option<IndexId>,
+
+    #[serde(default = "get_default_enum_strategy")]
+    enum_strategy: EnumStrategy,
 }
 
 pub struct DocIdStorageReadLock<'index> {
@@ -942,4 +973,8 @@ impl Deref for DocIdStorageReadLock<'_> {
     fn deref(&self) -> &Self::Target {
         &self.doc_id_storage
     }
+}
+
+fn get_default_enum_strategy() -> EnumStrategy {
+    EnumStrategy::StringLength(25)
 }

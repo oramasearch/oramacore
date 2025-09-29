@@ -35,16 +35,16 @@ use crate::{
             SearchRequest,
         },
         write::{
-            CollectionsWriterConfig, OramaModelSerializable, TempIndexCleanupConfig, WriteError,
-            WriteSide, WriteSideConfig,
+            index::EnumStrategy, CollectionsWriterConfig, OramaModelSerializable,
+            TempIndexCleanupConfig, WriteError, WriteSide, WriteSideConfig,
         },
         InputSideChannelType, OutputSideChannelType, ReplaceIndexReason,
     },
     types::{
         ApiKey, CollectionId, CollectionStatsRequest, CreateCollection, CreateIndexRequest,
         DescribeCollectionResponse, DocumentList, IndexId, InsertDocumentsResult, LanguageDTO,
-        ReplaceIndexRequest, SearchParams, SearchResult, UpdateDocumentRequest,
-        UpdateDocumentsResult, WriteApiKey,
+        ReplaceIndexRequest, SearchParams, SearchResult, TypeParsingStrategies,
+        UpdateDocumentRequest, UpdateDocumentsResult, WriteApiKey,
     },
     web_server::HttpConfig,
     OramacoreConfig,
@@ -554,6 +554,14 @@ pub struct TestCollectionClient {
 }
 impl TestCollectionClient {
     pub async fn create_index(&self) -> Result<TestIndexClient> {
+        self.create_index_with_explicit_type_strategy(TypeParsingStrategies::default())
+            .await
+    }
+
+    pub async fn create_index_with_explicit_type_strategy(
+        &self,
+        type_strategy: TypeParsingStrategies,
+    ) -> Result<TestIndexClient> {
         let index_id = Self::generate_index_id("index");
         self.writer
             .create_index(
@@ -562,6 +570,7 @@ impl TestCollectionClient {
                 CreateIndexRequest {
                     index_id,
                     embedding: None,
+                    type_strategy,
                 },
             )
             .await?;
@@ -604,6 +613,7 @@ impl TestCollectionClient {
                 CreateIndexRequest {
                     index_id,
                     embedding: None,
+                    type_strategy: Default::default(),
                 },
             )
             .await?;

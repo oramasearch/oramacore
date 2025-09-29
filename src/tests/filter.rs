@@ -1,7 +1,7 @@
 use serde_json::json;
 
 use crate::{
-    collection_manager::sides::read::ReadError,
+    collection_manager::sides::{read::ReadError, write::index::EnumStrategy},
     tests::utils::{init_log, TestContext},
     types::SearchParams,
 };
@@ -695,4 +695,98 @@ async fn test_date() {
     assert_eq!(output.count, 1);
 
     drop(test_context);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_enum_strategy() {
+    init_log();
+
+    let test_context = TestContext::new().await;
+    let collection_client = test_context.create_collection().await.unwrap();
+    let index_client = collection_client
+        .create_index_with_explicit_type_strategy(crate::types::TypeParsingStrategies {
+            enum_strategy: EnumStrategy::Explicit,
+        })
+        .await
+        .unwrap();
+    let docs = (0..100)
+        .map(|i| {
+            json!({
+                "id": i.to_string(),
+                "text": "text ".repeat(i + 1),
+                "enum": if i % 2 == 0 { "enum('even')" } else { "enum(`odd`)" },
+            })
+        })
+        .collect::<Vec<_>>();
+    index_client
+        .insert_documents(json!(docs).try_into().unwrap())
+        .await
+        .unwrap();
+
+    let output = collection_client
+        .search(
+            json!({
+                "term": "text",
+                "where": {
+                    "enum": "even"
+                }
+            })
+            .try_into()
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(output.count, 50);
+
+    let stats = collection_client.reader_stats().await.unwrap();
+
+    assert_eq!(
+        stats.indexes_stats[0].type_parsing_strategies.enum_strategy,
+        EnumStrategy::Explicit
+    );
+
+    test_context.commit_all().await.unwrap();
+
+    let stats = collection_client.reader_stats().await.unwrap();
+
+    assert_eq!(
+        stats.indexes_stats[0].type_parsing_strategies.enum_strategy,
+        EnumStrategy::Explicit
+    );
+
+    let new_test_context = test_context.reload().await;
+
+    let new_collection = new_test_context
+        .get_test_collection_client(
+            collection_client.collection_id,
+            collection_client.write_api_key,
+            collection_client.read_api_key,
+        )
+        .unwrap();
+
+    let output = new_collection
+        .search(
+            json!({
+                "term": "text",
+                "where": {
+                    "enum": "even"
+                }
+            })
+            .try_into()
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(output.count, 50);
+
+    let stats = new_collection.reader_stats().await.unwrap();
+
+    assert_eq!(
+        stats.indexes_stats[0].type_parsing_strategies.enum_strategy,
+        EnumStrategy::Explicit
+    );
+
+    drop(new_test_context);
 }
