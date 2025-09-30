@@ -16,7 +16,6 @@ use search_context::FullTextSearchContext;
 use serde::{Deserialize, Serialize};
 use tokio::sync::{RwLock, RwLockReadGuard};
 use tracing::{debug, error, info, trace, warn};
-use tracing_subscriber::field::debug;
 use uncommitted_field::*;
 
 use crate::{

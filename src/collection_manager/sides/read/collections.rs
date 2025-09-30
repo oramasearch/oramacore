@@ -66,7 +66,7 @@ impl CollectionsReader {
 
         let base_dir_for_collections = data_dir.join("collections");
         let mut collections: HashMap<CollectionId, CollectionReader> = HashMap::with_capacity(
-            collections_info.collection_ids.len() - collections_info.deleted_collection_ids.len()
+            collections_info.collection_ids.len() - collections_info.deleted_collection_ids.len(),
         );
         for collection_id in collections_info.collection_ids {
             if collections_info

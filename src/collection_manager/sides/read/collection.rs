@@ -28,7 +28,6 @@ use crate::{
     },
     types::{
         ApiKey, CollectionId, CollectionStatsRequest, FieldId, IndexId, InteractionMessage, Role,
-        TypeParsingStrategies,
     },
 };
 

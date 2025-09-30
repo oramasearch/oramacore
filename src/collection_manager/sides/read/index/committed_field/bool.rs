@@ -5,7 +5,7 @@ use std::{
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
-use tracing::{debug, info};
+use tracing::info;
 
 use crate::types::DocumentId;
 use oramacore_lib::data_structures::ordered_key::BoundedValue;
@@ -76,12 +76,13 @@ impl CommittedBoolField {
             Ok(file) => {
                 info!("Found bool_map.bin, loading from it");
                 bincode::deserialize_from::<_, HashMap<bool, HashSet<DocumentId>>>(file)
-                .context("Failed to deserialize bool_map.bin")?
-            },
+                    .context("Failed to deserialize bool_map.bin")?
+            }
             Err(_) => {
                 info!("bool_map.bin not found, reconstructing from OrderedKeyIndex");
                 use oramacore_lib::data_structures::ordered_key::OrderedKeyIndex;
-                let inner = match OrderedKeyIndex::<BoolWrapper, DocumentId>::load(data_dir.clone()) {
+                let inner = match OrderedKeyIndex::<BoolWrapper, DocumentId>::load(data_dir.clone())
+                {
                     Ok(index) => index,
                     Err(e) => {
                         info!("---- Failed to load OrderedKeyIndex: {}", e);
