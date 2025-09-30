@@ -16,6 +16,7 @@ use search_context::FullTextSearchContext;
 use serde::{Deserialize, Serialize};
 use tokio::sync::{RwLock, RwLockReadGuard};
 use tracing::{debug, error, info, trace, warn};
+use tracing_subscriber::field::debug;
 use uncommitted_field::*;
 
 use crate::{
@@ -196,23 +197,27 @@ impl Index {
         context: ReadSideContext,
         offload_config: OffloadFieldConfig,
     ) -> Result<Self> {
+        debug!("Reading index info");
         let dump: Dump = BufferedFile::open(data_dir.join("index.json"))
             .context("Cannot open index.json")?
             .read_json_data()
             .context("Cannot read index.json")?;
         let Dump::V1(dump) = dump;
+        debug!("Index info read");
 
         debug_assert_eq!(
             dump.id, index_id,
             "Index id mismatch: expected {:?}, got {:?}",
             index_id, dump.id
         );
+        debug!("DONE");
 
         let mut filter_fields: HashMap<Box<[String]>, (FieldId, FieldType)> = Default::default();
         let mut score_fields: HashMap<Box<[String]>, (FieldId, FieldType)> = Default::default();
 
         let mut uncommitted_fields = UncommittedFields::default();
         let mut committed_fields = CommittedFields::default();
+        debug!("Loading bool fields");
         for (field_id, info) in dump.bool_field_ids {
             filter_fields.insert(info.field_path.clone(), (field_id, FieldType::Bool));
 
@@ -220,9 +225,14 @@ impl Index {
                 field_id,
                 UncommittedBoolField::empty(info.field_path.clone()),
             );
+            debug!("CommittedBoolField::try_load for field_id {:?}", field_id);
             let field = CommittedBoolField::try_load(info).context("Cannot load bool field")?;
+            debug!("DONE");
             committed_fields.bool_fields.insert(field_id, field);
         }
+        debug!("Bool fields loaded");
+
+        debug!("Loading number_field_ids");
         for (field_id, info) in dump.number_field_ids {
             filter_fields.insert(info.field_path.clone(), (field_id, FieldType::Number));
 
@@ -233,6 +243,9 @@ impl Index {
             let field = CommittedNumberField::try_load(info).context("Cannot load number field")?;
             committed_fields.number_fields.insert(field_id, field);
         }
+        debug!("Number fields loaded");
+
+        debug!("Loading date_field_ids");
         for (field_id, info) in dump.date_field_ids {
             filter_fields.insert(info.field_path.clone(), (field_id, FieldType::Date));
 
@@ -243,6 +256,8 @@ impl Index {
             let field = CommittedDateField::try_load(info).context("Cannot load date field")?;
             committed_fields.date_fields.insert(field_id, field);
         }
+
+        debug!("Loading geopoint_field_ids");
         for (field_id, info) in dump.geopoint_field_ids {
             filter_fields.insert(info.field_path.clone(), (field_id, FieldType::GeoPoint));
 
@@ -254,6 +269,8 @@ impl Index {
                 CommittedGeoPointField::try_load(info).context("Cannot load geopoint field")?;
             committed_fields.geopoint_fields.insert(field_id, field);
         }
+
+        debug!("Loading string_filter_field_ids");
         for (field_id, info) in dump.string_filter_field_ids {
             filter_fields.insert(info.field_path.clone(), (field_id, FieldType::StringFilter));
 
@@ -267,6 +284,8 @@ impl Index {
                 .string_filter_fields
                 .insert(field_id, field);
         }
+
+        debug!("Loading string_field_ids");
         for (field_id, info) in dump.string_field_ids {
             score_fields.insert(info.field_path.clone(), (field_id, FieldType::String));
 
@@ -278,6 +297,8 @@ impl Index {
                 .context("Cannot load string field")?;
             committed_fields.string_fields.insert(field_id, field);
         }
+
+        debug!("Loading vector_field_ids");
         for (field_id, info) in dump.vector_field_ids {
             score_fields.insert(info.field_path.clone(), (field_id, FieldType::Vector));
 
@@ -289,6 +310,7 @@ impl Index {
                 .context("Cannot load vector field")?;
             committed_fields.vector_fields.insert(field_id, field);
         }
+        debug!("Vector fields loaded");
 
         Ok(Self {
             id: dump.id,

@@ -13,7 +13,7 @@ use orama_js_pool::OutputChannel;
 use oramacore_lib::hook_storage::{HookReader, HookType};
 use serde::{Deserialize, Serialize};
 use tokio::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 
 use crate::{
     ai::advanced_autoquery::{AdvancedAutoQuery, AdvancedAutoQuerySteps, QueryMappedSearchResult},
@@ -113,14 +113,17 @@ impl CollectionReader {
         data_dir: PathBuf,
         offload_config: OffloadFieldConfig,
     ) -> Result<Self> {
+        debug!("Loading collection info");
         let dump: Dump = BufferedFile::open(data_dir.join("collection.json"))
             .context("Cannot open collection.json")?
             .read_json_data()
             .context("Cannot read collection.json")?;
         let Dump::V1(dump) = dump;
+        debug!("Collection info loaded");
 
         let mut indexes: Vec<Index> = Vec::with_capacity(dump.index_ids.len());
         for index_id in dump.index_ids {
+            debug!("Loading index {:?}", index_id);
             let index = Index::try_load(
                 index_id,
                 data_dir.join("indexes").join(index_id.as_str()),
@@ -128,10 +131,12 @@ impl CollectionReader {
                 offload_config,
             )?;
             indexes.push(index);
+            debug!("Index {:?} loaded", index_id);
         }
 
         let mut temp_indexes: Vec<Index> = Vec::with_capacity(dump.temp_index_ids.len());
         for index_id in dump.temp_index_ids {
+            debug!("Loading temp index {:?}", index_id);
             let index = Index::try_load(
                 index_id,
                 data_dir.join("temp_indexes").join(index_id.as_str()),
@@ -139,6 +144,7 @@ impl CollectionReader {
                 offload_config,
             )?;
             temp_indexes.push(index);
+            debug!("Temp index {:?} loaded", index_id);
         }
 
         let document_count_estimation = indexes.iter().map(|i| i.document_count()).sum::<u64>();
