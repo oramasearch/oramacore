@@ -1417,7 +1417,7 @@ impl AnswerStateMachine {
                 .get_hook_storage(read_api_key, collection_id)
                 .await
                 .map_err(|e| AnswerError::HookError(e.to_string()))?;
-            let lock = hook_storage.read().await;
+            let lock = hook_storage.read("run_before_retrieval").await;
             let params = run_before_retrieval(
                 &lock,
                 params.clone(),
@@ -1472,7 +1472,7 @@ impl AnswerStateMachine {
             .get_hook_storage(read_api_key, collection_id)
             .await
             .map_err(|e| AnswerError::HookError(e.to_string()))?;
-        let lock = hook_storage.read().await;
+        let lock = hook_storage.read("run_before_answer").await;
         let (variables, system_prompt) = run_before_answer(
             &lock,
             (variables, system_prompt),

@@ -8,7 +8,7 @@ use anyhow::{Context, Result};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
-use tokio::sync::{mpsc::Sender, RwLock};
+use tokio::sync::mpsc::Sender;
 
 use crate::{
     ai::{
@@ -19,6 +19,7 @@ use crate::{
         write::{embedding::MultiEmbeddingCalculationRequest, WriteSideContext},
         Term, TermStringField,
     },
+    lock::OramaAsyncLock,
     types::{CollectionId, DocumentId, FieldId, IndexId, Number, OramaDate, SerializableNumber},
 };
 
@@ -817,7 +818,7 @@ pub struct EmbeddingField {
     chunker: Chunker,
     calculation: EmbeddingStringCalculation,
     embedding_sender: Sender<MultiEmbeddingCalculationRequest>,
-    embeddings_selector_cache: RwLock<HashMap<String, ChosenProperties>>,
+    embeddings_selector_cache: OramaAsyncLock<HashMap<String, ChosenProperties>>,
     automatic_embeddings_selector: Arc<AutomaticEmbeddingsSelector>,
 }
 impl EmbeddingField {
@@ -848,7 +849,10 @@ impl EmbeddingField {
             chunker,
             calculation,
             embedding_sender: context.embedding_sender,
-            embeddings_selector_cache: RwLock::new(HashMap::new()),
+            embeddings_selector_cache: OramaAsyncLock::new(
+                "embeddings_selector_cache",
+                HashMap::new(),
+            ),
             automatic_embeddings_selector: context.automatic_embeddings_selector,
         }
     }
@@ -862,7 +866,7 @@ impl EmbeddingField {
     }
 
     pub async fn get_automatic_embeddings_selector(&self) -> HashMap<String, ChosenProperties> {
-        let cache_read = self.embeddings_selector_cache.read().await;
+        let cache_read = self.embeddings_selector_cache.read("get").await;
         cache_read.clone()
     }
 
@@ -873,7 +877,7 @@ impl EmbeddingField {
     ) -> Result<Vec<IndexedValue>> {
         let input: String = match &self.calculation {
             EmbeddingStringCalculation::Automatic => {
-                let cache_read = self.embeddings_selector_cache.read().await;
+                let cache_read = self.embeddings_selector_cache.read("index_value").await;
                 let mut cache_key: Vec<String> = Vec::new();
 
                 for (key, _value) in doc.iter() {
@@ -886,7 +890,7 @@ impl EmbeddingField {
                     cached_value.format(doc)
                 } else {
                     drop(cache_read);
-                    let mut cache_write = self.embeddings_selector_cache.write().await;
+                    let mut cache_write = self.embeddings_selector_cache.write("index_value").await;
                     let cache_key = cache_key.join(":");
 
                     let chosen_properties = self

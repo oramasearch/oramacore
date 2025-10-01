@@ -36,7 +36,6 @@ pub use collection::{IndexFieldStats, IndexFieldStatsType};
 use collections::CollectionsReader;
 use document_storage::{DocumentStorage, DocumentStorageConfig};
 use serde::{Deserialize, Serialize};
-use tokio::sync::{Mutex, RwLock};
 use tracing::{error, info, trace, warn};
 
 use crate::ai::advanced_autoquery::{AdvancedAutoQuerySteps, QueryMappedSearchResult};
@@ -49,6 +48,7 @@ pub use crate::collection_manager::sides::read::context::ReadSideContext;
 use crate::collection_manager::sides::read::logs::HookLogs;
 use crate::collection_manager::sides::read::notify::Notifier;
 use crate::collection_manager::sides::read::search::Search;
+use crate::lock::{OramaAsyncLock, OramaAsyncMutex};
 use crate::metrics::operations::OPERATION_COUNT;
 use crate::metrics::Empty;
 use crate::types::{
@@ -117,12 +117,12 @@ pub enum ReadError {
 pub struct ReadSide {
     collections: CollectionsReader,
     document_storage: DocumentStorage,
-    operation_counter: RwLock<u64>,
+    operation_counter: OramaAsyncLock<u64>,
     insert_batch_commit_size: u64,
     data_dir: PathBuf,
-    live_offset: RwLock<Offset>,
+    live_offset: OramaAsyncLock<Offset>,
     // This offset will update everytime a change is made to the read side.
-    commit_insert_mutex: Mutex<Offset>,
+    commit_insert_mutex: OramaAsyncMutex<Offset>,
     master_api_key: Option<ApiKey>,
     system_prompts: SystemPromptInterface,
     training_sets: TrainingSetInterface,
@@ -138,7 +138,7 @@ pub struct ReadSide {
     // Handle to stop the read side
     // This is used to stop the read side when the server is shutting down
     stop_sender: tokio::sync::broadcast::Sender<()>,
-    stop_done_receiver: RwLock<tokio::sync::mpsc::Receiver<()>>,
+    stop_done_receiver: OramaAsyncLock<tokio::sync::mpsc::Receiver<()>>,
 }
 
 impl ReadSide {
@@ -219,10 +219,10 @@ impl ReadSide {
         let read_side = ReadSide {
             collections: collections_reader,
             document_storage,
-            operation_counter: Default::default(),
+            operation_counter: OramaAsyncLock::new("operation_counter", Default::default()),
             insert_batch_commit_size,
-            live_offset: RwLock::new(last_offset),
-            commit_insert_mutex: Mutex::new(last_offset),
+            live_offset: OramaAsyncLock::new("live_offset", last_offset),
+            commit_insert_mutex: OramaAsyncMutex::new("commit_insert_mutex", last_offset),
             master_api_key: config.master_api_key,
             system_prompts,
             training_sets,
@@ -237,7 +237,7 @@ impl ReadSide {
             data_dir,
 
             stop_sender,
-            stop_done_receiver: RwLock::new(stop_done_receiver),
+            stop_done_receiver: OramaAsyncLock::new("stop_done_receiver", stop_done_receiver),
         };
 
         let operation_receiver = operation_receiver_creator.create(last_offset).await?;
@@ -266,7 +266,7 @@ impl ReadSide {
         self.stop_sender
             .send(())
             .context("Cannot send stop signal")?;
-        let mut stop_done_receiver = self.stop_done_receiver.write().await;
+        let mut stop_done_receiver = self.stop_done_receiver.write("stop").await;
         // Commit loop
         stop_done_receiver
             .recv()
@@ -286,10 +286,11 @@ impl ReadSide {
         // We stop insertion operations while we are committing
         // This lock is needed to prevent any collection from being created, deleted or changed
         // ie, we stop to process any new events
-        let mut commit_insert_mutex_lock = self.commit_insert_mutex.lock().await;
+        let mut commit_insert_mutex_lock = self.commit_insert_mutex.lock("commit").await;
 
-        let live_offset = self.live_offset.write().await;
-        let offset = *live_offset;
+        let live_offset = self.live_offset.write("commit").await;
+        let offset = **live_offset;
+        drop(live_offset);
 
         self.collections.commit(offset).await?;
         self.document_storage
@@ -303,7 +304,7 @@ impl ReadSide {
             .write_json_data(&ReadInfo::V1(ReadInfoV1 { offset }))
             .context("Cannot write read.info file")?;
 
-        *commit_insert_mutex_lock = offset;
+        **commit_insert_mutex_lock = offset;
 
         drop(commit_insert_mutex_lock);
 
@@ -333,16 +334,16 @@ impl ReadSide {
 
         // We stop commit operations while we are updating
         // The lock is released at the end of this function
-        let commit_insert_mutex_lock = self.commit_insert_mutex.lock().await;
+        let commit_insert_mutex_lock = self.commit_insert_mutex.lock("update").await;
 
         // Already applied. We can skip this operation.
-        if offset <= *commit_insert_mutex_lock && !commit_insert_mutex_lock.is_zero() {
+        if offset <= **commit_insert_mutex_lock && !commit_insert_mutex_lock.is_zero() {
             warn!(offset=?offset, "Operation already applied. Skipping");
             return Ok(());
         }
 
-        let mut live_offset = self.live_offset.write().await;
-        *live_offset = offset;
+        let mut live_offset = self.live_offset.write("update").await;
+        **live_offset = offset;
         drop(live_offset);
 
         match op {
@@ -410,10 +411,10 @@ impl ReadSide {
 
         drop(m);
 
-        let mut lock = self.operation_counter.write().await;
-        *lock += 1;
-        let should_commit = if *lock >= self.insert_batch_commit_size {
-            *lock = 0;
+        let mut lock = self.operation_counter.write("update").await;
+        **lock += 1;
+        let should_commit = if **lock >= self.insert_batch_commit_size {
+            **lock = 0;
             true
         } else {
             false
@@ -906,10 +907,13 @@ fn start_receive_operations(
 
             warn!("Reconnecting...");
 
-            let arc = Arc::new(RwLock::new(&mut operation_receiver));
+            let arc = Arc::new(OramaAsyncLock::new(
+                "operation_receiver",
+                &mut operation_receiver,
+            ));
             let op = || async {
                 let arc = arc.clone();
-                let mut operation_receiver = arc.write().await;
+                let mut operation_receiver = arc.write("reconnect").await;
                 operation_receiver
                     .reconnect()
                     .await
@@ -956,7 +960,7 @@ pub struct HookReaderLock<'guard> {
 }
 
 impl Deref for HookReaderLock<'_> {
-    type Target = RwLock<HookReader>;
+    type Target = OramaAsyncLock<HookReader>;
 
     fn deref(&self) -> &Self::Target {
         self.collection.get_hook_storage()

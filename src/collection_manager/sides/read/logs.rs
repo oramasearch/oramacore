@@ -1,6 +1,6 @@
 use std::{
     collections::{hash_map::Entry, HashMap},
-    sync::{Arc, RwLock},
+    sync::Arc,
     time::{Duration, Instant},
 };
 
@@ -8,7 +8,7 @@ use orama_js_pool::OutputChannel;
 use tokio::sync::broadcast;
 use tokio::task::JoinHandle;
 
-use crate::types::CollectionId;
+use crate::{lock::OramaSyncLock, types::CollectionId};
 
 struct ChannelEntry {
     sender: Arc<broadcast::Sender<(OutputChannel, String)>>,
@@ -16,7 +16,7 @@ struct ChannelEntry {
 }
 
 pub struct HookLogs {
-    channels: Arc<RwLock<HashMap<CollectionId, ChannelEntry>>>,
+    channels: Arc<OramaSyncLock<HashMap<CollectionId, ChannelEntry>>>,
 }
 
 impl Default for HookLogs {
@@ -27,7 +27,8 @@ impl Default for HookLogs {
 
 impl HookLogs {
     pub fn new() -> Self {
-        let channels: Arc<RwLock<HashMap<CollectionId, ChannelEntry>>> = Default::default();
+        let channels: Arc<OramaSyncLock<HashMap<CollectionId, ChannelEntry>>> =
+            Arc::new(OramaSyncLock::new("hook_channels", Default::default()));
         let s = Self {
             channels: channels.clone(),
         };
@@ -40,7 +41,10 @@ impl HookLogs {
         &self,
         collection_id: &CollectionId,
     ) -> Option<Arc<broadcast::Sender<(OutputChannel, String)>>> {
-        let mut lock = self.channels.write().expect("This lock should never panic");
+        let mut lock = self
+            .channels
+            .write("get_sender")
+            .expect("This lock should never panic");
         if let Some(entry) = lock.get_mut(collection_id) {
             entry.last_used = Instant::now();
             Some(entry.sender.clone())
@@ -53,7 +57,10 @@ impl HookLogs {
         &self,
         collection_id: CollectionId,
     ) -> broadcast::Receiver<(OutputChannel, String)> {
-        let mut lock = self.channels.write().expect("This lcok should never panic");
+        let mut lock = self
+            .channels
+            .write("get_or_create_receiver")
+            .expect("This lock should never panic");
         let answer_receiver = match lock.entry(collection_id) {
             Entry::Vacant(a) => {
                 let (answer_sender, answer_receiver) = broadcast::channel(100);
@@ -74,7 +81,7 @@ impl HookLogs {
     }
 
     fn spawn_cleanup_task(
-        channels: Arc<RwLock<HashMap<CollectionId, ChannelEntry>>>,
+        channels: Arc<OramaSyncLock<HashMap<CollectionId, ChannelEntry>>>,
     ) -> JoinHandle<()> {
         tokio::spawn(async move {
             let cleanup_interval = Duration::from_secs(60); // check every minute
@@ -82,7 +89,9 @@ impl HookLogs {
             loop {
                 tokio::time::sleep(cleanup_interval).await;
                 let now = Instant::now();
-                let mut lock = channels.write().expect("This lock should never panic");
+                let mut lock = channels
+                    .write("cleanup")
+                    .expect("This lock should never panic");
                 lock.retain(|_, entry| now.duration_since(entry.last_used) < max_idle);
                 drop(lock);
             }

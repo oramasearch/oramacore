@@ -2,7 +2,6 @@ use std::{
     collections::{HashMap, HashSet},
     fmt::Debug,
     path::PathBuf,
-    sync::RwLock,
 };
 
 use anyhow::{anyhow, Context, Result};
@@ -20,13 +19,14 @@ use crate::{
         },
         write::OramaModelSerializable,
     },
+    lock::OramaSyncLock,
     types::DocumentId,
 };
 use oramacore_lib::fs::{create_if_not_exists, BufferedFile};
 
 #[derive(Debug)]
 pub struct CommittedVectorField {
-    inner: RwLock<
+    inner: OramaSyncLock<
         InnerCommittedField<LoadedCommittedVectorField, CommittedVectorFieldStats, VectorFieldInfo>,
     >,
 }
@@ -63,7 +63,7 @@ impl CommittedVectorField {
         let loaded = LoadedCommittedVectorField::from_iter(field_path, iter, model, data_dir)?;
 
         let inner = InnerCommittedField::new_loaded(loaded, offload_config);
-        let inner = RwLock::new(inner);
+        let inner = OramaSyncLock::new("vector_inner", inner);
         Ok(Self { inner })
     }
 
@@ -86,19 +86,19 @@ impl CommittedVectorField {
         )?;
 
         let inner = InnerCommittedField::new_loaded(loaded, offload_config);
-        let inner = RwLock::new(inner);
+        let inner = OramaSyncLock::new("vector_inner", inner);
         Ok(Self { inner })
     }
 
     pub fn try_load(info: VectorFieldInfo, offload_config: OffloadFieldConfig) -> Result<Self> {
         let loaded = LoadedCommittedVectorField::try_load(info)?;
         let inner = InnerCommittedField::new_loaded(loaded, offload_config);
-        let inner = RwLock::new(inner);
+        let inner = OramaSyncLock::new("vector_inner", inner);
         Ok(Self { inner })
     }
 
     fn loaded(&self) -> bool {
-        self.inner.read().unwrap().loaded()
+        self.inner.read("loaded").unwrap().loaded()
     }
 
     fn load(&self) {
@@ -106,21 +106,21 @@ impl CommittedVectorField {
             return;
         }
 
-        let mut inner = self.inner.write().unwrap();
+        let mut inner = self.inner.write("load").unwrap();
         if let InnerCommittedField::Unloaded {
             offload_config,
             field_info,
             ..
-        } = &*inner
+        } = &**inner
         {
             let loaded = LoadedCommittedVectorField::try_load(field_info.clone())
                 .expect("Cannot load committed vector field");
-            *inner = InnerCommittedField::new_loaded(loaded, *offload_config)
+            **inner = InnerCommittedField::new_loaded(loaded, *offload_config)
         }
     }
 
     pub fn unload_if_not_used(&self) {
-        let lock = self.inner.read().unwrap();
+        let lock = self.inner.read("unload_if_not_used").unwrap();
         if lock.should_unload() {
             drop(lock); // Release the read lock before unloading
             self.unload();
@@ -128,29 +128,34 @@ impl CommittedVectorField {
     }
 
     fn unload(&self) {
-        let mut inner = self.inner.write().unwrap();
+        let mut inner = self.inner.write("unload").unwrap();
         if let InnerCommittedField::Loaded {
             field,
             offload_config,
             ..
-        } = &*inner
+        } = &**inner
         {
             let field_path = field.field_path();
             debug!("Unloading committed vector field {:?}", field_path,);
             let mut stats = field.stats();
             stats.loaded = false; // Mark field as unloaded
-            *inner = InnerCommittedField::unloaded(*offload_config, stats, field.info());
+            **inner = InnerCommittedField::unloaded(*offload_config, stats, field.info());
 
             info!("Committed vector field {:?} unloaded", field_path,);
         }
     }
 
     pub fn get_field_info(&self) -> VectorFieldInfo {
-        self.inner.read().unwrap().info()
+        self.inner.read("get_field_info").unwrap().info()
     }
 
     pub fn field_path(&self) -> Box<[String]> {
-        self.inner.read().unwrap().info().field_path.clone()
+        self.inner
+            .read("field_path")
+            .unwrap()
+            .info()
+            .field_path
+            .clone()
     }
 
     pub fn search(
@@ -164,7 +169,7 @@ impl CommittedVectorField {
     ) -> Result<()> {
         self.load();
 
-        let inner = self.inner.read().unwrap();
+        let inner = self.inner.read("search").unwrap();
 
         if let Some(field) = inner.get_load_unchecked() {
             field.search(
@@ -181,7 +186,7 @@ impl CommittedVectorField {
     }
 
     pub fn stats(&self) -> CommittedVectorFieldStats {
-        let inner = self.inner.read().unwrap();
+        let inner = self.inner.read("stats").unwrap();
         inner.stats()
     }
 }

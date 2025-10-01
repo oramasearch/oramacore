@@ -60,6 +60,26 @@ create_label_struct!(JSOperationLabels, {
     collection: SharedString,
 });
 
+pub enum LockType {
+    Read,
+    Write,
+    Mutex,
+}
+impl From<LockType> for SharedString {
+    fn from(val: LockType) -> Self {
+        match val {
+            LockType::Read => SharedString::from("read"),
+            LockType::Write => SharedString::from("write"),
+            LockType::Mutex => SharedString::from("mutex"),
+        }
+    }
+}
+create_label_struct!(LockNameLabels, {
+    name: &'static str,
+    reason: &'static str,
+    lock_type: LockType,
+});
+
 pub mod ai {
     use super::EmbeddingCalculationLabels;
     use crate::{create_counter_histogram, create_time_histogram};
@@ -126,6 +146,13 @@ pub mod operations {
     use super::Empty;
     use crate::create_time_histogram;
     create_time_histogram!(OPERATION_COUNT, "operation_count", Empty);
+}
+
+pub mod locks {
+    use super::LockNameLabels;
+    use crate::create_time_histogram;
+    create_time_histogram!(LOCKING_TIME, "locking_time", LockNameLabels);
+    create_time_histogram!(LOCKED_FOR_TIME, "locked_for_time", LockNameLabels);
 }
 
 pub mod search {
