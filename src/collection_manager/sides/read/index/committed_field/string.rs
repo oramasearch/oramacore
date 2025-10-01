@@ -2,7 +2,6 @@ use std::{
     cell::RefCell,
     collections::{HashMap, HashSet},
     path::PathBuf,
-    sync::RwLock,
 };
 
 use anyhow::{Context, Result};
@@ -24,6 +23,7 @@ use crate::{
             OffloadFieldConfig,
         },
     },
+    lock::OramaSyncLock,
     merger::MergedIterator,
     types::DocumentId,
 };
@@ -33,7 +33,7 @@ const EXACT_MATCH_BOOST_MULTIPLIER: f32 = 3.0;
 
 #[derive(Debug)]
 pub struct CommittedStringField {
-    inner: RwLock<
+    inner: OramaSyncLock<
         InnerCommittedField<LoadedCommittedStringField, CommittedStringFieldStats, StringFieldInfo>,
     >,
 }
@@ -42,7 +42,7 @@ impl CommittedStringField {
     pub fn try_load(info: StringFieldInfo, offload_config: OffloadFieldConfig) -> Result<Self> {
         let loaded = LoadedCommittedStringField::try_load(info)?;
         let inner = InnerCommittedField::new_loaded(loaded, offload_config);
-        let inner = RwLock::new(inner);
+        let inner = OramaSyncLock::new("string_inner", inner);
         Ok(Self { inner })
     }
 
@@ -71,7 +71,7 @@ impl CommittedStringField {
         )?;
 
         let inner = InnerCommittedField::new_loaded(loaded, offload_config);
-        let inner = RwLock::new(inner);
+        let inner = OramaSyncLock::new("string_inner", inner);
         Ok(Self { inner })
     }
 
@@ -93,8 +93,8 @@ impl CommittedStringField {
         offload_config: OffloadFieldConfig,
     ) -> Result<Self> {
         committed.load(); // enforce loading of the committed field
-        let lock = committed.inner.read().unwrap();
-        let prev_loaded = match &*lock {
+        let lock = committed.inner.read("from_iter_and_committed").unwrap();
+        let prev_loaded = match &**lock {
             InnerCommittedField::Loaded { field, .. } => field,
             InnerCommittedField::Unloaded { field_info, .. } => {
                 return Err(anyhow::anyhow!(
@@ -116,12 +116,12 @@ impl CommittedStringField {
         let inner = InnerCommittedField::new_loaded(loaded, offload_config);
 
         Ok(Self {
-            inner: RwLock::new(inner),
+            inner: OramaSyncLock::new("string_inner", inner),
         })
     }
 
     fn loaded(&self) -> bool {
-        self.inner.read().unwrap().loaded()
+        self.inner.read("loaded").unwrap().loaded()
     }
 
     fn load(&self) {
@@ -129,21 +129,21 @@ impl CommittedStringField {
             return;
         }
 
-        let mut inner = self.inner.write().unwrap();
+        let mut inner = self.inner.write("load").unwrap();
         if let InnerCommittedField::Unloaded {
             offload_config,
             field_info,
             ..
-        } = &*inner
+        } = &**inner
         {
             let loaded = LoadedCommittedStringField::try_load(field_info.clone())
                 .expect("Cannot load committed string field");
-            *inner = InnerCommittedField::new_loaded(loaded, *offload_config)
+            **inner = InnerCommittedField::new_loaded(loaded, *offload_config)
         }
     }
 
     pub fn unload_if_not_used(&self) {
-        let lock = self.inner.read().unwrap();
+        let lock = self.inner.read("unload_if_not_used").unwrap();
         if lock.should_unload() {
             drop(lock); // Release the read lock before unloading
             self.unload();
@@ -151,25 +151,25 @@ impl CommittedStringField {
     }
 
     fn unload(&self) {
-        let mut inner = self.inner.write().unwrap();
+        let mut inner = self.inner.write("unload").unwrap();
         if let InnerCommittedField::Loaded {
             field,
             offload_config,
             ..
-        } = &*inner
+        } = &**inner
         {
             let field_path = field.field_path();
             debug!("Unloading committed string field {:?}", field_path,);
             let mut stats = field.stats();
             stats.loaded = false; // Mark field as unloaded
-            *inner = InnerCommittedField::unloaded(*offload_config, stats, field.info());
+            **inner = InnerCommittedField::unloaded(*offload_config, stats, field.info());
 
             info!("Committed string field {:?} unloaded", field_path,);
         }
     }
 
     pub fn field_path(&self) -> Box<[String]> {
-        let inner = self.inner.read().unwrap();
+        let inner = self.inner.read("field_path").unwrap();
         inner.info().field_path.clone()
     }
 
@@ -178,19 +178,19 @@ impl CommittedStringField {
             self.load();
         }
 
-        let inner = self.inner.read().unwrap();
-        match &*inner {
+        let inner = self.inner.read("global_info").unwrap();
+        match &**inner {
             InnerCommittedField::Loaded { field, .. } => field.global_info(),
             InnerCommittedField::Unloaded { .. } => GlobalInfo::default(),
         }
     }
 
     pub fn get_field_info(&self) -> StringFieldInfo {
-        self.inner.read().unwrap().info()
+        self.inner.read("field_info").unwrap().info()
     }
 
     pub fn stats(&self) -> CommittedStringFieldStats {
-        let inner = self.inner.read().unwrap();
+        let inner = self.inner.read("stats").unwrap();
         inner.stats()
     }
 
@@ -202,7 +202,7 @@ impl CommittedStringField {
     ) -> Result<()> {
         self.load();
 
-        let inner = self.inner.read().unwrap();
+        let inner = self.inner.read("search").unwrap();
 
         if let Some(field) = inner.get_load_unchecked() {
             field.search(context, scorer, tolerance)

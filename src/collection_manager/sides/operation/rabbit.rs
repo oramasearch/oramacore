@@ -13,10 +13,11 @@ use std::{
     sync::{atomic::AtomicBool, Arc},
     task::Poll,
 };
-use tokio::sync::{Notify, RwLock};
+use tokio::sync::Notify;
 use tokio::time::sleep;
 use tracing::{debug, error, info, warn};
 
+use crate::lock::OramaAsyncLock;
 use crate::types::CollectionId;
 
 use super::{Offset, WriteOperation};
@@ -24,7 +25,7 @@ use super::{Offset, WriteOperation};
 struct MyHAProducerInner {
     environment: Box<Environment>,
     stream: String,
-    producer: RwLock<Producer<NoDedup>>,
+    producer: OramaAsyncLock<Producer<NoDedup>>,
     notify: Notify,
     is_opened: AtomicBool,
 }
@@ -44,7 +45,7 @@ impl OnClosed for MyHAProducer {
             .is_opened
             .store(false, std::sync::atomic::Ordering::SeqCst);
 
-        let mut producer = self.0.producer.write().await;
+        let mut producer = self.0.producer.write("recreate").await;
 
         let inner = self.0.clone();
         let new_producer: std::result::Result<Producer<NoDedup>, ProducerCreateError> =
@@ -78,7 +79,7 @@ impl OnClosed for MyHAProducer {
             }
         }
 
-        *producer = new_producer;
+        **producer = new_producer;
 
         self.0
             .is_opened
@@ -103,13 +104,14 @@ impl MyHAProducer {
         let inner = MyHAProducerInner {
             environment,
             stream: stream_name.to_string(),
-            producer: RwLock::new(producer),
+            producer: OramaAsyncLock::new("orama_rw_lock", producer),
             notify: Notify::new(),
             is_opened: AtomicBool::new(true),
         };
         let s = Self(Arc::new(inner));
 
-        let p = s.0.producer.write().await;
+        let p = s.0.producer.write("set_on_closed").await;
+
         p.set_on_closed(Box::new(s.clone())).await;
         drop(p);
 
@@ -121,8 +123,9 @@ impl MyHAProducer {
             self.0.notify.notified().await;
         }
 
-        let producer = self.0.producer.read().await;
+        let producer = self.0.producer.read("batch_send").await;
         let err = producer.batch_send(messages.clone(), async |_| {}).await;
+        drop(producer);
 
         if let Err(e) = err {
             if matches!(

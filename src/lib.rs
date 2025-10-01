@@ -18,6 +18,7 @@ use tracing::level_filters::LevelFilter;
 #[allow(unused_imports)]
 use tracing::{info, warn};
 use web_server::{HttpConfig, WebServer};
+pub mod lock;
 
 pub mod types;
 

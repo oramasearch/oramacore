@@ -1,14 +1,12 @@
 use itertools::Itertools;
 use std::{borrow::Cow, fmt::Debug, path::PathBuf, sync::Arc, time::Duration};
-use tokio::{
-    sync::RwLock,
-    time::{sleep, timeout},
-};
+use tokio::time::{sleep, timeout};
 use tracing::{debug, error, info, trace, warn};
 use zebo::{Zebo, ZeboInfo};
 
 use crate::{
     collection_manager::sides::{DocumentStorageWriteOperation, DocumentToInsert},
+    lock::OramaAsyncLock,
     metrics::{commit::DOCUMENT_COMMIT_CALCULATION_TIME, Empty},
     types::{DocumentId, RawJSONDocument},
 };
@@ -20,7 +18,7 @@ static PAGE_SIZE: u64 = 1024 * 1024 * 1024;
 
 #[derive(Debug)]
 struct CommittedDiskDocumentStorage {
-    zebo: Arc<RwLock<Zebo<1_000_000, PAGE_SIZE, DocumentId>>>,
+    zebo: Arc<OramaAsyncLock<Zebo<1_000_000, PAGE_SIZE, DocumentId>>>,
 }
 impl CommittedDiskDocumentStorage {
     async fn try_new(data_dir: PathBuf) -> Result<Self> {
@@ -38,7 +36,7 @@ impl CommittedDiskDocumentStorage {
                 .context("Cannot migrate to zebo")?
         };
 
-        let zebo = Arc::new(RwLock::new(zebo));
+        let zebo = Arc::new(OramaAsyncLock::new("zebo", zebo));
 
         Ok(Self { zebo })
     }
@@ -49,7 +47,7 @@ impl CommittedDiskDocumentStorage {
     ) -> Result<Vec<Option<Arc<RawJSONDocument>>>> {
         trace!(doc_len=?doc_ids.len(), "Read document");
 
-        let zebo = self.zebo.read().await;
+        let zebo = self.zebo.read("get_documents_by_ids").await;
         let output = zebo
             .get_documents(doc_ids.to_vec())
             .context("Cannot get documents from zebo")?;
@@ -101,7 +99,7 @@ impl CommittedDiskDocumentStorage {
         to_delete: Vec<DocumentId>,
         retry: u8,
     ) -> Result<()> {
-        let result = timeout(Duration::from_secs(5), self.zebo.write()).await;
+        let result = timeout(Duration::from_secs(5), self.zebo.write("apply_inner")).await;
         let mut zebo = match result {
             Ok(zebo) => zebo,
             Err(_) => {
@@ -141,9 +139,9 @@ pub struct DocumentStorageConfig {
 
 #[derive(Debug)]
 pub struct DocumentStorage {
-    uncommitted: tokio::sync::RwLock<Vec<(DocumentId, Arc<RawJSONDocument>)>>,
+    uncommitted: OramaAsyncLock<Vec<(DocumentId, Arc<RawJSONDocument>)>>,
     committed: CommittedDiskDocumentStorage,
-    uncommitted_document_deletions: tokio::sync::RwLock<Vec<DocumentId>>,
+    uncommitted_document_deletions: OramaAsyncLock<Vec<DocumentId>>,
 }
 
 impl DocumentStorage {
@@ -155,9 +153,12 @@ impl DocumentStorage {
             .context("Cannot create CommittedDiskDocumentStorage")?;
 
         Ok(Self {
-            uncommitted: Default::default(),
+            uncommitted: OramaAsyncLock::new("uncommitted", Default::default()),
             committed,
-            uncommitted_document_deletions: Default::default(),
+            uncommitted_document_deletions: OramaAsyncLock::new(
+                "uncommitted_document_deletions",
+                Default::default(),
+            ),
         })
     }
 
@@ -183,7 +184,7 @@ impl DocumentStorage {
             panic!("Add documents are not in order");
         }
 
-        let mut uncommitted = self.uncommitted.write().await;
+        let mut uncommitted = self.uncommitted.write("add_documents").await;
         uncommitted.extend(
             docs.into_iter()
                 .map(|(doc_id, doc)| (doc_id, Arc::new(doc.0))),
@@ -196,13 +197,16 @@ impl DocumentStorage {
     }
 
     async fn delete_documents(&self, doc_ids: Vec<DocumentId>) -> Result<()> {
-        let mut uncommitted_document_deletions = self.uncommitted_document_deletions.write().await;
+        let mut uncommitted_document_deletions = self
+            .uncommitted_document_deletions
+            .write("delete_documents")
+            .await;
         uncommitted_document_deletions.extend(doc_ids);
         Ok(())
     }
 
     pub async fn get_zebo_info(&self) -> Result<ZeboInfo> {
-        let zebo = self.committed.zebo.read().await;
+        let zebo = self.committed.zebo.read("get_zebo_info").await;
         zebo.get_info().context("Cannot get zebo info")
     }
 
@@ -211,14 +215,18 @@ impl DocumentStorage {
         &self,
         mut doc_ids: Vec<DocumentId>,
     ) -> Result<Vec<Option<Arc<RawJSONDocument>>>> {
-        let uncommitted_document_deletions = self.uncommitted_document_deletions.read().await;
+        let uncommitted_document_deletions = self
+            .uncommitted_document_deletions
+            .read("get_documents_by_ids")
+            .await;
         doc_ids.retain(|doc_id| !uncommitted_document_deletions.contains(doc_id));
+        drop(uncommitted_document_deletions);
 
         debug!("Get from committed documents");
         let committed = self.committed.get_documents_by_ids(&doc_ids).await?;
 
         trace!("Get from uncommitted documents");
-        let uncommitted = self.uncommitted.read().await;
+        let uncommitted = self.uncommitted.read("get_documents_by_ids").await;
         let uncommitted: Vec<_> = doc_ids
             .iter()
             .map(|doc_id| uncommitted.iter().find(|i| i.0 == *doc_id).cloned())
@@ -248,11 +256,12 @@ impl DocumentStorage {
 
         let m = DOCUMENT_COMMIT_CALCULATION_TIME.create(Empty {});
 
-        let uncommitted_lock = self.uncommitted.read().await;
+        let uncommitted_lock = self.uncommitted.read("commit").await;
         let uncommitted_docs: Vec<_> = uncommitted_lock.clone();
         drop(uncommitted_lock);
 
-        let uncommitted_document_deletions_lock = self.uncommitted_document_deletions.read().await;
+        let uncommitted_document_deletions_lock =
+            self.uncommitted_document_deletions.read("commit").await;
         let uncommitted_document_deletions_docs = uncommitted_document_deletions_lock.clone();
         drop(uncommitted_document_deletions_lock);
 
@@ -261,7 +270,7 @@ impl DocumentStorage {
             .await
             .context("Cannot commit documents")?;
 
-        let mut uncommitted_lock = self.uncommitted.write().await;
+        let mut uncommitted_lock = self.uncommitted.write("commit").await;
         uncommitted_lock.clear();
         drop(uncommitted_lock);
 

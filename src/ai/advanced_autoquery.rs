@@ -634,7 +634,7 @@ impl AdvancedAutoQuery {
                 let hook_storage = read_side
                     .get_hook_storage(read_api_key, collection_id)
                     .await?;
-                let lock = hook_storage.read().await;
+                let lock = hook_storage.read("execute_mapped_searches").await;
                 let search_params = run_before_retrieval(
                     &lock,
                     search_params.clone(),

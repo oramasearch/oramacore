@@ -378,12 +378,11 @@ impl AnalyticsHolder {
         self.full_context = Some(full_context);
     }
 
-    //// MISSING
-
     pub(crate) fn add_rag_step(&mut self, rag_step: serde_json::Value) {
         self.rag_steps.push(rag_step);
     }
 
+    #[allow(dead_code)]
     pub(crate) fn set_interaction_error(&mut self, interaction_error: String) {
         self.interaction_error = Some(interaction_error);
     }
