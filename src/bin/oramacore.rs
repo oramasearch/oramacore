@@ -8,7 +8,7 @@ use itertools::Itertools;
 use oramacore::build_info::get_build_version;
 use oramacore::{start, OramacoreConfig};
 use tracing::level_filters::LevelFilter;
-use tracing::{error, instrument};
+use tracing::{error, instrument, warn};
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::{fmt, EnvFilter, Registry};
 
@@ -76,8 +76,16 @@ fn main() -> anyhow::Result<()> {
         println!("{e:#?}");
         return Err(e);
     }
+    if let Ok(Err(e)) = res {
+        error!(error = ?e, "Failed to run the oramacore runtime");
+        eprintln!("{e:#?}");
+        println!("{e:#?}");
+        return Err(e);
+    }
 
     drop(sentry_guard);
+
+    warn!("Runtime finished {:?}", res);
 
     Ok(())
 }

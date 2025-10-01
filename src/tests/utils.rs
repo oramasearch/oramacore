@@ -35,8 +35,8 @@ use crate::{
             SearchRequest,
         },
         write::{
-            index::EnumStrategy, CollectionsWriterConfig, OramaModelSerializable,
-            TempIndexCleanupConfig, WriteError, WriteSide, WriteSideConfig,
+            CollectionsWriterConfig, OramaModelSerializable, TempIndexCleanupConfig, WriteError,
+            WriteSide, WriteSideConfig,
         },
         InputSideChannelType, OutputSideChannelType, ReplaceIndexReason,
     },

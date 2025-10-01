@@ -65,7 +65,9 @@ impl CollectionsReader {
         let CollectionsInfo::V1(collections_info) = collections_info;
 
         let base_dir_for_collections = data_dir.join("collections");
-        let mut collections: HashMap<CollectionId, CollectionReader> = Default::default();
+        let mut collections: HashMap<CollectionId, CollectionReader> = HashMap::with_capacity(
+            collections_info.collection_ids.len() - collections_info.deleted_collection_ids.len(),
+        );
         for collection_id in collections_info.collection_ids {
             if collections_info
                 .deleted_collection_ids
@@ -79,10 +81,12 @@ impl CollectionsReader {
 
             let collection = CollectionReader::try_load(
                 context.clone(),
-                collection_dir,
+                collection_dir.clone(),
                 indexes_config.offload_field,
             )
             .with_context(|| format!("Cannot load {collection_id:?} collection"))?;
+
+            info!("Collection {:?} loaded", collection_dir);
 
             collections.insert(collection_id, collection);
         }

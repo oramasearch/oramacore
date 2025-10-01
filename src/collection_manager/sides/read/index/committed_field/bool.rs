@@ -5,6 +5,7 @@ use std::{
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
+use tracing::info;
 
 use crate::types::DocumentId;
 use oramacore_lib::data_structures::ordered_key::BoundedValue;
@@ -69,12 +70,28 @@ impl CommittedBoolField {
     #[allow(deprecated)]
     pub fn try_load(info: BoolFieldInfo) -> Result<Self> {
         let data_dir = info.data_dir;
+
+        info!("Loading committed bool field from {:?}", data_dir);
         let map = match std::fs::File::open(data_dir.join("bool_map.bin")) {
-            Ok(file) => bincode::deserialize_from::<_, HashMap<bool, HashSet<DocumentId>>>(file)
-                .context("Failed to deserialize bool_map.bin")?,
+            Ok(file) => {
+                info!("Found bool_map.bin, loading from it");
+                bincode::deserialize_from::<_, HashMap<bool, HashSet<DocumentId>>>(file)
+                    .context("Failed to deserialize bool_map.bin")?
+            }
             Err(_) => {
+                info!("bool_map.bin not found, reconstructing from OrderedKeyIndex");
                 use oramacore_lib::data_structures::ordered_key::OrderedKeyIndex;
-                let inner = OrderedKeyIndex::<BoolWrapper, DocumentId>::load(data_dir.clone())?;
+                let inner = match OrderedKeyIndex::<BoolWrapper, DocumentId>::load(data_dir.clone())
+                {
+                    Ok(index) => index,
+                    Err(e) => {
+                        info!("---- Failed to load OrderedKeyIndex: {}", e);
+                        return Err(anyhow::anyhow!(
+                            "Failed to load OrderedKeyIndex for bool field: {}",
+                            e
+                        ));
+                    }
+                };
 
                 let false_count = inner
                     .count(BoolWrapper::False)
