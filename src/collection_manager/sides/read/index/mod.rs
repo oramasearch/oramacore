@@ -14,7 +14,6 @@ use oramacore_lib::filters::{FilterResult, PlainFilterResult};
 use path_to_index_id_map::PathToIndexId;
 use search_context::FullTextSearchContext;
 use serde::{Deserialize, Serialize};
-use tokio::sync::{RwLock, RwLockReadGuard};
 use tracing::{debug, error, info, trace, warn};
 use uncommitted_field::*;
 
@@ -38,6 +37,7 @@ use crate::{
             Offset,
         },
     },
+    lock::{OramaAsyncLock, OramaAsyncLockReadGuard},
     metrics::{
         search::{MATCHING_COUNT_CALCULTATION_COUNT, MATCHING_PERC_CALCULATION_COUNT},
         CollectionLabels,
@@ -139,8 +139,8 @@ pub struct Index {
     document_count: u64,
     uncommitted_deleted_documents: HashSet<DocumentId>,
 
-    uncommitted_fields: RwLock<UncommittedFields>,
-    committed_fields: RwLock<CommittedFields>,
+    uncommitted_fields: OramaAsyncLock<UncommittedFields>,
+    committed_fields: OramaAsyncLock<CommittedFields>,
 
     path_to_index_id_map: PathToIndexId,
 
@@ -149,7 +149,7 @@ pub struct Index {
     created_at: DateTime<Utc>,
     updated_at: DateTime<Utc>,
 
-    pin_rules_reader: RwLock<PinRulesReader<DocumentId>>,
+    pin_rules_reader: OramaAsyncLock<PinRulesReader<DocumentId>>,
     enum_strategy: EnumStrategy,
 }
 
@@ -175,8 +175,8 @@ impl Index {
             document_count: 0,
             uncommitted_deleted_documents: HashSet::new(),
 
-            committed_fields: Default::default(),
-            uncommitted_fields: Default::default(),
+            committed_fields: OramaAsyncLock::new("committed_fields", Default::default()),
+            uncommitted_fields: OramaAsyncLock::new("uncommitted_fields", Default::default()),
 
             path_to_index_id_map: PathToIndexId::empty(),
             is_new: AtomicBool::new(true),
@@ -184,7 +184,7 @@ impl Index {
             created_at: Utc::now(),
             updated_at: Utc::now(),
 
-            pin_rules_reader: RwLock::new(PinRulesReader::empty()),
+            pin_rules_reader: OramaAsyncLock::new("pin_rules_reader", PinRulesReader::empty()),
 
             enum_strategy,
         }
@@ -196,23 +196,27 @@ impl Index {
         context: ReadSideContext,
         offload_config: OffloadFieldConfig,
     ) -> Result<Self> {
+        debug!("Reading index info");
         let dump: Dump = BufferedFile::open(data_dir.join("index.json"))
             .context("Cannot open index.json")?
             .read_json_data()
             .context("Cannot read index.json")?;
         let Dump::V1(dump) = dump;
+        debug!("Index info read");
 
         debug_assert_eq!(
             dump.id, index_id,
             "Index id mismatch: expected {:?}, got {:?}",
             index_id, dump.id
         );
+        debug!("DONE");
 
         let mut filter_fields: HashMap<Box<[String]>, (FieldId, FieldType)> = Default::default();
         let mut score_fields: HashMap<Box<[String]>, (FieldId, FieldType)> = Default::default();
 
         let mut uncommitted_fields = UncommittedFields::default();
         let mut committed_fields = CommittedFields::default();
+        debug!("Loading bool fields");
         for (field_id, info) in dump.bool_field_ids {
             filter_fields.insert(info.field_path.clone(), (field_id, FieldType::Bool));
 
@@ -220,9 +224,14 @@ impl Index {
                 field_id,
                 UncommittedBoolField::empty(info.field_path.clone()),
             );
+            debug!("CommittedBoolField::try_load for field_id {:?}", field_id);
             let field = CommittedBoolField::try_load(info).context("Cannot load bool field")?;
+            debug!("DONE");
             committed_fields.bool_fields.insert(field_id, field);
         }
+        debug!("Bool fields loaded");
+
+        debug!("Loading number_field_ids");
         for (field_id, info) in dump.number_field_ids {
             filter_fields.insert(info.field_path.clone(), (field_id, FieldType::Number));
 
@@ -233,6 +242,9 @@ impl Index {
             let field = CommittedNumberField::try_load(info).context("Cannot load number field")?;
             committed_fields.number_fields.insert(field_id, field);
         }
+        debug!("Number fields loaded");
+
+        debug!("Loading date_field_ids");
         for (field_id, info) in dump.date_field_ids {
             filter_fields.insert(info.field_path.clone(), (field_id, FieldType::Date));
 
@@ -243,6 +255,8 @@ impl Index {
             let field = CommittedDateField::try_load(info).context("Cannot load date field")?;
             committed_fields.date_fields.insert(field_id, field);
         }
+
+        debug!("Loading geopoint_field_ids");
         for (field_id, info) in dump.geopoint_field_ids {
             filter_fields.insert(info.field_path.clone(), (field_id, FieldType::GeoPoint));
 
@@ -254,6 +268,8 @@ impl Index {
                 CommittedGeoPointField::try_load(info).context("Cannot load geopoint field")?;
             committed_fields.geopoint_fields.insert(field_id, field);
         }
+
+        debug!("Loading string_filter_field_ids");
         for (field_id, info) in dump.string_filter_field_ids {
             filter_fields.insert(info.field_path.clone(), (field_id, FieldType::StringFilter));
 
@@ -267,6 +283,8 @@ impl Index {
                 .string_filter_fields
                 .insert(field_id, field);
         }
+
+        debug!("Loading string_field_ids");
         for (field_id, info) in dump.string_field_ids {
             score_fields.insert(info.field_path.clone(), (field_id, FieldType::String));
 
@@ -278,6 +296,8 @@ impl Index {
                 .context("Cannot load string field")?;
             committed_fields.string_fields.insert(field_id, field);
         }
+
+        debug!("Loading vector_field_ids");
         for (field_id, info) in dump.vector_field_ids {
             score_fields.insert(info.field_path.clone(), (field_id, FieldType::Vector));
 
@@ -289,6 +309,7 @@ impl Index {
                 .context("Cannot load vector field")?;
             committed_fields.vector_fields.insert(field_id, field);
         }
+        debug!("Vector fields loaded");
 
         Ok(Self {
             id: dump.id,
@@ -304,8 +325,8 @@ impl Index {
             document_count: dump.document_count,
             uncommitted_deleted_documents: HashSet::new(),
 
-            committed_fields: RwLock::new(committed_fields),
-            uncommitted_fields: RwLock::new(uncommitted_fields),
+            committed_fields: OramaAsyncLock::new("committed_fields", committed_fields),
+            uncommitted_fields: OramaAsyncLock::new("uncommitted_fields", uncommitted_fields),
 
             path_to_index_id_map: PathToIndexId::new(filter_fields, score_fields),
             is_new: AtomicBool::new(false),
@@ -313,7 +334,10 @@ impl Index {
             created_at: dump.created_at,
             updated_at: dump.updated_at,
 
-            pin_rules_reader: RwLock::new(PinRulesReader::try_new(data_dir.join("pin_rules"))?),
+            pin_rules_reader: OramaAsyncLock::new(
+                "pin_rules_reader",
+                PinRulesReader::try_new(data_dir.join("pin_rules"))?,
+            ),
             enum_strategy: dump.enum_strategy,
         })
     }
@@ -344,7 +368,7 @@ impl Index {
 
         let data_dir_with_offset = data_dir.join(format!("offset-{}", offset.0));
 
-        let uncommitted_fields = self.uncommitted_fields.read().await;
+        let uncommitted_fields = self.uncommitted_fields.read("commit").await;
 
         let is_new = self.is_new.load(Ordering::Relaxed);
 
@@ -400,7 +424,7 @@ impl Index {
 
         debug!("Committing index {:?}", self.id);
 
-        let committed_fields = self.committed_fields.read().await;
+        let committed_fields = self.committed_fields.read("commit").await;
 
         enum MergeResult<T> {
             Changed(T),
@@ -605,8 +629,8 @@ impl Index {
         drop(committed_fields);
         // Here something bad can happen inside here
         // see: https://github.com/tokio-rs/tokio/issues/7282
-        let mut uncommitted_fields = self.uncommitted_fields.write().await;
-        let mut committed_fields = self.committed_fields.write().await;
+        let mut uncommitted_fields = self.uncommitted_fields.write("commit").await;
+        let mut committed_fields = self.committed_fields.write("commit").await;
 
         for (field_id, merged) in merged_bools {
             match merged {
@@ -738,10 +762,11 @@ impl Index {
         drop(uncommitted_fields);
         drop(committed_fields);
 
-        let mut pin_rules_reader = self.pin_rules_reader.write().await;
+        let mut pin_rules_reader = self.pin_rules_reader.write("commit").await;
         pin_rules_reader
             .commit(data_dir.join("pin_rules"))
             .context("Cannot commit pin rules")?;
+        drop(pin_rules_reader);
 
         self.try_unload_fields().await;
 
@@ -761,7 +786,7 @@ impl Index {
     }
 
     async fn try_unload_fields(&self) {
-        let lock = self.committed_fields.read().await;
+        let lock = self.committed_fields.read("try_unload_fields").await;
         for string_field in lock.string_fields.values() {
             string_field.unload_if_not_used();
         }
@@ -999,8 +1024,8 @@ impl Index {
             return Err(ReadError::SortFieldNotFound(field_name.to_string()));
         };
 
-        let uncommitted_fields = self.uncommitted_fields.read().await;
-        let committed_fields = self.committed_fields.read().await;
+        let uncommitted_fields = self.uncommitted_fields.read("get_sort_iterator").await;
+        let committed_fields = self.committed_fields.read("get_sort_iterator").await;
 
         match &field_type {
             FieldType::Number => {
@@ -1062,7 +1087,7 @@ impl Index {
     // Since we only have one embedding model for all indexes in a collection,
     // we can get the first index model and return it early.
     pub async fn get_model(&self) -> Option<OramaModel> {
-        let uncommitted_fields = self.uncommitted_fields.read().await;
+        let uncommitted_fields = self.uncommitted_fields.read("get_model").await;
         uncommitted_fields
             .vector_fields
             .values()
@@ -1235,8 +1260,8 @@ impl Index {
     pub async fn stats(&self, is_temp: bool, with_keys: bool) -> Result<IndexStats> {
         let mut fields_stats = Vec::new();
 
-        let uncommitted_fields = self.uncommitted_fields.read().await;
-        let committed_fields = self.committed_fields.read().await;
+        let uncommitted_fields = self.uncommitted_fields.read("stats").await;
+        let committed_fields = self.committed_fields.read("stats").await;
 
         fields_stats.extend(uncommitted_fields.bool_fields.iter().map(|(k, v)| {
             let path = v.field_path().join(".");
@@ -1394,8 +1419,8 @@ impl Index {
 
         info!("Computing facets on {:?}", facets.keys());
 
-        let uncommitted_fields = self.uncommitted_fields.read().await;
-        let committed_fields = self.committed_fields.read().await;
+        let uncommitted_fields = self.uncommitted_fields.read("facets").await;
+        let committed_fields = self.committed_fields.read("facets").await;
 
         for (field_name, facet) in facets {
             let Some((field_id, field_type)) =
@@ -1608,8 +1633,8 @@ impl Index {
             return Ok(());
         };
 
-        let committed = self.committed_fields.read().await;
-        let uncommitted = self.uncommitted_fields.read().await;
+        let committed = self.committed_fields.read("groups").await;
+        let uncommitted = self.uncommitted_fields.read("groups").await;
 
         let mut all_variants = HashMap::<FieldId, HashMap<GroupValue, HashSet<DocumentId>>>::new();
         for (field_id, field_type) in &properties {
@@ -1748,8 +1773,8 @@ impl Index {
 
         trace!("Calculating filtered doc ids");
 
-        let uncommitted_fields = self.uncommitted_fields.read().await;
-        let committed_fields = self.committed_fields.read().await;
+        let uncommitted_fields = self.uncommitted_fields.read("filters").await;
+        let committed_fields = self.committed_fields.read("filters").await;
 
         fn calculate_filter(
             document_count_estimate: u64,
@@ -2042,8 +2067,8 @@ impl Index {
     }
 
     async fn calculate_vector_properties(&self) -> Result<Vec<FieldId>> {
-        let uncommitted_fields = self.uncommitted_fields.read().await;
-        let committed_fields = self.committed_fields.read().await;
+        let uncommitted_fields = self.uncommitted_fields.read("vector_props").await;
+        let committed_fields = self.committed_fields.read("vector_props").await;
 
         let properties: HashSet<_> = uncommitted_fields
             .vector_fields
@@ -2073,8 +2098,8 @@ impl Index {
                 field_ids
             }
             Properties::None | Properties::Star => {
-                let uncommitted_fields = self.uncommitted_fields.read().await;
-                let committed_fields = self.committed_fields.read().await;
+                let uncommitted_fields = self.uncommitted_fields.read("string_props").await;
+                let committed_fields = self.committed_fields.read("string_props").await;
 
                 uncommitted_fields
                     .string_fields
@@ -2099,8 +2124,8 @@ impl Index {
         filtered_doc_ids: Option<&FilterResult<DocumentId>>,
         uncommitted_deleted_documents: &HashSet<DocumentId>,
     ) -> Result<HashMap<DocumentId, f32>> {
-        let uncommitted_fields = self.uncommitted_fields.read().await;
-        let committed_fields = self.committed_fields.read().await;
+        let uncommitted_fields = self.uncommitted_fields.read("search_fulltext").await;
+        let committed_fields = self.committed_fields.read("search_fulltext").await;
 
         let tokens = self.text_parser.tokenize_and_stem(term);
         let mut tokens: Vec<_> = if exact {
@@ -2261,8 +2286,8 @@ impl Index {
     ) -> Result<HashMap<DocumentId, f32>> {
         let mut output: HashMap<DocumentId, f32> = HashMap::new();
 
-        let uncommitted_fields = self.uncommitted_fields.read().await;
-        let committed_fields = self.committed_fields.read().await;
+        let uncommitted_fields = self.uncommitted_fields.read("vector_search").await;
+        let committed_fields = self.committed_fields.read("vector_search").await;
 
         for field_id in properties {
             let Some(uncommitted) = uncommitted_fields.vector_fields.get(&field_id) else {
@@ -2308,14 +2333,16 @@ impl Index {
     }
 
     pub async fn get_pin_rule_ids(&self) -> Vec<String> {
-        let pin_rules_reader = self.pin_rules_reader.read().await;
+        let pin_rules_reader = self.pin_rules_reader.read("get_pin_rule_ids").await;
         pin_rules_reader.get_rule_ids()
     }
 
     pub async fn get_read_lock_on_pin_rules(
         &self,
-    ) -> RwLockReadGuard<'_, PinRulesReader<DocumentId>> {
-        self.pin_rules_reader.read().await
+    ) -> OramaAsyncLockReadGuard<'_, PinRulesReader<DocumentId>> {
+        self.pin_rules_reader
+            .read("get_read_lock_on_pin_rules")
+            .await
     }
 }
 
@@ -2377,8 +2404,8 @@ impl oramacore_lib::filters::DocId for DocumentId {
 }
 
 pub struct SortedField<'index> {
-    uncommitted_fields: RwLockReadGuard<'index, UncommittedFields>,
-    committed_fields: RwLockReadGuard<'index, CommittedFields>,
+    uncommitted_fields: OramaAsyncLockReadGuard<'index, UncommittedFields>,
+    committed_fields: OramaAsyncLockReadGuard<'index, CommittedFields>,
     field_id: FieldId,
     field_type: FieldType,
     order: SortOrder,

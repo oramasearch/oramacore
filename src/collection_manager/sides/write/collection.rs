@@ -5,7 +5,6 @@ use chrono::{DateTime, Utc};
 use futures::FutureExt;
 use oramacore_lib::hook_storage::HookWriter;
 use serde::{Deserialize, Serialize};
-use tokio::sync::{RwLock, RwLockReadGuard};
 use tracing::{info, warn};
 
 use crate::{
@@ -18,6 +17,7 @@ use crate::{
         CollectionWriteOperation, DocumentStorageWriteOperation, ReplaceIndexReason,
         WriteOperation,
     },
+    lock::{OramaAsyncLock, OramaAsyncLockReadGuard},
     types::{
         ApiKey, CollectionId, DescribeCollectionResponse, DocumentId, IndexEmbeddingsCalculation,
         IndexId, WriteApiKey,
@@ -40,14 +40,14 @@ struct CollectionRuntimeConfig {
 pub struct CollectionWriter {
     pub(super) id: CollectionId,
     description: Option<String>,
-    runtime_config: RwLock<CollectionRuntimeConfig>,
+    runtime_config: OramaAsyncLock<CollectionRuntimeConfig>,
     write_api_key: ApiKey,
     read_api_key: ApiKey,
 
     context: WriteSideContext,
 
-    indexes: RwLock<HashMap<IndexId, Index>>,
-    temp_indexes: RwLock<HashMap<IndexId, Index>>,
+    indexes: OramaAsyncLock<HashMap<IndexId, Index>>,
+    temp_indexes: OramaAsyncLock<HashMap<IndexId, Index>>,
 
     created_at: DateTime<Utc>,
 
@@ -81,14 +81,17 @@ impl CollectionWriter {
             description: req.description,
             write_api_key: req.write_api_key,
             read_api_key: req.read_api_key,
-            runtime_config: RwLock::new(CollectionRuntimeConfig {
-                default_locale: req.default_locale,
-                embeddings_model: req.embeddings_model,
-            }),
+            runtime_config: OramaAsyncLock::new(
+                "runtime_config",
+                CollectionRuntimeConfig {
+                    default_locale: req.default_locale,
+                    embeddings_model: req.embeddings_model,
+                },
+            ),
             context,
 
-            indexes: Default::default(),
-            temp_indexes: Default::default(),
+            indexes: OramaAsyncLock::new("indexes", Default::default()),
+            temp_indexes: OramaAsyncLock::new("temp_indexes", Default::default()),
 
             created_at: Utc::now(),
 
@@ -143,13 +146,16 @@ impl CollectionWriter {
             description,
             write_api_key,
             read_api_key,
-            runtime_config: RwLock::new(CollectionRuntimeConfig {
-                default_locale,
-                embeddings_model: dump.embeddings_model.0,
-            }),
+            runtime_config: OramaAsyncLock::new(
+                "runtime_config",
+                CollectionRuntimeConfig {
+                    default_locale,
+                    embeddings_model: dump.embeddings_model.0,
+                },
+            ),
             context,
-            indexes: RwLock::new(indexes),
-            temp_indexes: RwLock::new(temp_indexes),
+            indexes: OramaAsyncLock::new("indexes", indexes),
+            temp_indexes: OramaAsyncLock::new("temp_indexes", temp_indexes),
 
             created_at: dump.created_at,
 
@@ -192,7 +198,7 @@ impl CollectionWriter {
             index.commit(indexes_path.join(id.as_str())).await?;
         }
 
-        let runtime_config = self.runtime_config.read().await;
+        let runtime_config = self.runtime_config.read("commit").await;
         let default_locale = runtime_config.default_locale;
         let embeddings_model = runtime_config.embeddings_model;
         drop(runtime_config);
@@ -218,12 +224,12 @@ impl CollectionWriter {
     }
 
     pub async fn get_index_ids(&self) -> Vec<IndexId> {
-        let indexes = self.indexes.read().await;
+        let indexes = self.indexes.read("get_index_ids").await;
         indexes.keys().copied().collect()
     }
 
     pub async fn get_temp_index_ids(&self) -> Vec<IndexId> {
-        let temp_indexes = self.temp_indexes.read().await;
+        let temp_indexes = self.temp_indexes.read("get_temp_index_ids").await;
         temp_indexes.keys().copied().collect()
     }
 
@@ -233,12 +239,12 @@ impl CollectionWriter {
         embedding: IndexEmbeddingsCalculation,
         enum_strategy: EnumStrategy,
     ) -> Result<(), WriteError> {
-        let mut indexes = self.indexes.write().await;
+        let mut indexes = self.indexes.write("create_index").await;
         if indexes.contains_key(&index_id) {
             return Err(WriteError::IndexAlreadyExists(self.id, index_id));
         }
 
-        let runtime_config = self.runtime_config.read().await;
+        let runtime_config = self.runtime_config.read("create_index").await;
         let default_locale = runtime_config.default_locale;
         let embeddings_model = runtime_config.embeddings_model;
         drop(runtime_config);
@@ -287,7 +293,7 @@ impl CollectionWriter {
         new_index_id: IndexId,
         embedding: Option<IndexEmbeddingsCalculation>,
     ) -> Result<(), WriteError> {
-        let indexes_lock = self.indexes.write().await;
+        let indexes_lock = self.indexes.write("create_temp_index").await;
         let Some(copy_from_index) = indexes_lock.get(&copy_from) else {
             return Err(WriteError::IndexNotFound(self.id, copy_from));
         };
@@ -301,13 +307,13 @@ impl CollectionWriter {
             .await?;
         let embedding = embedding.unwrap_or(copy_from_index_embedding_calculation);
 
-        let mut temp_indexes_lock = self.temp_indexes.write().await;
+        let mut temp_indexes_lock = self.temp_indexes.write("create_temp_index").await;
 
         if temp_indexes_lock.contains_key(&new_index_id) {
             return Err(WriteError::IndexAlreadyExists(self.id, new_index_id));
         }
 
-        let runtime_config = self.runtime_config.read().await;
+        let runtime_config = self.runtime_config.read("create_temp_index").await;
         let default_locale = runtime_config.default_locale;
         let embeddings_model = runtime_config.embeddings_model;
         drop(runtime_config);
@@ -354,13 +360,13 @@ impl CollectionWriter {
         new_default_locale: Locale,
         new_embeddings_model: OramaModel,
     ) {
-        let mut runtime_config = self.runtime_config.write().await;
+        let mut runtime_config = self.runtime_config.write("change_runtime_config").await;
         runtime_config.default_locale = new_default_locale;
         runtime_config.embeddings_model = new_embeddings_model;
     }
 
     pub async fn delete_index(&self, index_id: IndexId) -> Result<Vec<DocumentId>, WriteError> {
-        let mut indexes = self.indexes.write().await;
+        let mut indexes = self.indexes.write("delete_index").await;
         let index = match indexes.remove(&index_id) {
             Some(index) => index,
             None => {
@@ -389,7 +395,7 @@ impl CollectionWriter {
     }
 
     pub async fn delete_temp_index(&self, temp_index_id: IndexId) -> Result<(), WriteError> {
-        let mut temp_indexes = self.temp_indexes.write().await;
+        let mut temp_indexes = self.temp_indexes.write("delete_temp_index").await;
         let temp_index = match temp_indexes.remove(&temp_index_id) {
             Some(index) => index,
             None => {
@@ -424,13 +430,13 @@ impl CollectionWriter {
     where
         's: 'index,
     {
-        let lock = self.temp_indexes.read().await;
+        let lock = self.temp_indexes.read("get_temporary_index").await;
         IndexReadLock::try_new(lock, id)
     }
 
     pub async fn promote_temp_index(&self, index_id: IndexId, temp_index: IndexId) -> Result<()> {
-        let mut temp_index_lock = self.indexes.write().await;
-        let mut index_lock = self.indexes.write().await;
+        let mut temp_index_lock = self.indexes.write("promote_temp_index").await;
+        let mut index_lock = self.indexes.write("promote_temp_index").await;
 
         let temp_index = match temp_index_lock.remove(&temp_index) {
             Some(index) => index,
@@ -452,7 +458,7 @@ impl CollectionWriter {
 
     pub async fn get_document_ids(&self) -> Vec<DocumentId> {
         let mut doc_id = vec![];
-        let indexes = self.indexes.read().await;
+        let indexes = self.indexes.read("get_document_ids").await;
         for (_, index) in indexes.iter() {
             let index_doc_ids = index.get_document_ids().await;
             doc_id.extend(index_doc_ids);
@@ -481,7 +487,7 @@ impl CollectionWriter {
     pub async fn as_dto(&self) -> DescribeCollectionResponse {
         let mut indexes_desc = vec![];
         let mut document_count = 0_usize;
-        let indexes = self.indexes.read().await;
+        let indexes = self.indexes.read("as_dto").await;
         for index in indexes.values() {
             let index_desc = index.describe().await;
             document_count += index_desc.document_count;
@@ -489,7 +495,7 @@ impl CollectionWriter {
         }
         drop(indexes);
 
-        let temp_indexs = self.temp_indexes.read().await;
+        let temp_indexs = self.temp_indexes.read("as_dto").await;
         for index in temp_indexs.values() {
             let index_desc = index.describe().await;
             document_count += index_desc.document_count;
@@ -510,12 +516,12 @@ impl CollectionWriter {
     where
         's: 'index,
     {
-        let lock = self.indexes.read().await;
+        let lock = self.indexes.read("get_index").await;
         if lock.contains_key(&id) {
             return IndexReadLock::try_new(lock, id);
         }
         drop(lock);
-        let lock = self.temp_indexes.read().await;
+        let lock = self.temp_indexes.read("get_index").await;
         if lock.contains_key(&id) {
             return IndexReadLock::try_new(lock, id);
         }
@@ -544,7 +550,7 @@ impl CollectionWriter {
         reason: ReplaceIndexReason,
         reference: Option<String>,
     ) -> Result<(), WriteError> {
-        let indexes_lock = self.indexes.read().await;
+        let indexes_lock = self.indexes.read("replace_index").await;
         if !indexes_lock.contains_key(&runtime_index_id) {
             return Err(WriteError::IndexNotFound(self.id, runtime_index_id));
         }
@@ -552,13 +558,13 @@ impl CollectionWriter {
 
         info!(coll_id= ?self.id, "Replacing index {} with temporary index {}", runtime_index_id, temp_index_id);
 
-        let mut temp_indexes_lock = self.temp_indexes.write().await;
+        let mut temp_indexes_lock = self.temp_indexes.write("replace_index").await;
         let mut temp_index = match temp_indexes_lock.remove(&temp_index_id) {
             Some(index) => index,
             None => return Err(WriteError::TempIndexNotFound(self.id, temp_index_id)),
         };
         temp_index.set_index_id(runtime_index_id);
-        let mut indexes_lock = self.indexes.write().await;
+        let mut indexes_lock = self.indexes.write("replace_index").await;
         match indexes_lock.insert(runtime_index_id, temp_index) {
             Some(_) => {
                 info!(coll_id= ?self.id, "Index {} replaced with temporary index {}", runtime_index_id, temp_index_id);
@@ -660,13 +666,13 @@ struct CollectionDumpV1 {
 }
 
 pub struct IndexReadLock<'guard> {
-    lock: RwLockReadGuard<'guard, HashMap<IndexId, Index>>,
+    lock: OramaAsyncLockReadGuard<'guard, HashMap<IndexId, Index>>,
     id: IndexId,
 }
 
 impl<'guard> IndexReadLock<'guard> {
     pub fn try_new(
-        lock: RwLockReadGuard<'guard, HashMap<IndexId, Index>>,
+        lock: OramaAsyncLockReadGuard<'guard, HashMap<IndexId, Index>>,
         id: IndexId,
     ) -> Option<Self> {
         let guard = lock.get(&id);

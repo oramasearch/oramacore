@@ -7,6 +7,7 @@ use std::{
 use crate::{
     ai::AIService,
     collection_manager::sides::{read::context::ReadSideContext, Offset},
+    lock::{OramaAsyncLock, OramaAsyncLockReadGuard},
     metrics::{commit::COMMIT_CALCULATION_TIME, Empty},
     types::{ApiKey, CollectionId},
 };
@@ -17,7 +18,6 @@ use oramacore_lib::nlp::locales::Locale;
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
-use tokio::sync::{RwLock, RwLockReadGuard};
 use tracing::{error, info, instrument, warn};
 
 use super::{collection::CollectionReader, IndexesConfig};
@@ -35,9 +35,9 @@ use super::{collection::CollectionReader, IndexesConfig};
 pub struct CollectionsReader {
     context: ReadSideContext,
 
-    collections: RwLock<HashMap<CollectionId, CollectionReader>>,
+    collections: OramaAsyncLock<HashMap<CollectionId, CollectionReader>>,
     indexes_config: IndexesConfig,
-    last_reindexed_collections: RwLock<Vec<(CollectionId, CollectionId)>>,
+    last_reindexed_collections: OramaAsyncLock<Vec<(CollectionId, CollectionId)>>,
 }
 
 impl CollectionsReader {
@@ -54,10 +54,12 @@ impl CollectionsReader {
                     warn!("Cannot read info.json file. Skip loading collections",);
                     return Ok(Self {
                         context,
-
-                        collections: Default::default(),
+                        collections: OramaAsyncLock::new("collections", Default::default()),
                         indexes_config,
-                        last_reindexed_collections: Default::default(),
+                        last_reindexed_collections: OramaAsyncLock::new(
+                            "last_reindexed_collections",
+                            Default::default(),
+                        ),
                     });
                 }
             };
@@ -65,7 +67,9 @@ impl CollectionsReader {
         let CollectionsInfo::V1(collections_info) = collections_info;
 
         let base_dir_for_collections = data_dir.join("collections");
-        let mut collections: HashMap<CollectionId, CollectionReader> = Default::default();
+        let mut collections: HashMap<CollectionId, CollectionReader> = HashMap::with_capacity(
+            collections_info.collection_ids.len() - collections_info.deleted_collection_ids.len(),
+        );
         for collection_id in collections_info.collection_ids {
             if collections_info
                 .deleted_collection_ids
@@ -79,10 +83,12 @@ impl CollectionsReader {
 
             let collection = CollectionReader::try_load(
                 context.clone(),
-                collection_dir,
+                collection_dir.clone(),
                 indexes_config.offload_field,
             )
             .with_context(|| format!("Cannot load {collection_id:?} collection"))?;
+
+            info!("Collection {:?} loaded", collection_dir);
 
             collections.insert(collection_id, collection);
         }
@@ -92,9 +98,10 @@ impl CollectionsReader {
         Ok(Self {
             context,
 
-            collections: RwLock::new(collections),
+            collections: OramaAsyncLock::new("collections", collections),
             indexes_config,
-            last_reindexed_collections: RwLock::new(
+            last_reindexed_collections: OramaAsyncLock::new(
+                "last_reindexed_collections",
                 collections_info
                     .last_reindexed_collections
                     .into_iter()
@@ -114,8 +121,9 @@ impl CollectionsReader {
     where
         's: 'coll,
     {
-        let collections_lock = self.collections.read().await;
-        let last_reindexed_collections_lock = self.last_reindexed_collections.read().await;
+        let collections_lock = self.collections.read("get_collection").await;
+        let last_reindexed_collections_lock =
+            self.last_reindexed_collections.read("get_collection").await;
 
         if let Some(collection) = collections_lock.get(&id) {
             if collection.is_deleted() {
@@ -131,7 +139,7 @@ impl CollectionsReader {
         let data_dir = &self.indexes_config.data_dir;
         let collections_dir = data_dir.join("collections");
 
-        let col = self.collections.read().await;
+        let col = self.collections.read("commit").await;
 
         let mut collection_ids: Vec<_> = vec![];
         info!("Committing collections: {:?}", collection_ids);
@@ -163,7 +171,7 @@ impl CollectionsReader {
             drop(m);
         }
 
-        let guard = self.last_reindexed_collections.read().await;
+        let guard = self.last_reindexed_collections.read("commit").await;
         let collections_info = CollectionsInfo::V1(CollectionsInfoV1 {
             collection_ids: collection_ids.into_iter().collect(),
             deleted_collection_ids: Default::default(),
@@ -210,7 +218,7 @@ impl CollectionsReader {
             self.indexes_config.offload_field,
         )?;
 
-        let mut guard = self.collections.write().await;
+        let mut guard = self.collections.write("create_collection").await;
 
         if let Some(collection) = guard.get(&id) {
             if !collection.is_deleted() {
@@ -269,7 +277,7 @@ impl CollectionsReader {
     pub async fn delete_collection(&self, collection_id: CollectionId) -> Result<()> {
         info!(collection_id=?collection_id, "ReadSide: Deleting collection {:?}", collection_id);
 
-        let mut guard = self.collections.write().await;
+        let mut guard = self.collections.write("delete_collection").await;
         if let Some(collection) = guard.get_mut(&collection_id) {
             collection.mark_as_deleted();
             info!(collection_id=?collection_id, "Collection marked as deleted {:?}", collection_id);
@@ -280,14 +288,17 @@ impl CollectionsReader {
 }
 
 pub struct CollectionReadLock<'guard> {
-    lock: RwLockReadGuard<'guard, HashMap<CollectionId, CollectionReader>>,
+    lock: OramaAsyncLockReadGuard<'guard, HashMap<CollectionId, CollectionReader>>,
     pub id: CollectionId,
 }
 
 impl<'guard> CollectionReadLock<'guard> {
     pub fn try_new(
-        collections_lock: RwLockReadGuard<'guard, HashMap<CollectionId, CollectionReader>>,
-        last_reindexed_collections_lock: RwLockReadGuard<'guard, Vec<(CollectionId, CollectionId)>>,
+        collections_lock: OramaAsyncLockReadGuard<'guard, HashMap<CollectionId, CollectionReader>>,
+        last_reindexed_collections_lock: OramaAsyncLockReadGuard<
+            'guard,
+            Vec<(CollectionId, CollectionId)>,
+        >,
         id: CollectionId,
     ) -> Option<Self> {
         let guard = collections_lock.get(&id);

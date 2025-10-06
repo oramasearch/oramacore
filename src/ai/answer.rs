@@ -193,7 +193,7 @@ impl Answer {
                 .read_side
                 .get_hook_storage(self.read_api_key, self.collection_id)
                 .await?;
-            let lock = hook_storage.read().await;
+            let lock = hook_storage.read("answer").await;
             let params = run_before_retrieval(
                 &lock,
                 params.clone(),
@@ -241,7 +241,7 @@ impl Answer {
             .read_side
             .get_hook_storage(self.read_api_key, self.collection_id)
             .await?;
-        let lock = hook_storage.read().await;
+        let lock = hook_storage.read("answer").await;
         let (variables, system_prompt) = run_before_answer(
             &lock,
             (variables, system_prompt),
@@ -543,7 +543,7 @@ impl Answer {
             .read_side
             .get_hook_storage(self.read_api_key, self.collection_id)
             .await?;
-        let lock = hook_storage.read().await;
+        let lock = hook_storage.read("run_before_retrieval").await;
         let params = run_before_retrieval(
             &lock,
             params.clone(),

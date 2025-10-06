@@ -2,21 +2,24 @@ use futures::Stream;
 use serde::{de::Unexpected, Deserialize, Serialize};
 use serde_json::value::RawValue;
 use std::{borrow::Cow, path::PathBuf, sync::Arc};
-use tokio::sync::{mpsc, RwLock};
+use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 use zebo::Zebo;
 
 use anyhow::{Context, Result};
 use tracing::{error, info, warn};
 
-use crate::types::{DocumentId, RawJSONDocument};
+use crate::{
+    lock::OramaAsyncLock,
+    types::{DocumentId, RawJSONDocument},
+};
 use oramacore_lib::fs::{create_if_not_exists, read_file};
 
 // 1GB
 const PAGE_SIZE: u64 = 1024 * 1024 * 1024;
 
 pub struct DocumentStorage {
-    zebo: Arc<RwLock<Zebo<1_000_000, PAGE_SIZE, DocumentId>>>,
+    zebo: Arc<OramaAsyncLock<Zebo<1_000_000, PAGE_SIZE, DocumentId>>>,
 }
 
 impl DocumentStorage {
@@ -38,7 +41,7 @@ impl DocumentStorage {
         };
 
         Ok(Self {
-            zebo: Arc::new(RwLock::new(zebo)),
+            zebo: Arc::new(OramaAsyncLock::new("zebo", zebo)),
         })
     }
 
@@ -47,7 +50,7 @@ impl DocumentStorage {
             return Ok(());
         }
 
-        let mut zebo = self.zebo.write().await;
+        let mut zebo = self.zebo.write("insert_many").await;
         let space = zebo
             .reserve_space_for(docs)
             .context("Cannot reserve space in zebo")?;
@@ -60,7 +63,7 @@ impl DocumentStorage {
 
     pub async fn remove(&self, ids: Vec<DocumentId>) {
         if !ids.is_empty() {
-            let mut zebo = self.zebo.write().await;
+            let mut zebo = self.zebo.write("remove").await;
             zebo.remove_documents(ids, false).unwrap();
         }
     }
@@ -73,7 +76,7 @@ impl DocumentStorage {
 
         let zebo = self.zebo.clone();
         tokio::spawn(async move {
-            let zebo = zebo.read().await;
+            let zebo = zebo.read("stream_documents").await;
 
             let docs_iter = match zebo.get_documents(ids) {
                 Ok(a) => a,

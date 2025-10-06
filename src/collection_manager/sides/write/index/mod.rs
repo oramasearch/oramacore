@@ -18,7 +18,6 @@ use fields::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
-use tokio::sync::{RwLock, RwLockReadGuard};
 use tracing::{info, instrument, trace, warn};
 
 use crate::{
@@ -28,6 +27,7 @@ use crate::{
         DocumentStorageWriteOperation, IndexWriteOperation, IndexWriteOperationFieldType,
         WriteOperation,
     },
+    lock::{OramaAsyncLock, OramaAsyncLockReadGuard, OramaAsyncLockWriteGuard},
     types::{
         CollectionId, DescribeCollectionIndexResponse, Document, DocumentId, DocumentList, FieldId,
         IndexEmbeddingsCalculation, IndexFieldType, IndexId, OramaDate,
@@ -52,10 +52,10 @@ pub struct Index {
     locale: Locale,
     text_parser: Arc<TextParser>,
 
-    filter_fields: RwLock<Vec<IndexFilterField>>,
-    score_fields: RwLock<Vec<IndexScoreField>>,
+    filter_fields: OramaAsyncLock<Vec<IndexFilterField>>,
+    score_fields: OramaAsyncLock<Vec<IndexScoreField>>,
 
-    doc_id_storage: RwLock<DocIdStorage>,
+    doc_id_storage: OramaAsyncLock<DocIdStorage>,
 
     field_id_generator: AtomicU16,
 
@@ -65,7 +65,7 @@ pub struct Index {
 
     runtime_index_id: Option<IndexId>,
 
-    pin_rules_writer: RwLock<PinRulesWriter>,
+    pin_rules_writer: OramaAsyncLock<PinRulesWriter>,
 
     enum_strategy: EnumStrategy,
 }
@@ -90,10 +90,10 @@ impl Index {
             locale,
             text_parser,
 
-            doc_id_storage: RwLock::new(DocIdStorage::empty()),
+            doc_id_storage: OramaAsyncLock::new("doc_id_storage", DocIdStorage::empty()),
 
-            filter_fields: RwLock::new(Default::default()),
-            score_fields: RwLock::new(score_fields),
+            filter_fields: OramaAsyncLock::new("filter_fields", Default::default()),
+            score_fields: OramaAsyncLock::new("score_fields", score_fields),
 
             field_id_generator: AtomicU16::new(field_id),
 
@@ -103,7 +103,7 @@ impl Index {
 
             runtime_index_id,
 
-            pin_rules_writer: RwLock::new(PinRulesWriter::empty()?),
+            pin_rules_writer: OramaAsyncLock::new("pin_rules_writer", PinRulesWriter::empty()?),
 
             enum_strategy,
         })
@@ -152,10 +152,10 @@ impl Index {
             locale: Locale::EN, // TODO: load from file
             text_parser: Arc::new(TextParser::from_locale(Locale::EN)),
 
-            doc_id_storage: RwLock::new(doc_id_storage),
+            doc_id_storage: OramaAsyncLock::new("doc_id_storage", doc_id_storage),
 
-            filter_fields: RwLock::new(filter_fields),
-            score_fields: RwLock::new(score_fields),
+            filter_fields: OramaAsyncLock::new("filter_fields", filter_fields),
+            score_fields: OramaAsyncLock::new("score_fields", score_fields),
 
             field_id_generator: AtomicU16::new(0),
 
@@ -165,7 +165,10 @@ impl Index {
 
             runtime_index_id: dump.runtime_index_id,
 
-            pin_rules_writer: RwLock::new(PinRulesWriter::try_new(data_dir.join("pin_rules"))?),
+            pin_rules_writer: OramaAsyncLock::new(
+                "pin_rules_writer",
+                PinRulesWriter::try_new(data_dir.join("pin_rules"))?,
+            ),
 
             enum_strategy: dump.enum_strategy,
         })
@@ -199,7 +202,7 @@ impl Index {
         &self,
         field_path: Box<[String]>,
     ) -> Result<IndexEmbeddingsCalculation> {
-        let score_fields = self.score_fields.read().await;
+        let score_fields = self.score_fields.read("get_embedding_field").await;
         let field = match get_field_by_path(&field_path, &score_fields) {
             Some(field) => field,
             None => {
@@ -257,7 +260,7 @@ impl Index {
             string_calculation,
         );
 
-        let mut field_lock = self.score_fields.write().await;
+        let mut field_lock = self.score_fields.write("add_embedding_field").await;
         field_lock.push(field);
         drop(field_lock);
 
@@ -286,8 +289,8 @@ impl Index {
     pub async fn commit(&self, data_dir: PathBuf) -> Result<()> {
         std::fs::create_dir_all(&data_dir).context("Cannot create data directory")?;
 
-        let filter_fields = self.filter_fields.read().await;
-        let score_fields = self.score_fields.read().await;
+        let filter_fields = self.filter_fields.read("commit").await;
+        let score_fields = self.score_fields.read("commit").await;
         let dump = IndexDump::V1(IndexDumpV1 {
             id: self.index_id,
             locale: self.locale,
@@ -307,12 +310,12 @@ impl Index {
             .write_json_data(&dump)
             .context("Cannot serialize collection info")?;
 
-        let mut pin_rules_writer = self.pin_rules_writer.write().await;
+        let mut pin_rules_writer = self.pin_rules_writer.write("commit").await;
         pin_rules_writer
             .commit(data_dir.join("pin_rules"))
             .context("Cannot commit index")?;
 
-        let doc_id_storage = self.doc_id_storage.read().await;
+        let doc_id_storage = self.doc_id_storage.read("commit").await;
         doc_id_storage
             .commit(data_dir)
             .context("Cannot commit index")?;
@@ -321,7 +324,7 @@ impl Index {
     }
 
     pub async fn get_document_ids(&self) -> Vec<DocumentId> {
-        let doc_id_storage = self.doc_id_storage.read().await;
+        let doc_id_storage = self.doc_id_storage.read("get").await;
         doc_id_storage.get_document_ids().collect()
     }
 
@@ -344,7 +347,7 @@ impl Index {
     }
 
     pub async fn get_document_id_storage<'index>(&'index self) -> DocIdStorageReadLock<'index> {
-        let doc_id_storage = self.doc_id_storage.read().await;
+        let doc_id_storage = self.doc_id_storage.read("get").await;
 
         DocIdStorageReadLock { doc_id_storage }
     }
@@ -368,7 +371,7 @@ impl Index {
             .context("Document id is not a string")?;
 
         // Check if the document is already indexed. If so, we will replace it
-        let mut doc_id_storage = self.doc_id_storage.write().await;
+        let mut doc_id_storage = self.doc_id_storage.write("new_doc").await;
         if let Some(old_doc_id) = doc_id_storage.insert_document_id(doc_id_str.to_string(), doc_id)
         {
             trace!("Document already indexed, replacing it.");
@@ -406,7 +409,7 @@ impl Index {
         new_document: &Document,
         index_operation_batch: &mut Vec<WriteOperation>,
     ) {
-        let pin_rules_writer = self.pin_rules_writer.write().await;
+        let pin_rules_writer = self.pin_rules_writer.write("update").await;
         let rules = pin_rules_writer.get_matching_rules(
             new_document
                 .inner
@@ -445,8 +448,8 @@ impl Index {
     ) -> Result<()> {
         let mut doc_indexed_values: Vec<IndexedValue> = vec![];
 
-        let filter_fields = self.filter_fields.read().await;
-        for field in &*filter_fields {
+        let filter_fields = self.filter_fields.read("process").await;
+        for field in &**filter_fields {
             let indexed_values = match field.index_value(doc_id, &doc.inner).await {
                 Ok(indexed_values) => indexed_values,
                 Err(_) => continue,
@@ -456,8 +459,8 @@ impl Index {
         }
         drop(filter_fields);
 
-        let score_fields = self.score_fields.read().await;
-        for field in &*score_fields {
+        let score_fields = self.score_fields.read("process").await;
+        for field in &**score_fields {
             let indexed_values = match field.index_value(doc_id, &doc.inner).await {
                 Ok(indexed_values) => indexed_values,
                 Err(_) => continue,
@@ -498,7 +501,7 @@ impl Index {
             })
             .collect();
 
-        let mut doc_id_storage = self.doc_id_storage.write().await;
+        let mut doc_id_storage = self.doc_id_storage.write("delete").await;
         let doc_ids = doc_id_storage.remove_document_ids(doc_ids);
 
         if !doc_ids.is_empty() {
@@ -533,8 +536,8 @@ impl Index {
     }
 
     pub async fn describe(&self) -> DescribeCollectionIndexResponse {
-        let filter_fields = self.filter_fields.read().await;
-        let score_fields = self.score_fields.read().await;
+        let filter_fields = self.filter_fields.read("describe").await;
+        let score_fields = self.score_fields.read("describe").await;
 
         let mut fields = Vec::new();
         fields.extend(filter_fields.iter().map(|f| IndexFieldType {
@@ -553,7 +556,7 @@ impl Index {
         // Sort by field id to a consistent order
         fields.sort_by_key(|a| a.field_id.0);
 
-        let document_count = self.doc_id_storage.read().await.len();
+        let document_count = self.doc_id_storage.read("describe").await.len();
 
         // FieldId(0) is the default embedding field by construction
         let automatically_chosen_properties = if let Some(IndexScoreField::Embedding(field)) =
@@ -641,8 +644,8 @@ impl Index {
             }
         }
 
-        let score_fields = self.score_fields.read().await;
-        let filter_fields = self.filter_fields.read().await;
+        let score_fields = self.score_fields.read("add_field").await;
+        let filter_fields = self.filter_fields.read("add_field").await;
 
         let mut current_fields = score_fields
             .iter()
@@ -681,8 +684,8 @@ impl Index {
             return Ok(());
         }
 
-        let mut score_fields = self.score_fields.write().await;
-        let mut filter_fields = self.filter_fields.write().await;
+        let mut score_fields = self.score_fields.write("add_field").await;
+        let mut filter_fields = self.filter_fields.write("add_field").await;
         for (k, f) in current_fields {
             let (filter, score) = match f {
                 F::AlreadyInserted => continue,
@@ -758,14 +761,12 @@ impl Index {
         Ok(())
     }
 
-    pub async fn get_pin_rule_writer(&self) -> tokio::sync::RwLockReadGuard<'_, PinRulesWriter> {
-        self.pin_rules_writer.read().await
+    pub async fn get_pin_rule_writer(&self) -> OramaAsyncLockReadGuard<'_, PinRulesWriter> {
+        self.pin_rules_writer.read("get").await
     }
 
-    pub async fn get_write_pin_rule_writer(
-        &self,
-    ) -> tokio::sync::RwLockWriteGuard<'_, PinRulesWriter> {
-        self.pin_rules_writer.write().await
+    pub async fn get_write_pin_rule_writer(&self) -> OramaAsyncLockWriteGuard<'_, PinRulesWriter> {
+        self.pin_rules_writer.write("get").await
     }
 }
 
@@ -964,7 +965,7 @@ struct IndexDumpV2 {
 }
 
 pub struct DocIdStorageReadLock<'index> {
-    doc_id_storage: RwLockReadGuard<'index, DocIdStorage>,
+    doc_id_storage: OramaAsyncLockReadGuard<'index, DocIdStorage>,
 }
 
 impl Deref for DocIdStorageReadLock<'_> {

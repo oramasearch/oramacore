@@ -1560,7 +1560,7 @@ impl AdvancedAutoqueryStateMachine {
             .await
             .map_err(|e| AdvancedAutoqueryError::ExecuteBeforeRetrievalHookError(e.to_string()))?;
 
-        let lock = hook_storage.read().await;
+        let lock = hook_storage.read("run_before_retrieval").await;
         let processed_search_params = run_before_retrieval(
             &lock,
             search_params.clone(),

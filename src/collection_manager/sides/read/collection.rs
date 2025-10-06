@@ -12,8 +12,7 @@ use debug_panic::debug_panic;
 use orama_js_pool::OutputChannel;
 use oramacore_lib::hook_storage::{HookReader, HookType};
 use serde::{Deserialize, Serialize};
-use tokio::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 
 use crate::{
     ai::advanced_autoquery::{AdvancedAutoQuery, AdvancedAutoQuerySteps, QueryMappedSearchResult},
@@ -26,9 +25,9 @@ use crate::{
         write::index::EnumStrategy,
         CollectionWriteOperation, Offset, ReplaceIndexReason,
     },
+    lock::{OramaAsyncLock, OramaAsyncLockReadGuard, OramaAsyncLockWriteGuard},
     types::{
         ApiKey, CollectionId, CollectionStatsRequest, FieldId, IndexId, InteractionMessage, Role,
-        TypeParsingStrategies,
     },
 };
 
@@ -48,7 +47,7 @@ pub struct CollectionReader {
     data_dir: PathBuf,
     id: CollectionId,
     description: Option<String>,
-    mcp_description: RwLock<Option<String>>,
+    mcp_description: OramaAsyncLock<Option<String>>,
     default_locale: Locale,
     deleted: bool,
 
@@ -57,14 +56,14 @@ pub struct CollectionReader {
     context: ReadSideContext,
     offload_config: OffloadFieldConfig,
 
-    indexes: RwLock<Vec<Index>>,
+    indexes: OramaAsyncLock<Vec<Index>>,
 
-    temp_indexes: RwLock<Vec<Index>>,
+    temp_indexes: OramaAsyncLock<Vec<Index>>,
 
-    hook: RwLock<HookReader>,
+    hook: OramaAsyncLock<HookReader>,
 
     created_at: DateTime<Utc>,
-    updated_at: RwLock<DateTime<Utc>>,
+    updated_at: OramaAsyncLock<DateTime<Utc>>,
 
     document_count_estimation: AtomicU64,
 }
@@ -84,7 +83,7 @@ impl CollectionReader {
         Ok(Self {
             id,
             description,
-            mcp_description: RwLock::new(mcp_description),
+            mcp_description: OramaAsyncLock::new("collection_mcp_description", mcp_description),
             default_locale,
             deleted: false,
 
@@ -94,13 +93,16 @@ impl CollectionReader {
             context,
             offload_config,
 
-            indexes: Default::default(),
-            temp_indexes: Default::default(),
+            indexes: OramaAsyncLock::new("collection_indexes", Default::default()),
+            temp_indexes: OramaAsyncLock::new("collection_temp_indexes", Default::default()),
 
-            hook: RwLock::new(HookReader::try_new(data_dir.join("hooks"))?),
+            hook: OramaAsyncLock::new(
+                "collection_hook",
+                HookReader::try_new(data_dir.join("hooks"))?,
+            ),
 
             created_at: Utc::now(),
-            updated_at: RwLock::new(Utc::now()),
+            updated_at: OramaAsyncLock::new("collection_updated_at", Utc::now()),
 
             document_count_estimation: AtomicU64::new(0),
 
@@ -113,14 +115,17 @@ impl CollectionReader {
         data_dir: PathBuf,
         offload_config: OffloadFieldConfig,
     ) -> Result<Self> {
+        debug!("Loading collection info");
         let dump: Dump = BufferedFile::open(data_dir.join("collection.json"))
             .context("Cannot open collection.json")?
             .read_json_data()
             .context("Cannot read collection.json")?;
         let Dump::V1(dump) = dump;
+        debug!("Collection info loaded");
 
         let mut indexes: Vec<Index> = Vec::with_capacity(dump.index_ids.len());
         for index_id in dump.index_ids {
+            debug!("Loading index {:?}", index_id);
             let index = Index::try_load(
                 index_id,
                 data_dir.join("indexes").join(index_id.as_str()),
@@ -128,10 +133,12 @@ impl CollectionReader {
                 offload_config,
             )?;
             indexes.push(index);
+            debug!("Index {:?} loaded", index_id);
         }
 
         let mut temp_indexes: Vec<Index> = Vec::with_capacity(dump.temp_index_ids.len());
         for index_id in dump.temp_index_ids {
+            debug!("Loading temp index {:?}", index_id);
             let index = Index::try_load(
                 index_id,
                 data_dir.join("temp_indexes").join(index_id.as_str()),
@@ -139,6 +146,7 @@ impl CollectionReader {
                 offload_config,
             )?;
             temp_indexes.push(index);
+            debug!("Temp index {:?} loaded", index_id);
         }
 
         let document_count_estimation = indexes.iter().map(|i| i.document_count()).sum::<u64>();
@@ -146,7 +154,10 @@ impl CollectionReader {
         let s = Self {
             id: dump.id,
             description: dump.description,
-            mcp_description: RwLock::new(dump.mcp_description),
+            mcp_description: OramaAsyncLock::new(
+                "collection_mcp_description",
+                dump.mcp_description,
+            ),
             default_locale: dump.default_locale,
             deleted: false,
 
@@ -156,13 +167,16 @@ impl CollectionReader {
             context,
             offload_config,
 
-            indexes: RwLock::new(indexes),
-            temp_indexes: RwLock::new(temp_indexes),
+            indexes: OramaAsyncLock::new("collection_indexes", indexes),
+            temp_indexes: OramaAsyncLock::new("collection_temp_indexes", temp_indexes),
 
-            hook: RwLock::new(HookReader::try_new(data_dir.join("hooks"))?),
+            hook: OramaAsyncLock::new(
+                "collection_hook",
+                HookReader::try_new(data_dir.join("hooks"))?,
+            ),
 
             created_at: dump.created_at,
-            updated_at: RwLock::new(dump.updated_at),
+            updated_at: OramaAsyncLock::new("collection_updated_at", dump.updated_at),
 
             document_count_estimation: AtomicU64::new(document_count_estimation),
 
@@ -188,7 +202,7 @@ impl CollectionReader {
         //     because the writer sends an appropriate command for that.
         //     Hence, we don't need to do anything here.
 
-        let indexes_lock = self.indexes.read().await;
+        let indexes_lock = self.indexes.read("commit").await;
         let mut index_ids = Vec::with_capacity(indexes_lock.len());
 
         let mut index_id_to_remove = vec![];
@@ -224,7 +238,7 @@ impl CollectionReader {
         }
         drop(indexes_lock);
 
-        let temp_indexes_lock = self.temp_indexes.read().await;
+        let temp_indexes_lock = self.temp_indexes.read("commit").await;
         let mut temp_index_ids = Vec::with_capacity(temp_indexes_lock.len());
         let temp_indexes_dir = self.data_dir.join("temp_indexes");
         for index in temp_indexes_lock.iter() {
@@ -257,21 +271,21 @@ impl CollectionReader {
         }
         drop(temp_indexes_lock);
 
-        let mut hook_lock = self.hook.write().await;
+        let mut hook_lock = self.hook.write("commit").await;
         hook_lock.commit()?;
         drop(hook_lock);
 
         let dump = Dump::V1(DumpV1 {
             id: self.id,
             description: self.description.clone(),
-            mcp_description: self.mcp_description.read().await.clone(),
+            mcp_description: self.mcp_description.read("commit").await.clone(),
             default_locale: self.default_locale,
             read_api_key: self.read_api_key,
             write_api_key: self.write_api_key,
             index_ids,
             temp_index_ids,
             created_at: self.created_at,
-            updated_at: *self.updated_at.read().await,
+            updated_at: **self.updated_at.read("commit").await,
         });
 
         BufferedFile::create_or_overwrite(self.data_dir.join("collection.json"))
@@ -280,12 +294,12 @@ impl CollectionReader {
             .context("Cannot write collection.json")?;
 
         // Remove deleted indexes from in memory
-        let mut indexes_lock = self.indexes.write().await;
-        let (kept, deleted): (Vec<_>, Vec<_>) = std::mem::take(&mut *indexes_lock)
+        let mut indexes_lock = self.indexes.write("commit").await;
+        let (kept, deleted): (Vec<_>, Vec<_>) = std::mem::take(&mut **indexes_lock)
             .into_iter()
             .enumerate()
             .partition(|(i, _)| !index_id_to_remove.iter().any(|(ind, _)| ind == i));
-        *indexes_lock = kept.into_iter().map(|(_, index)| index).collect();
+        **indexes_lock = kept.into_iter().map(|(_, index)| index).collect();
         drop(indexes_lock);
 
         // Remove deleted indexes from disk: here it is safe because we already save the collection dump to fs
@@ -303,7 +317,7 @@ impl CollectionReader {
         let temp_indexes_to_remove: std::collections::HashSet<_> =
             temp_index_id_to_remove.iter().collect();
         if !temp_indexes_to_remove.is_empty() {
-            let mut temp_indexes_lock = self.temp_indexes.write().await;
+            let mut temp_indexes_lock = self.temp_indexes.write("commit_retain").await;
             temp_indexes_lock.retain(|index| !temp_indexes_to_remove.contains(&index.id()));
             drop(temp_indexes_lock);
         }
@@ -374,13 +388,13 @@ impl CollectionReader {
         self.id
     }
 
-    pub fn get_hook_storage(&self) -> &RwLock<HookReader> {
+    pub fn get_hook_storage(&self) -> &OramaAsyncLock<HookReader> {
         &self.hook
     }
 
     pub async fn update_mcp_description(&self, mcp_description: Option<String>) -> Result<()> {
-        let mut mcp_description_lock = self.mcp_description.write().await;
-        *mcp_description_lock = mcp_description;
+        let mut mcp_description_lock = self.mcp_description.write("update").await;
+        **mcp_description_lock = mcp_description;
         drop(mcp_description_lock);
 
         Ok(())
@@ -453,7 +467,7 @@ impl CollectionReader {
     }
 
     pub async fn get_all_index_ids(&self) -> Result<Vec<IndexId>> {
-        let lock = self.indexes.read().await;
+        let lock = self.indexes.read("get_all_index_ids").await;
         let all_indexes = lock
             .iter()
             .filter(|index| !index.is_deleted())
@@ -466,7 +480,7 @@ impl CollectionReader {
         &'collection self,
         index_ids: &'search [IndexId],
     ) -> Result<ReadIndexesLockGuard<'collection, 'search>> {
-        let lock = self.indexes.read().await;
+        let lock = self.indexes.read("get_indexes_lock").await;
 
         let unknown_index = index_ids
             .iter()
@@ -518,18 +532,18 @@ impl CollectionReader {
     }
 
     pub async fn get_index(&self, index_id: IndexId) -> Option<IndexReadLock<'_>> {
-        let indexes_lock = self.indexes.read().await;
+        let indexes_lock = self.indexes.read("get_index").await;
         IndexReadLock::try_new(indexes_lock, index_id)
     }
 
     pub async fn update(&self, collection_operation: CollectionWriteOperation) -> Result<()> {
-        let mut updated_at_lock = self.updated_at.write().await;
-        *updated_at_lock = Utc::now();
+        let mut updated_at_lock = self.updated_at.write("update").await;
+        **updated_at_lock = Utc::now();
         drop(updated_at_lock);
 
         match collection_operation {
             CollectionWriteOperation::CreateIndex2 { index_id, locale } => {
-                let mut indexes_lock = self.indexes.write().await;
+                let mut indexes_lock = self.indexes.write("create_index").await;
                 let index = Index::new(
                     index_id,
                     self.context.nlp_service.get(locale),
@@ -551,7 +565,7 @@ impl CollectionReader {
                 locale,
                 enum_strategy,
             } => {
-                let mut indexes_lock = self.indexes.write().await;
+                let mut indexes_lock = self.indexes.write("create_index").await;
                 let index = Index::new(
                     index_id,
                     self.context.nlp_service.get(locale),
@@ -569,7 +583,7 @@ impl CollectionReader {
                 drop(indexes_lock);
             }
             CollectionWriteOperation::CreateTemporaryIndex2 { index_id, locale } => {
-                let mut temp_indexes_lock = self.temp_indexes.write().await;
+                let mut temp_indexes_lock = self.temp_indexes.write("create_temp_index").await;
                 let index = Index::new(
                     index_id,
                     self.context.nlp_service.get(locale),
@@ -591,7 +605,7 @@ impl CollectionReader {
                 locale,
                 enum_strategy,
             } => {
-                let mut temp_indexes_lock = self.temp_indexes.write().await;
+                let mut temp_indexes_lock = self.temp_indexes.write("create_temp_index").await;
                 let index = Index::new(
                     index_id,
                     self.context.nlp_service.get(locale),
@@ -649,8 +663,8 @@ impl CollectionReader {
                 reference,
                 reason,
             } => {
-                let mut temp_index_lock = self.temp_indexes.write().await;
-                let mut runtime_index_lock = self.indexes.write().await;
+                let mut temp_index_lock = self.temp_indexes.write("replace_temp_index").await;
+                let mut runtime_index_lock = self.indexes.write("replace_runtime_index").await;
 
                 let runtime_i = get_index_in_vector(&runtime_index_lock, runtime_index_id);
                 let temp_i = get_index_in_vector(&temp_index_lock, temp_index_id);
@@ -707,7 +721,7 @@ impl CollectionReader {
                 }
             }
             CollectionWriteOperation::Hook(op) => {
-                let mut lock = self.hook.write().await;
+                let mut lock = self.hook.write("update_hook").await;
                 lock.update(op)?;
                 drop(lock);
             }
@@ -720,7 +734,7 @@ impl CollectionReader {
     }
 
     pub async fn stats(&self, req: CollectionStatsRequest) -> Result<CollectionStats, ReadError> {
-        let indexes_lock = self.indexes.read().await;
+        let indexes_lock = self.indexes.read("stats").await;
         let mut indexes_stats = Vec::with_capacity(indexes_lock.len());
         let mut embedding_model: Option<String> = None;
 
@@ -741,7 +755,7 @@ impl CollectionReader {
         }
         drop(indexes_lock);
 
-        let temp_indexes_lock = self.temp_indexes.read().await;
+        let temp_indexes_lock = self.temp_indexes.read("stats").await;
         for i in temp_indexes_lock.iter() {
             if i.is_deleted() {
                 continue;
@@ -749,7 +763,7 @@ impl CollectionReader {
             indexes_stats.push(i.stats(true, req.with_keys).await?);
         }
 
-        let lock = self.hook.read().await;
+        let lock = self.hook.read("stats").await;
         let hooks = lock.list()?;
         let hooks = hooks
             .into_iter()
@@ -764,23 +778,23 @@ impl CollectionReader {
                 .map(|i| i.document_count)
                 .sum::<usize>(),
             description: self.description.clone(),
-            mcp_description: self.mcp_description.read().await.clone(),
+            mcp_description: self.mcp_description.read("stats").await.clone(),
             default_locale: self.default_locale,
             embedding_model,
             indexes_stats,
             hooks,
             created_at: self.created_at,
-            updated_at: *self.updated_at.read().await,
+            updated_at: **self.updated_at.read("stats").await,
         })
     }
 
     async fn get_index_mut(&self, index_id: IndexId) -> Option<IndexWriteLock<'_>> {
-        let indexes_lock = self.indexes.write().await;
+        let indexes_lock = self.indexes.write("get_index_mut").await;
         IndexWriteLock::try_new(indexes_lock, index_id)
     }
 
     async fn get_temp_index_mut(&self, index_id: IndexId) -> Option<IndexWriteLock<'_>> {
-        let indexes_lock = self.temp_indexes.write().await;
+        let indexes_lock = self.temp_indexes.write("get_temp_index_mut").await;
         IndexWriteLock::try_new(indexes_lock, index_id)
     }
 }
@@ -852,12 +866,15 @@ pub struct CollectionStats {
 }
 
 pub struct IndexReadLock<'guard> {
-    lock: RwLockReadGuard<'guard, Vec<Index>>,
+    lock: OramaAsyncLockReadGuard<'guard, Vec<Index>>,
     index: usize,
 }
 
 impl<'guard> IndexReadLock<'guard> {
-    pub fn try_new(indexes_lock: RwLockReadGuard<'guard, Vec<Index>>, id: IndexId) -> Option<Self> {
+    pub fn try_new(
+        indexes_lock: OramaAsyncLockReadGuard<'guard, Vec<Index>>,
+        id: IndexId,
+    ) -> Option<Self> {
         get_index_in_vector(&indexes_lock, id).map(|index| Self {
             lock: indexes_lock,
             index,
@@ -876,13 +893,13 @@ impl Deref for IndexReadLock<'_> {
 }
 
 pub struct IndexWriteLock<'guard> {
-    lock: RwLockWriteGuard<'guard, Vec<Index>>,
+    lock: OramaAsyncLockWriteGuard<'guard, Vec<Index>>,
     index: usize,
 }
 
 impl<'guard> IndexWriteLock<'guard> {
     pub fn try_new(
-        indexes_lock: RwLockWriteGuard<'guard, Vec<Index>>,
+        indexes_lock: OramaAsyncLockWriteGuard<'guard, Vec<Index>>,
         id: IndexId,
     ) -> Option<Self> {
         get_index_in_vector(&indexes_lock, id).map(|index| Self {
@@ -951,12 +968,12 @@ enum Dump {
 }
 
 pub struct ReadIndexesLockGuard<'collection, 'search> {
-    lock: RwLockReadGuard<'collection, Vec<Index>>,
+    lock: OramaAsyncLockReadGuard<'collection, Vec<Index>>,
     index_ids: &'search [IndexId],
 }
 impl<'collection, 'search> ReadIndexesLockGuard<'collection, 'search> {
     pub fn new(
-        lock: RwLockReadGuard<'collection, Vec<Index>>,
+        lock: OramaAsyncLockReadGuard<'collection, Vec<Index>>,
         index_ids: &'search [IndexId],
     ) -> Self {
         Self { lock, index_ids }

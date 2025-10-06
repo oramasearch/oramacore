@@ -6,7 +6,6 @@ use std::time::Duration;
 use anyhow::{Context, Result};
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
-use tokio::sync::{RwLock, RwLockReadGuard};
 use tracing::{error, info};
 
 use crate::ai::OramaModel;
@@ -14,6 +13,7 @@ use crate::collection_manager::sides::write::collection::CreateEmptyCollection;
 use crate::collection_manager::sides::write::context::WriteSideContext;
 use crate::collection_manager::sides::write::WriteError;
 use crate::collection_manager::sides::{CollectionWriteOperation, OperationSender, WriteOperation};
+use crate::lock::{OramaAsyncLock, OramaAsyncLockReadGuard};
 use crate::metrics::commit::COMMIT_CALCULATION_TIME;
 use crate::metrics::Empty;
 use crate::types::{CollectionId, DocumentId};
@@ -25,7 +25,7 @@ use super::collection::CollectionWriter;
 use super::CollectionsWriterConfig;
 
 pub struct CollectionsWriter {
-    collections: RwLock<HashMap<CollectionId, CollectionWriter>>,
+    collections: OramaAsyncLock<HashMap<CollectionId, CollectionWriter>>,
     config: CollectionsWriterConfig,
     context: WriteSideContext,
     default_model: OramaModel,
@@ -56,7 +56,7 @@ impl CollectionsWriter {
                 );
                 return Ok(CollectionsWriter {
                     // collection_options: Default::default(),
-                    collections: Default::default(),
+                    collections: OramaAsyncLock::new("collections", Default::default()),
                     config,
                     context,
                     default_model,
@@ -77,7 +77,7 @@ impl CollectionsWriter {
         }
 
         let writer = CollectionsWriter {
-            collections: RwLock::new(collections),
+            collections: OramaAsyncLock::new("collections", collections),
             config,
             context,
             default_model,
@@ -94,7 +94,7 @@ impl CollectionsWriter {
     where
         's: 'coll,
     {
-        let r = self.collections.read().await;
+        let r = self.collections.read("get_collection").await;
         CollectionReadLock::try_new(r, id)
     }
 
@@ -129,7 +129,7 @@ impl CollectionsWriter {
         let collection =
             CollectionWriter::empty(self.data_dir.join(id.as_str()), req, self.context.clone())?;
 
-        let mut collections = self.collections.write().await;
+        let mut collections = self.collections.write("create_collection").await;
 
         if collections.contains_key(&id) {
             return Err(WriteError::CollectionAlreadyExists(id));
@@ -161,7 +161,10 @@ impl CollectionsWriter {
     ) -> Result<(), WriteError> {
         info!("Updating collection {:?}", collection_id);
 
-        let collections = self.collections.read().await;
+        let collections = self
+            .collections
+            .read("update_collection_mcp_description")
+            .await;
         if !collections.contains_key(&collection_id) {
             return Err(WriteError::CollectionNotFound(collection_id));
         }
@@ -179,7 +182,7 @@ impl CollectionsWriter {
     }
 
     pub async fn list(&self) -> Vec<DescribeCollectionResponse> {
-        let collections = self.collections.read().await;
+        let collections = self.collections.read("list").await;
 
         let mut r = vec![];
         for collection in collections.values() {
@@ -193,7 +196,7 @@ impl CollectionsWriter {
 
         // During the commit, we don't accept any new write operation
         // This `write` lock is held until the commit is done
-        let mut collections = self.collections.write().await;
+        let mut collections = self.collections.write("commit").await;
 
         let data_dir = &self.config.data_dir.join("collections");
         create_if_not_exists(data_dir).context("Cannot create data directory")?;
@@ -225,7 +228,7 @@ impl CollectionsWriter {
     }
 
     pub async fn delete_collection(&self, collection_id: CollectionId) -> Option<Vec<DocumentId>> {
-        let mut collections = self.collections.write().await;
+        let mut collections = self.collections.write("delete_collection").await;
         let collection = collections.remove(&collection_id);
 
         let collection = match collection {
@@ -268,7 +271,7 @@ impl CollectionsWriter {
 
         // PHASE 1: Collect expired temp indexes (with collections lock)
         let expired_temp_indexes = {
-            let collections = self.collections.read().await;
+            let collections = self.collections.read("cleanup_expired_temp_indexes").await;
             let mut expired_indexes = Vec::new();
             let now = Utc::now();
 
@@ -300,7 +303,7 @@ impl CollectionsWriter {
         let mut cleanup_count = 0;
 
         for (collection_id, temp_index_id) in expired_temp_indexes {
-            let collections = self.collections.read().await;
+            let collections = self.collections.read("cleanup_expired_temp_indexes").await;
             let collection = collections.get(&collection_id);
 
             if let Some(collection) = collection {
@@ -335,13 +338,13 @@ impl CollectionsWriter {
 }
 
 pub struct CollectionReadLock<'guard> {
-    lock: RwLockReadGuard<'guard, HashMap<CollectionId, CollectionWriter>>,
+    lock: OramaAsyncLockReadGuard<'guard, HashMap<CollectionId, CollectionWriter>>,
     pub id: CollectionId,
 }
 
 impl<'guard> CollectionReadLock<'guard> {
     pub fn try_new(
-        lock: RwLockReadGuard<'guard, HashMap<CollectionId, CollectionWriter>>,
+        lock: OramaAsyncLockReadGuard<'guard, HashMap<CollectionId, CollectionWriter>>,
         id: CollectionId,
     ) -> Option<Self> {
         let guard = lock.get(&id);

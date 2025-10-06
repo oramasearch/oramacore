@@ -33,10 +33,7 @@ use duration_str::deserialize_duration;
 use futures::FutureExt;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
-use tokio::{
-    sync::RwLock,
-    time::{sleep, Instant, MissedTickBehavior},
-};
+use tokio::time::{sleep, Instant, MissedTickBehavior};
 use tokio_stream::StreamExt;
 use tracing::{debug, error, info, trace, warn};
 
@@ -47,6 +44,7 @@ use embedding::{start_calculate_embedding_loop, MultiEmbeddingCalculationRequest
 pub use context::WriteSideContext;
 
 use crate::collection_manager::sides::write::document_storage::ZeboDocument;
+use crate::lock::OramaAsyncLock;
 use crate::{
     ai::{
         automatic_embeddings_selector::AutomaticEmbeddingsSelector,
@@ -137,7 +135,7 @@ pub struct WriteSide {
     collections: CollectionsWriter,
     document_count: AtomicU64,
     data_dir: PathBuf,
-    operation_counter: RwLock<u64>,
+    operation_counter: OramaAsyncLock<u64>,
     insert_batch_commit_size: u64,
 
     document_storage: DocumentStorage,
@@ -150,7 +148,7 @@ pub struct WriteSide {
     context: WriteSideContext,
 
     stop_sender: tokio::sync::broadcast::Sender<()>,
-    stop_done_receiver: RwLock<tokio::sync::mpsc::Receiver<()>>,
+    stop_done_receiver: OramaAsyncLock<tokio::sync::mpsc::Receiver<()>>,
 
     // This counter is incremented each time we need to
     // change the collections hashmap:
@@ -265,7 +263,7 @@ impl WriteSide {
             data_dir,
             insert_batch_commit_size,
             master_api_key,
-            operation_counter: Default::default(),
+            operation_counter: OramaAsyncLock::new("operation_counter", Default::default()),
             op_sender: op_sender.clone(),
             system_prompts,
             training_sets,
@@ -273,7 +271,7 @@ impl WriteSide {
             kv,
             context: context.clone(),
             stop_sender,
-            stop_done_receiver: RwLock::new(stop_done_receiver),
+            stop_done_receiver: OramaAsyncLock::new("stop_done_receiver", stop_done_receiver),
             write_operation_counter: AtomicU32::new(0),
             jwt_manager,
         };
@@ -315,7 +313,7 @@ impl WriteSide {
         self.stop_sender
             .send(())
             .context("Cannot send stop signal")?;
-        let mut stop_done_receiver = self.stop_done_receiver.write().await;
+        let mut stop_done_receiver = self.stop_done_receiver.write("stop").await;
         // Commit loop
         stop_done_receiver
             .recv()
@@ -686,10 +684,10 @@ impl WriteSide {
 
         drop(metric);
 
-        let mut lock = self.operation_counter.write().await;
-        *lock += document_count as u64;
-        let should_commit = if *lock >= self.insert_batch_commit_size {
-            *lock = 0;
+        let mut lock = self.operation_counter.write("insert_doc").await;
+        **lock += document_count as u64;
+        let should_commit = if **lock >= self.insert_batch_commit_size {
+            **lock = 0;
             true
         } else {
             false
@@ -1016,12 +1014,6 @@ impl WriteSide {
                     DocumentStorageWriteOperation::InsertDocuments(batch),
                 ));
                 batch = Vec::with_capacity(batch_size);
-
-                self.document_storage
-                    .insert_many(&docs)
-                    .await
-                    .context("Cannot inser document into document storage")?;
-                docs.clear();
             }
 
             let doc_id = self.document_count.fetch_add(1, Ordering::Relaxed);
