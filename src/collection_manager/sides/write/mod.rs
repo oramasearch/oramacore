@@ -192,19 +192,30 @@ impl WriteSide {
         let document_count = AtomicU64::new(0);
 
         let write_side_info_path = data_dir.join("info.json");
-        let r = BufferedFile::open(write_side_info_path)
+        let write_side_info = BufferedFile::open(write_side_info_path)
             .and_then(|f| f.read_json_data::<WriteSideInfo>());
 
-        let op_sender = if let Ok(info) = r {
+        let op_sender = if let Ok(info) = write_side_info {
             let WriteSideInfo::V1(info) = info;
             document_count.store(info.document_count, Ordering::Relaxed);
+
+            // If RabbitMQ is used, we store 0 as offset in the info file
+            // If InMemory is used, we store the real offset
+            // So, if the offset is 0, we use the initial offset from the config
+            let offset = if info.offset.0 == 0 {
+                op_sender_creator.get_initial_offset()
+            } else {
+                info.offset
+            };
             op_sender_creator
-                .create(info.offset)
+                .create(offset)
                 .await
                 .context("Cannot create sender")?
         } else {
+            // Use the initial offset from config (0 for InMemory, configured value for RabbitMQ)
+            let initial_offset = op_sender_creator.get_initial_offset();
             op_sender_creator
-                .create(Offset(0))
+                .create(initial_offset)
                 .await
                 .context("Cannot create sender")?
         };
