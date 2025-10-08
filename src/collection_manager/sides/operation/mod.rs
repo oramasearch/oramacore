@@ -9,6 +9,8 @@ use tracing::{error, trace, warn};
 
 mod rabbit;
 pub use rabbit::*;
+mod kafka;
+pub use kafka::*;
 mod op;
 pub use op::*;
 
@@ -34,6 +36,10 @@ pub enum OperationSender {
         offset_counter: Arc<AtomicU64>,
         sender: RabbitOperationSender,
     },
+    Kafka {
+        offset_counter: Arc<AtomicU64>,
+        sender: KafkaOperationSender,
+    },
 }
 
 impl Debug for OperationSender {
@@ -45,6 +51,7 @@ impl Debug for OperationSender {
             OperationSender::RabbitMQ { .. } => {
                 f.debug_struct("OperationSender::RabbitMQ").finish()
             }
+            OperationSender::Kafka { .. } => f.debug_struct("OperationSender::Kafka").finish(),
         }
     }
 }
@@ -56,8 +63,11 @@ impl OperationSender {
                 Offset(offset_counter.load(std::sync::atomic::Ordering::SeqCst))
             }
             // This method is invoked when the write side is committing.
-            // Now we store the offset on writer side for both InMemory and RabbitMQ.
+            // Now we store the offset on writer side for both InMemory, RabbitMQ, and Kafka.
             OperationSender::RabbitMQ { offset_counter, .. } => {
+                Offset(offset_counter.load(std::sync::atomic::Ordering::SeqCst))
+            }
+            OperationSender::Kafka { offset_counter, .. } => {
                 Offset(offset_counter.load(std::sync::atomic::Ordering::SeqCst))
             }
         }
@@ -78,6 +88,13 @@ impl OperationSender {
                 sender.send((Offset(offset), message_body)).await?;
             }
             OperationSender::RabbitMQ {
+                offset_counter,
+                sender,
+            } => {
+                let offset = offset_counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                sender.send(&operation, Offset(offset)).await?;
+            }
+            OperationSender::Kafka {
                 offset_counter,
                 sender,
             } => {
@@ -123,6 +140,21 @@ impl OperationSender {
 
                 sender.send_batch(&operations_with_offsets).await?;
             }
+            OperationSender::Kafka {
+                offset_counter,
+                sender,
+            } => {
+                let operations_with_offsets: Vec<_> = operations
+                    .into_iter()
+                    .map(|op| {
+                        let offset =
+                            offset_counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                        (op, Offset(offset))
+                    })
+                    .collect();
+
+                sender.send_batch(&operations_with_offsets).await?;
+            }
         }
 
         Ok(())
@@ -134,11 +166,12 @@ pub enum OperationReceiver {
         receiver: tokio::sync::mpsc::Receiver<(Offset, Vec<u8>)>,
     },
     RabbitMQ(RabbitOperationReceiver),
+    Kafka(KafkaOperationReceiver),
 }
 
 impl OperationReceiver {
     pub fn should_reconnect(&self) -> bool {
-        matches!(self, Self::RabbitMQ(_))
+        matches!(self, Self::RabbitMQ(_) | Self::Kafka(_))
     }
 
     pub fn try_recv(&mut self) -> Option<Result<(Offset, WriteOperation)>> {
@@ -163,6 +196,7 @@ impl OperationReceiver {
                 }
             },
             Self::RabbitMQ(_) => None,
+            Self::Kafka(_) => None,
         }
     }
 
@@ -189,6 +223,7 @@ impl OperationReceiver {
                 Some(Ok((offset, message_body)))
             }
             Self::RabbitMQ(receiver) => receiver.next().await,
+            Self::Kafka(receiver) => receiver.next().await,
         }
     }
 
@@ -196,6 +231,7 @@ impl OperationReceiver {
         match self {
             Self::InMemory { .. } => Ok(()),
             Self::RabbitMQ(receiver) => receiver.reconnect().await,
+            Self::Kafka(receiver) => receiver.reconnect().await,
         }
     }
 }
@@ -205,12 +241,14 @@ pub enum OperationSenderCreator {
         sender: tokio::sync::mpsc::Sender<(Offset, Vec<u8>)>,
     },
     RabbitMQ(RabbitOperationSenderCreator),
+    Kafka(KafkaOperationSenderCreator),
 }
 impl OperationSenderCreator {
     pub fn get_initial_offset(&self) -> Offset {
         match self {
             OperationSenderCreator::InMemory { .. } => Offset(0),
             OperationSenderCreator::RabbitMQ(creator) => creator.get_initial_offset(),
+            OperationSenderCreator::Kafka(creator) => creator.get_initial_offset(),
         }
     }
 
@@ -234,6 +272,17 @@ impl OperationSenderCreator {
                     sender,
                 })
             }
+            OperationSenderCreator::Kafka(creator) => {
+                let sender = creator
+                    .create()
+                    .await
+                    .context("Cannot create Kafka sender")?;
+                let offset_counter = Arc::new(AtomicU64::new(offset.0));
+                Ok(OperationSender::Kafka {
+                    offset_counter,
+                    sender,
+                })
+            }
         }
     }
 }
@@ -243,6 +292,7 @@ pub enum OperationReceiverCreator {
         receiver: tokio::sync::mpsc::Receiver<(Offset, Vec<u8>)>,
     },
     RabbitMQ(RabbitOperationReceiverCreator),
+    Kafka(KafkaOperationReceiverCreator),
 }
 
 impl OperationReceiverCreator {
@@ -250,6 +300,7 @@ impl OperationReceiverCreator {
         match self {
             OperationReceiverCreator::InMemory { .. } => Offset(0),
             OperationReceiverCreator::RabbitMQ(creator) => creator.get_initial_offset(),
+            OperationReceiverCreator::Kafka(creator) => creator.get_initial_offset(),
         }
     }
 
@@ -264,6 +315,13 @@ impl OperationReceiverCreator {
                     .await
                     .context("Cannot create RabbitMQ receiver")?;
                 Ok(OperationReceiver::RabbitMQ(receiver))
+            }
+            OperationReceiverCreator::Kafka(creator) => {
+                let receiver = creator
+                    .create(last_offset)
+                    .await
+                    .context("Cannot create Kafka receiver")?;
+                Ok(OperationReceiver::Kafka(receiver))
             }
         }
     }
@@ -335,7 +393,48 @@ pub async fn channel_creator(
 
             Ok((None, Some(receiver_creator)))
         }
+        (
+            Some(OutputSideChannelType::Kafka(write_kafka_config)),
+            Some(InputSideChannelType::Kafka(read_kafka_config)),
+        ) => {
+            let sender_creator = OperationSenderCreator::Kafka(
+                KafkaOperationSenderCreator::try_new(write_kafka_config)
+                    .await
+                    .context("Cannot create Kafka sender")?,
+            );
+            let receiver_creator = OperationReceiverCreator::Kafka(
+                KafkaOperationReceiverCreator::try_new(read_kafka_config)
+                    .await
+                    .context("Cannot create Kafka receiver")?,
+            );
+
+            Ok((Some(sender_creator), Some(receiver_creator)))
+        }
+        (Some(OutputSideChannelType::Kafka(write_kafka_config)), None) => {
+            let sender_creator = OperationSenderCreator::Kafka(
+                KafkaOperationSenderCreator::try_new(write_kafka_config)
+                    .await
+                    .context("Cannot create Kafka sender")?,
+            );
+            Ok((Some(sender_creator), None))
+        }
+        (None, Some(InputSideChannelType::Kafka(read_kafka_config))) => {
+            let receiver_creator = OperationReceiverCreator::Kafka(
+                KafkaOperationReceiverCreator::try_new(read_kafka_config)
+                    .await
+                    .context("Cannot create Kafka receiver")?,
+            );
+
+            Ok((None, Some(receiver_creator)))
+        }
         (None, None) => Err(anyhow::anyhow!("write_side or read_side must be provided")),
+        // Mismatched channel types (RabbitMQ/Kafka) are not supported
+        (Some(OutputSideChannelType::RabbitMQ(_)), Some(InputSideChannelType::Kafka(_)))
+        | (Some(OutputSideChannelType::Kafka(_)), Some(InputSideChannelType::RabbitMQ(_))) => {
+            Err(anyhow::anyhow!(
+                "write_side and read_side must use the same channel type (both in-memory, both RabbitMQ, or both Kafka)"
+            ))
+        }
     }
 }
 
@@ -350,6 +449,8 @@ pub enum OutputSideChannelType {
     },
     #[serde(rename = "rabbitmq")]
     RabbitMQ(OutputRabbitMQConfig),
+    #[serde(rename = "kafka")]
+    Kafka(OutputKafkaConfig),
 }
 
 #[derive(Deserialize, Clone)]
@@ -363,6 +464,8 @@ pub enum InputSideChannelType {
     },
     #[serde(rename = "rabbitmq")]
     RabbitMQ(InputRabbitMQConfig),
+    #[serde(rename = "kafka")]
+    Kafka(InputKafkaConfig),
 }
 
 fn default_in_memory_capacity() -> usize {

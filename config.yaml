@@ -23,6 +23,11 @@ writer_side:
         # client_provided_name: oramacore-producer
         # producer_name: write
         # initial_offset: 0  # Default offset value for the first time
+        # type: kafka
+        # brokers: localhost:9092
+        # topic: oramacore-operations
+        # client_id: oramacore-producer
+        # initial_offset: 0  # Default offset value for the first time
 
     hooks:
         select_embeddings_properties:
@@ -83,6 +88,12 @@ reader_side:
         # stream_name: oramacore-operations
         # client_provided_name: oramacore-producer
         # consumer_name: reader
+        # initial_offset: 0  # Default offset value for the first time
+        # type: kafka
+        # brokers: localhost:9092
+        # topic: oramacore-operations
+        # group_id: oramacore-consumer-group
+        # client_id: oramacore-consumer
         # initial_offset: 0  # Default offset value for the first time
 
     config:
