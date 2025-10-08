@@ -189,7 +189,10 @@ impl KafkaOperationSenderCreator {
     pub async fn try_new(config: OutputKafkaConfig) -> Result<Self> {
         // Validate configuration by attempting to create a test producer
         let mut client_config = ClientConfig::new();
-        client_config.set("bootstrap.servers", &config.producer_config.brokers);
+        client_config.set(
+            "bootstrap.servers",
+            &config.producer_config.bootstrap_servers,
+        );
         client_config.set("client.id", &config.producer_config.client_id);
 
         // Test connection
@@ -311,7 +314,7 @@ impl Stream for KafkaOperationReceiver {
 
 #[derive(Debug, Deserialize, Clone, PartialEq)]
 pub struct KafkaProducerConfig {
-    pub brokers: String,
+    pub bootstrap_servers: String,
     pub topic: String,
     pub client_id: String,
     #[serde(default)]
@@ -342,7 +345,7 @@ pub struct InputKafkaConfig {
 
 async fn create_producer(producer_config: &KafkaProducerConfig) -> Result<FutureProducer> {
     let mut client_config = ClientConfig::new();
-    client_config.set("bootstrap.servers", &producer_config.brokers);
+    client_config.set("bootstrap.servers", &producer_config.bootstrap_servers);
     client_config.set("client.id", &producer_config.client_id);
     client_config.set("message.timeout.ms", "5000");
     client_config.set("queue.buffering.max.messages", "100000");

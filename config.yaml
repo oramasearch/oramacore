@@ -24,7 +24,7 @@ writer_side:
         # producer_name: write
         # initial_offset: 0  # Default offset value for the first time
         # type: kafka
-        # brokers: localhost:9092
+        # bootstrap_servers: localhost:9092
         # topic: oramacore-operations
         # client_id: oramacore-producer
         # initial_offset: 0  # Default offset value for the first time
