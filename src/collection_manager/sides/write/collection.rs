@@ -2,7 +2,7 @@ use std::{collections::HashMap, ops::Deref, path::PathBuf, sync::Arc};
 
 use anyhow::{bail, Context, Result};
 use chrono::{DateTime, Utc};
-use futures::FutureExt;
+use futures::{future::join_all, FutureExt};
 use oramacore_lib::hook_storage::HookWriter;
 use serde::{Deserialize, Serialize};
 use tracing::{info, warn};
@@ -52,6 +52,8 @@ pub struct CollectionWriter {
     created_at: DateTime<Utc>,
 
     hook: HookWriter,
+
+    is_new: bool,
 }
 
 impl CollectionWriter {
@@ -97,6 +99,8 @@ impl CollectionWriter {
 
             hook: HookWriter::try_new(data_dir.join("hooks"), send_hook_operation_cb)
                 .context("Cannot create hook writer")?,
+
+            is_new: true,
         })
     }
 
@@ -175,6 +179,8 @@ impl CollectionWriter {
                 }),
             )
             .context("Cannot create hook writer")?,
+
+            is_new: false,
         })
     }
 
@@ -186,17 +192,43 @@ impl CollectionWriter {
         let indexes_lock = self.indexes.get_mut();
         let temp_indexes_lock = self.temp_indexes.get_mut();
 
+        let is_dirty = indexes_lock.values().any(|i| i.is_dirty())
+            || temp_indexes_lock.values().any(|i| i.is_dirty());
+        if !self.is_new && !is_dirty {
+            info!("Collection is not dirty, skipping commit");
+            return Ok(());
+        }
+
         let indexes = indexes_lock.keys().copied().collect::<Vec<_>>();
         let indexes_path = data_dir.join("indexes");
-        for (id, index) in indexes_lock.iter_mut() {
-            index.commit(indexes_path.join(id.as_str())).await?;
-        }
+        let futures: Vec<_> = indexes_lock
+            .iter_mut()
+            .map(|(id, index)| {
+                let path = indexes_path.join(id.as_str());
+                async move { index.commit(path).await }
+            })
+            .collect();
+        join_all(futures)
+            .await
+            .into_iter()
+            .collect::<Result<Vec<_>, _>>()
+            .context("Error committing indexes")?;
 
         let temporary_indexes = temp_indexes_lock.keys().copied().collect::<Vec<_>>();
         let indexes_path = data_dir.join("temp_indexes");
-        for (id, index) in temp_indexes_lock.iter_mut() {
-            index.commit(indexes_path.join(id.as_str())).await?;
-        }
+
+        let futures: Vec<_> = temp_indexes_lock
+            .iter_mut()
+            .map(|(id, index)| {
+                let path = indexes_path.join(id.as_str());
+                async move { index.commit(path).await }
+            })
+            .collect();
+        join_all(futures)
+            .await
+            .into_iter()
+            .collect::<Result<Vec<_>, _>>()
+            .context("Error committing indexes")?;
 
         let runtime_config = self.runtime_config.read("commit").await;
         let default_locale = runtime_config.default_locale;
@@ -219,6 +251,8 @@ impl CollectionWriter {
             .context("Cannot create info.json file")?
             .write_json_data(&dump)
             .context("Cannot serialize collection info")?;
+
+        self.is_new = false;
 
         Ok(())
     }

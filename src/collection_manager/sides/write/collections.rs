@@ -5,6 +5,7 @@ use std::time::Duration;
 
 use anyhow::{Context, Result};
 use chrono::Utc;
+use futures::future::join_all;
 use serde::{Deserialize, Serialize};
 use tracing::{error, info};
 
@@ -197,16 +198,26 @@ impl CollectionsWriter {
         // During the commit, we don't accept any new write operation
         // This `write` lock is held until the commit is done
         let mut collections = self.collections.write("commit").await;
+        info!("locked");
 
         let data_dir = &self.config.data_dir.join("collections");
         create_if_not_exists(data_dir).context("Cannot create data directory")?;
 
         let m = COMMIT_CALCULATION_TIME.create(Empty);
-        for (collection_id, collection) in collections.iter_mut() {
-            let collection_dir = data_dir.join(collection_id.as_str());
 
-            collection.commit(collection_dir).await?;
-        }
+        let futures: Vec<_> = collections
+            .iter_mut()
+            .map(|(collection_id, collection)| {
+                let collection_dir = data_dir.join(collection_id.as_str());
+                async move { collection.commit(collection_dir).await }
+            })
+            .collect();
+        join_all(futures)
+            .await
+            .into_iter()
+            .collect::<Result<Vec<_>, _>>()?;
+
+        info!("unlocked");
 
         let info_path = data_dir.join("info.json");
         info!("Committing info at {:?}", info_path);
