@@ -6,7 +6,7 @@ use rdkafka::{
     consumer::{BaseConsumer, Consumer, ConsumerContext, Rebalance, StreamConsumer},
     message::{Headers, OwnedHeaders},
     producer::{FutureProducer, FutureRecord},
-    Message, Offset as KafkaOffset, TopicPartitionList,
+    Message,
 };
 use serde::Deserialize;
 use std::{pin::Pin, sync::Arc, task::Poll, time::Duration};
@@ -155,20 +155,18 @@ impl KafkaOperationReceiverCreator {
     }
 
     pub async fn create(self, last_offset: Offset) -> Result<KafkaOperationReceiver> {
-        // We save the last offset in the consumer config
-        // So, what we want to do is to start from the next offset
-        let starting_offset = if last_offset.is_zero() {
-            last_offset
-        } else {
-            last_offset.next()
-        };
+        // Note: last_offset is OramaCore's application-level offset (from message headers)
+        // We don't use it to seek Kafka partitions because:
+        // 1. OramaCore has one sequential offset across all operations
+        // 2. Kafka has separate offsets per partition
+        // Instead, we rely on Kafka's consumer group committed offsets
 
         let notify = Arc::new(Notify::new());
         let context = KafkaConsumerContext {
             notify: notify.clone(),
         };
 
-        let consumer = create_consumer(&self.consumer_config, starting_offset, context)
+        let consumer = create_consumer(&self.consumer_config, context)
             .await
             .context("Cannot create Kafka consumer")?;
 
@@ -234,7 +232,9 @@ impl KafkaOperationReceiver {
             notify: self.notify.clone(),
         };
 
-        self.consumer = create_consumer(&self.config, self.last_offset.next(), context)
+        // On reconnect, rely on Kafka's committed offsets to resume
+        // The consumer group will automatically continue from where it left off
+        self.consumer = create_consumer(&self.config, context)
             .await
             .context("Cannot reconnect to Kafka")?;
         Ok(())
@@ -365,15 +365,13 @@ async fn create_producer(producer_config: &KafkaProducerConfig) -> Result<Future
 
 async fn create_consumer(
     config: &KafkaConsumerConfig,
-    starting_offset: Offset,
     context: KafkaConsumerContext,
 ) -> Result<StreamConsumer<KafkaConsumerContext>> {
-    create_consumer_attempt(config, starting_offset, 0, context).await
+    create_consumer_attempt(config, 0, context).await
 }
 
 async fn create_consumer_attempt(
     config: &KafkaConsumerConfig,
-    starting_offset: Offset,
     attempt_count: u8,
     context: KafkaConsumerContext,
 ) -> Result<StreamConsumer<KafkaConsumerContext>> {
@@ -389,18 +387,25 @@ async fn create_consumer_attempt(
     }
 
     info!(
-        "Creating Kafka consumer for topic {} with offset {:?}. Attempt {}",
-        config.topic, starting_offset, attempt_count
+        "Creating Kafka consumer for topic {} in group {}. Attempt {}",
+        config.topic, config.group_id, attempt_count
     );
 
     let mut client_config = ClientConfig::new();
     client_config.set("bootstrap.servers", &config.brokers);
     client_config.set("group.id", &config.group_id);
     client_config.set("client.id", &config.client_id);
+
+    // Enable auto-commit so Kafka tracks consumer progress automatically
     client_config.set("enable.auto.commit", "true");
     client_config.set("auto.commit.interval.ms", "5000");
+
     client_config.set("session.timeout.ms", "6000");
     client_config.set("enable.partition.eof", "false");
+
+    // Configure offset behavior for new consumer groups or after offset loss
+    // Use earliest to ensure we don't miss messages when no committed offset exists
+    client_config.set("auto.offset.reset", "earliest");
 
     let consumer: StreamConsumer<KafkaConsumerContext> = client_config
         .create_with_context(context)
@@ -410,27 +415,20 @@ async fn create_consumer_attempt(
         .subscribe(&[&config.topic])
         .context("Cannot subscribe to Kafka topic")?;
 
-    // Wait a bit for assignment
-    sleep(Duration::from_millis(100)).await;
+    // Wait for partition assignment from consumer group coordinator
+    sleep(Duration::from_millis(200)).await;
 
-    // Seek to the desired offset if not starting from beginning
-    if starting_offset.0 > 0 {
-        let mut tpl = TopicPartitionList::new();
-        // Note: This assumes partition 0. For production, you'd want to handle multiple partitions
-        tpl.add_partition_offset(
-            &config.topic,
-            0,
-            KafkaOffset::Offset(starting_offset.0 as i64),
-        )
-        .ok();
+    // Consumer will automatically:
+    // 1. Resume from committed offsets if they exist (after restart)
+    // 2. Use auto.offset.reset (earliest) for new consumer groups
+    // 3. Handle partition rebalancing when other consumers join/leave
+    //
+    // No manual seeking needed - Kafka's consumer group protocol handles this
 
-        if let Err(e) = consumer.assign(&tpl) {
-            warn!("Failed to seek to offset {:?}: {:?}", starting_offset, e);
-            // Continue anyway - auto.offset.reset will handle it
-        }
-    }
-
-    info!("Created Kafka consumer for topic: {}", config.topic);
+    info!(
+        "Created Kafka consumer for topic {} in group {}",
+        config.topic, config.group_id
+    );
 
     Ok(consumer)
 }

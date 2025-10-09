@@ -90,7 +90,7 @@ reader_side:
         # consumer_name: reader
         # initial_offset: 0  # Default offset value for the first time
         # type: kafka
-        # brokers: localhost:9092
+        # bootstrap_servers: localhost:9092
         # topic: oramacore-operations
         # group_id: oramacore-consumer-group
         # client_id: oramacore-consumer
