@@ -2,7 +2,7 @@ use std::{collections::HashMap, ops::Deref, path::PathBuf, sync::Arc};
 
 use anyhow::{bail, Context, Result};
 use chrono::{DateTime, Utc};
-use futures::FutureExt;
+use futures::{FutureExt, future::join_all};
 use oramacore_lib::hook_storage::HookWriter;
 use serde::{Deserialize, Serialize};
 use tracing::{info, warn};
@@ -188,15 +188,28 @@ impl CollectionWriter {
 
         let indexes = indexes_lock.keys().copied().collect::<Vec<_>>();
         let indexes_path = data_dir.join("indexes");
-        for (id, index) in indexes_lock.iter_mut() {
-            index.commit(indexes_path.join(id.as_str())).await?;
-        }
+        let futures: Vec<_> = indexes_lock
+            .iter_mut()
+            .map(|(id, index)| {
+                let path = indexes_path.join(id.as_str());
+                async move { index.commit(path).await }
+            })
+            .collect();
+        join_all(futures).await.into_iter().collect::<Result<Vec<_>, _>>()
+            .context("Error committing indexes")?;
 
         let temporary_indexes = temp_indexes_lock.keys().copied().collect::<Vec<_>>();
         let indexes_path = data_dir.join("temp_indexes");
-        for (id, index) in temp_indexes_lock.iter_mut() {
-            index.commit(indexes_path.join(id.as_str())).await?;
-        }
+
+        let futures: Vec<_> = temp_indexes_lock
+            .iter_mut()
+            .map(|(id, index)| {
+                let path = indexes_path.join(id.as_str());
+                async move { index.commit(path).await }
+            })
+            .collect();
+        join_all(futures).await.into_iter().collect::<Result<Vec<_>, _>>()
+            .context("Error committing indexes")?;
 
         let runtime_config = self.runtime_config.read("commit").await;
         let default_locale = runtime_config.default_locale;

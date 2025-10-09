@@ -343,9 +343,12 @@ impl WriteSide {
     pub async fn commit(&self) -> Result<()> {
         info!("Committing write side");
 
-        self.collections.commit().await?;
-
-        self.kv.commit().await?;
+        let output = tokio::join!(
+            self.collections.commit(),
+            self.kv.commit()
+        );
+        output.0.context("Cannot commit collections")?;
+        output.1.context("Cannot commit kv")?;
 
         let offset = self.op_sender.get_offset();
         // This load is not atomic with the commit.
