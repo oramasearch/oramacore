@@ -205,13 +205,17 @@ impl CollectionsWriter {
 
         let m = COMMIT_CALCULATION_TIME.create(Empty);
 
-        let futures: Vec<_> = collections.iter_mut()
+        let futures: Vec<_> = collections
+            .iter_mut()
             .map(|(collection_id, collection)| {
                 let collection_dir = data_dir.join(collection_id.as_str());
                 async move { collection.commit(collection_dir).await }
             })
             .collect();
-        join_all(futures).await.into_iter().collect::<Result<Vec<_>, _>>()?;
+        join_all(futures)
+            .await
+            .into_iter()
+            .collect::<Result<Vec<_>, _>>()?;
 
         info!("unlocked");
 

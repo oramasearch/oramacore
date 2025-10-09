@@ -343,10 +343,7 @@ impl WriteSide {
     pub async fn commit(&self) -> Result<()> {
         info!("Committing write side");
 
-        let output = tokio::join!(
-            self.collections.commit(),
-            self.kv.commit()
-        );
+        let output = tokio::join!(self.collections.commit(), self.kv.commit());
         output.0.context("Cannot commit collections")?;
         output.1.context("Cannot commit kv")?;
 

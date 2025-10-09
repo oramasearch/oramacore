@@ -6,7 +6,10 @@ use std::{
     collections::HashMap,
     ops::Deref,
     path::PathBuf,
-    sync::{Arc, atomic::{AtomicBool, AtomicU16, Ordering}},
+    sync::{
+        atomic::{AtomicBool, AtomicU16, Ordering},
+        Arc,
+    },
 };
 
 use anyhow::{Context, Result};
@@ -179,6 +182,10 @@ impl Index {
 
             is_dirty: AtomicBool::new(false),
         })
+    }
+
+    pub fn is_dirty(&self) -> bool {
+        self.is_dirty.load(Ordering::SeqCst)
     }
 
     pub fn set_index_id(&mut self, index_id: IndexId) {
