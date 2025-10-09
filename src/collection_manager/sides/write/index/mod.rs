@@ -6,7 +6,10 @@ use std::{
     collections::HashMap,
     ops::Deref,
     path::PathBuf,
-    sync::{atomic::AtomicU16, Arc},
+    sync::{
+        atomic::{AtomicBool, AtomicU16, Ordering},
+        Arc,
+    },
 };
 
 use anyhow::{Context, Result};
@@ -68,6 +71,9 @@ pub struct Index {
     pin_rules_writer: OramaAsyncLock<PinRulesWriter>,
 
     enum_strategy: EnumStrategy,
+
+    /// Track if the index has unsaved changes that need to be committed
+    is_dirty: AtomicBool,
 }
 
 impl Index {
@@ -106,6 +112,8 @@ impl Index {
             pin_rules_writer: OramaAsyncLock::new("pin_rules_writer", PinRulesWriter::empty()?),
 
             enum_strategy,
+
+            is_dirty: AtomicBool::new(false),
         })
     }
 
@@ -171,11 +179,18 @@ impl Index {
             ),
 
             enum_strategy: dump.enum_strategy,
+
+            is_dirty: AtomicBool::new(false),
         })
+    }
+
+    pub fn is_dirty(&self) -> bool {
+        self.is_dirty.load(Ordering::SeqCst)
     }
 
     pub fn set_index_id(&mut self, index_id: IndexId) {
         self.index_id = index_id;
+        self.is_dirty.store(true, Ordering::SeqCst);
     }
 
     pub fn get_locale(&self) -> Locale {
@@ -283,14 +298,23 @@ impl Index {
             .await
             .context("Cannot send operation")?;
 
+        self.is_dirty.store(true, Ordering::SeqCst);
+
         Ok(())
     }
 
     pub async fn commit(&self, data_dir: PathBuf) -> Result<()> {
         std::fs::create_dir_all(&data_dir).context("Cannot create data directory")?;
 
-        let filter_fields = self.filter_fields.read("commit").await;
-        let score_fields = self.score_fields.read("commit").await;
+        if !self.is_dirty.load(Ordering::SeqCst) {
+            info!("Index is not dirty, skipping commit");
+            return Ok(());
+        }
+
+        let (filter_fields, score_fields) = tokio::join!(
+            self.filter_fields.read("commit"),
+            self.score_fields.read("commit")
+        );
         let dump = IndexDump::V1(IndexDumpV1 {
             id: self.index_id,
             locale: self.locale,
@@ -319,6 +343,8 @@ impl Index {
         doc_id_storage
             .commit(data_dir)
             .context("Cannot commit index")?;
+
+        self.is_dirty.store(false, Ordering::SeqCst);
 
         Ok(())
     }
@@ -438,6 +464,8 @@ impl Index {
                 ));
             }
         }
+
+        self.is_dirty.store(true, Ordering::SeqCst);
     }
 
     async fn process_document(
@@ -485,6 +513,8 @@ impl Index {
             ));
         }
 
+        self.is_dirty.store(true, Ordering::SeqCst);
+
         Ok(())
     }
 
@@ -531,6 +561,8 @@ impl Index {
             warn!("No document to delete");
         }
         drop(doc_id_storage);
+
+        self.is_dirty.store(true, Ordering::SeqCst);
 
         Ok(doc_ids)
     }
@@ -757,6 +789,8 @@ impl Index {
             .send_batch(index_operation_batch)
             .await
             .context("Cannot send add fields operation")?;
+
+        self.is_dirty.store(true, Ordering::SeqCst);
 
         Ok(())
     }
