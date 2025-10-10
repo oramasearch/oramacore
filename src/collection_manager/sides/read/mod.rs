@@ -186,13 +186,8 @@ impl ReadSide {
         let last_offset = match read_info {
             Ok(ReadInfo::V1(info)) => info.offset,
             Err(_) => {
-                // Use the initial offset from config (0 for InMemory, configured value for RabbitMQ)
-                let initial_offset = operation_receiver_creator.get_initial_offset();
-                warn!(
-                    "Cannot read 'read.info' file. Starting from {:?}",
-                    initial_offset
-                );
-                initial_offset
+                warn!("Cannot read 'read.info' file. Starting from 0");
+                Offset(0)
             }
         };
         info!(offset=?last_offset, "Starting read side");
