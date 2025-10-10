@@ -33,7 +33,6 @@ async fn main2() -> Result<()> {
         producer_config: RabbitMQProducerConfig {
             stream_name: "foo".to_string(),
             producer_name: "producer".to_string(),
-            initial_offset: 0,
         },
     });
     let input: InputSideChannelType = InputSideChannelType::RabbitMQ(InputRabbitMQConfig {
@@ -41,7 +40,6 @@ async fn main2() -> Result<()> {
         consumer_config: RabbitMQConsumerConfig {
             stream_name: "foo".to_string(),
             consumer_name: "consumer".to_string(),
-            initial_offset: 0,
         },
     });
     let (producer_creator, consumer_creator) = channel_creator(Some(output), Some(input)).await?;
