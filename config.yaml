@@ -22,7 +22,6 @@ writer_side:
         # stream_name: oramacore-operations
         # client_provided_name: oramacore-producer
         # producer_name: write
-        # initial_offset: 0  # Default offset value for the first time
 
     hooks:
         select_embeddings_properties:
@@ -83,7 +82,6 @@ reader_side:
         # stream_name: oramacore-operations
         # client_provided_name: oramacore-producer
         # consumer_name: reader
-        # initial_offset: 0  # Default offset value for the first time
 
     config:
         data_dir: ./.data/reader

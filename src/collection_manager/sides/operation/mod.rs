@@ -30,10 +30,7 @@ pub enum OperationSender {
         offset_counter: Arc<AtomicU64>,
         sender: tokio::sync::mpsc::Sender<(Offset, Vec<u8>)>,
     },
-    RabbitMQ {
-        offset_counter: Arc<AtomicU64>,
-        sender: RabbitOperationSender,
-    },
+    RabbitMQ(RabbitOperationSender),
 }
 
 impl Debug for OperationSender {
@@ -42,9 +39,7 @@ impl Debug for OperationSender {
             OperationSender::InMemory { .. } => {
                 f.debug_struct("OperationSender::InMemory").finish()
             }
-            OperationSender::RabbitMQ { .. } => {
-                f.debug_struct("OperationSender::RabbitMQ").finish()
-            }
+            OperationSender::RabbitMQ(_) => f.debug_struct("OperationSender::RabbitMQ").finish(),
         }
     }
 }
@@ -55,11 +50,10 @@ impl OperationSender {
             OperationSender::InMemory { offset_counter, .. } => {
                 Offset(offset_counter.load(std::sync::atomic::Ordering::SeqCst))
             }
-            // This method is invoked when the write side is committing.
-            // Now we store the offset on writer side for both InMemory and RabbitMQ.
-            OperationSender::RabbitMQ { offset_counter, .. } => {
-                Offset(offset_counter.load(std::sync::atomic::Ordering::SeqCst))
-            }
+            // This method is invoked only when the write side is committing.
+            // In RabbitMQ case, we don't care to store that offset,
+            // because RabbitMQ server keeps track of it.
+            OperationSender::RabbitMQ { .. } => Offset(0),
         }
     }
 
@@ -77,12 +71,8 @@ impl OperationSender {
 
                 sender.send((Offset(offset), message_body)).await?;
             }
-            OperationSender::RabbitMQ {
-                offset_counter,
-                sender,
-            } => {
-                let offset = offset_counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                sender.send(&operation, Offset(offset)).await?;
+            OperationSender::RabbitMQ(sender) => {
+                sender.send(&operation).await?;
             }
         }
 
@@ -108,20 +98,8 @@ impl OperationSender {
                     sender.send((Offset(offset), message_body)).await?;
                 }
             }
-            OperationSender::RabbitMQ {
-                offset_counter,
-                sender,
-            } => {
-                let operations_with_offsets: Vec<_> = operations
-                    .into_iter()
-                    .map(|op| {
-                        let offset =
-                            offset_counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                        (op, Offset(offset))
-                    })
-                    .collect();
-
-                sender.send_batch(&operations_with_offsets).await?;
+            OperationSender::RabbitMQ(sender) => {
+                sender.send_batch(&operations).await?;
             }
         }
 
@@ -207,13 +185,6 @@ pub enum OperationSenderCreator {
     RabbitMQ(RabbitOperationSenderCreator),
 }
 impl OperationSenderCreator {
-    pub fn get_initial_offset(&self) -> Offset {
-        match self {
-            OperationSenderCreator::InMemory { .. } => Offset(0),
-            OperationSenderCreator::RabbitMQ(creator) => creator.get_initial_offset(),
-        }
-    }
-
     pub async fn create(self, offset: Offset) -> Result<OperationSender> {
         match self {
             OperationSenderCreator::InMemory { sender } => {
@@ -228,11 +199,7 @@ impl OperationSenderCreator {
                     .create()
                     .await
                     .context("Cannot create RabbitMQ sender")?;
-                let offset_counter = Arc::new(AtomicU64::new(offset.0));
-                Ok(OperationSender::RabbitMQ {
-                    offset_counter,
-                    sender,
-                })
+                Ok(OperationSender::RabbitMQ(sender))
             }
         }
     }
@@ -246,13 +213,6 @@ pub enum OperationReceiverCreator {
 }
 
 impl OperationReceiverCreator {
-    pub fn get_initial_offset(&self) -> Offset {
-        match self {
-            OperationReceiverCreator::InMemory { .. } => Offset(0),
-            OperationReceiverCreator::RabbitMQ(creator) => creator.get_initial_offset(),
-        }
-    }
-
     pub async fn create(self, last_offset: Offset) -> Result<OperationReceiver> {
         match self {
             OperationReceiverCreator::InMemory { receiver } => {

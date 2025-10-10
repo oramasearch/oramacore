@@ -158,10 +158,6 @@ impl RabbitOperationReceiverCreator {
         })
     }
 
-    pub fn get_initial_offset(&self) -> Offset {
-        Offset(self.config.initial_offset)
-    }
-
     pub async fn create(self, last_offset: Offset) -> Result<RabbitOperationReceiver> {
         // We save the last offset in the consumer config
         // So, what we want to do is to start from the next offset
@@ -200,10 +196,6 @@ impl RabbitOperationSenderCreator {
         })
     }
 
-    pub fn get_initial_offset(&self) -> Offset {
-        Offset(self.producer_config.initial_offset)
-    }
-
     pub async fn create(self) -> Result<RabbitOperationSender> {
         let producer = create_producer(self.environment.clone(), self.producer_config)
             .await
@@ -222,10 +214,10 @@ impl RabbitOperationSender {
         Self { producer }
     }
 
-    pub async fn send_batch(&self, operations: &[(WriteOperation, Offset)]) -> Result<()> {
+    pub async fn send_batch(&self, operations: &[WriteOperation]) -> Result<()> {
         let mut messages = Vec::with_capacity(operations.len());
 
-        for (operation, offset) in operations {
+        for operation in operations {
             let coll_id: Option<CollectionId> = match operation {
                 WriteOperation::Collection(coll_id, _) => Some(*coll_id),
                 WriteOperation::DeleteCollection(id) => Some(*id),
@@ -253,7 +245,6 @@ impl RabbitOperationSender {
             let message = prop
                 .insert("v", 1)
                 .insert("op_type_id", op_type_id)
-                .insert("offset", offset.0)
                 .message_builder()
                 .build();
 
@@ -270,7 +261,7 @@ impl RabbitOperationSender {
         Ok(())
     }
 
-    pub async fn send(&self, operation: &WriteOperation, offset: Offset) -> Result<()> {
+    pub async fn send(&self, operation: &WriteOperation) -> Result<()> {
         let coll_id: Option<CollectionId> = match operation {
             WriteOperation::Collection(coll_id, _) => Some(*coll_id),
             WriteOperation::DeleteCollection(id) => Some(*id),
@@ -297,7 +288,6 @@ impl RabbitOperationSender {
         let message = prop
             .insert("v", 1)
             .insert("op_type_id", op_type_id)
-            .insert("offset", offset.0)
             .message_builder()
             .build();
 
@@ -352,33 +342,7 @@ impl Stream for RabbitOperationReceiver {
         };
 
         let message = delivery.message();
-
-        // Try to read offset from message header first (writer-generated offset)
-        // Fall back to RabbitMQ offset if header is not present
-        let offset = if let Some(app_props) = message.application_properties() {
-            if let Some(offset_value) = app_props.get("offset") {
-                // SimpleValue is an enum, we need to pattern match to extract the u64
-                use rabbitmq_stream_client::types::SimpleValue;
-                match offset_value {
-                    SimpleValue::Ulong(offset_u64) => {
-                        debug!("Using writer-generated offset from header: {}", offset_u64);
-                        Offset(*offset_u64)
-                    }
-                    _ => {
-                        warn!(
-                            "Offset header present but not Ulong, falling back to RabbitMQ offset"
-                        );
-                        Offset(delivery.offset())
-                    }
-                }
-            } else {
-                debug!("No offset header found, using RabbitMQ offset");
-                Offset(delivery.offset())
-            }
-        } else {
-            debug!("No application properties, using RabbitMQ offset");
-            Offset(delivery.offset())
-        };
+        let offset = Offset(delivery.offset());
 
         // Save last offset in case of reconnect
         self.last_offset = offset;
@@ -415,15 +379,11 @@ impl Stream for RabbitOperationReceiver {
 pub struct RabbitMQProducerConfig {
     pub stream_name: String,
     pub producer_name: String,
-    #[serde(default)]
-    pub initial_offset: u64,
 }
 #[derive(Debug, Deserialize, Clone, PartialEq)]
 pub struct RabbitMQConsumerConfig {
     pub stream_name: String,
     pub consumer_name: String,
-    #[serde(default)]
-    pub initial_offset: u64,
 }
 
 #[derive(Deserialize, Clone)]
