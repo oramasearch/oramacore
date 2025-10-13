@@ -123,17 +123,12 @@ pub mod document_insertion {
 }
 
 pub mod commit {
-    use super::{CollectionFieldCommitLabels, Empty};
-    use crate::create_time_histogram;
+    use super::Empty;
+    use crate::{create_time_histogram, metrics::CollectionCommitLabels};
     create_time_histogram!(
         COMMIT_CALCULATION_TIME,
         "commit_calculation_time_sec",
-        Empty
-    );
-    create_time_histogram!(
-        FIELD_COMMIT_CALCULATION_TIME,
-        "field_commit_calculation_time_sec",
-        CollectionFieldCommitLabels
+        CollectionCommitLabels
     );
     create_time_histogram!(
         DOCUMENT_COMMIT_CALCULATION_TIME,

@@ -16,7 +16,7 @@ use crate::collection_manager::sides::write::WriteError;
 use crate::collection_manager::sides::{CollectionWriteOperation, OperationSender, WriteOperation};
 use crate::lock::{OramaAsyncLock, OramaAsyncLockReadGuard};
 use crate::metrics::commit::COMMIT_CALCULATION_TIME;
-use crate::metrics::Empty;
+use crate::metrics::CollectionCommitLabels;
 use crate::types::{CollectionId, DocumentId};
 use crate::types::{CreateCollection, DescribeCollectionResponse, LanguageDTO};
 use oramacore_lib::fs::{create_if_not_exists, BufferedFile};
@@ -203,13 +203,21 @@ impl CollectionsWriter {
         let data_dir = &self.config.data_dir.join("collections");
         create_if_not_exists(data_dir).context("Cannot create data directory")?;
 
-        let m = COMMIT_CALCULATION_TIME.create(Empty);
-
         let futures: Vec<_> = collections
             .iter_mut()
             .map(|(collection_id, collection)| {
                 let collection_dir = data_dir.join(collection_id.as_str());
-                async move { collection.commit(collection_dir).await }
+                async move {
+                    let m = COMMIT_CALCULATION_TIME.create(CollectionCommitLabels {
+                        collection: collection_id.as_str().to_string(),
+                        side: "write",
+                    });
+                    let r = collection.commit(collection_dir).await;
+
+                    drop(m);
+
+                    r
+                }
             })
             .collect();
         join_all(futures)
@@ -227,8 +235,6 @@ impl CollectionsWriter {
                 collection_ids: collections.keys().cloned().collect::<Vec<_>>(),
             }))
             .context("Cannot write info.json")?;
-
-        drop(m);
 
         // Now it is safe to drop the lock
         // because we save everything to disk
