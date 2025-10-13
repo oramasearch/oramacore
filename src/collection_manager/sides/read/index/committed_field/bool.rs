@@ -29,11 +29,15 @@ impl CommittedBoolField {
         map.insert(false, false_docs);
         map.insert(true, true_docs);
 
-        Ok(Self {
+        let field = Self {
             field_path,
             map,
             data_dir,
-        })
+        };
+
+        field.commit().context("Failed to commit bool field")?;
+
+        Ok(field)
     }
 
     pub fn from_iter<I>(field_path: Box<[String]>, iter: I, data_dir: PathBuf) -> Result<Self>
@@ -56,28 +60,24 @@ impl CommittedBoolField {
             }
         }
 
-        let s = Self {
+        let field = Self {
             field_path,
             map,
-            data_dir,
+            data_dir: data_dir.clone(),
         };
 
-        s.commit().context("Failed to commit bool field")?;
+        field.commit().context("Failed to commit bool field")?;
 
-        Ok(s)
+        Ok(field)
     }
 
     #[allow(deprecated)]
     pub fn try_load(info: BoolFieldInfo) -> Result<Self> {
         let data_dir = info.data_dir;
 
-        info!("Loading committed bool field from {:?}", data_dir);
         let map = match std::fs::File::open(data_dir.join("bool_map.bin")) {
-            Ok(file) => {
-                info!("Found bool_map.bin, loading from it");
-                bincode::deserialize_from::<_, HashMap<bool, HashSet<DocumentId>>>(file)
-                    .context("Failed to deserialize bool_map.bin")?
-            }
+            Ok(file) => bincode::deserialize_from::<_, HashMap<bool, HashSet<DocumentId>>>(file)
+                .context("Failed to deserialize bool_map.bin")?,
             Err(_) => {
                 info!("bool_map.bin not found, reconstructing from OrderedKeyIndex");
                 use oramacore_lib::data_structures::ordered_key::OrderedKeyIndex;
@@ -85,7 +85,6 @@ impl CommittedBoolField {
                 {
                     Ok(index) => index,
                     Err(e) => {
-                        info!("---- Failed to load OrderedKeyIndex: {}", e);
                         return Err(anyhow::anyhow!(
                             "Failed to load OrderedKeyIndex for bool field: {}",
                             e

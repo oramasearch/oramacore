@@ -39,13 +39,15 @@ use crate::{
     },
     lock::{OramaAsyncLock, OramaAsyncLockReadGuard},
     metrics::{
+        commit::INDEX_COMMIT_CALCULATION_TIME,
         search::{MATCHING_COUNT_CALCULTATION_COUNT, MATCHING_PERC_CALCULATION_COUNT},
-        CollectionLabels,
+        CollectionLabels, IndexCollectionCommitLabels,
     },
     types::{
-        DocumentId, FacetDefinition, FacetResult, Filter, FulltextMode, HybridMode, IndexId, Limit,
-        Number, NumberFilter, Properties, SearchMode, SearchModeResult, SearchParams, Similarity,
-        SortOrder, Threshold, TypeParsingStrategies, VectorMode, WhereFilter,
+        CollectionId, DocumentId, FacetDefinition, FacetResult, Filter, FulltextMode, HybridMode,
+        IndexId, Limit, Number, NumberFilter, Properties, SearchMode, SearchModeResult,
+        SearchParams, Similarity, SortOrder, Threshold, TypeParsingStrategies, VectorMode,
+        WhereFilter,
     },
 };
 use oramacore_lib::fs::{create_if_not_exists, BufferedFile};
@@ -363,7 +365,12 @@ impl Index {
         Ok(document_ids)
     }
 
-    pub async fn commit(&self, data_dir: PathBuf, offset: Offset) -> Result<()> {
+    pub async fn commit(
+        &self,
+        data_dir: PathBuf,
+        offset: Offset,
+        collection_id: CollectionId,
+    ) -> Result<()> {
         debug!("Starting to commit index {:?}", self.id);
 
         let data_dir_with_offset = data_dir.join(format!("offset-{}", offset.0));
@@ -423,6 +430,12 @@ impl Index {
             .context("Cannot create data directory")?;
 
         debug!("Committing index {:?}", self.id);
+
+        let m = INDEX_COMMIT_CALCULATION_TIME.create(IndexCollectionCommitLabels {
+            collection: collection_id.as_str().to_string(),
+            index: self.id.as_str().to_string(),
+            side: "read",
+        });
 
         let committed_fields = self.committed_fields.read("commit").await;
 
@@ -779,6 +792,8 @@ impl Index {
         self.promoted_to_runtime_index
             .store(false, Ordering::Relaxed);
         self.is_new.store(false, Ordering::Relaxed);
+
+        drop(m);
 
         debug!("Index committed: {:?}", self.id);
 
