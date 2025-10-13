@@ -1,4 +1,7 @@
+use std::time::Duration;
+
 use serde_json::json;
+use tokio::time::sleep;
 
 use crate::ai::OramaModel;
 use crate::collection_manager::sides::write::OramaModelSerializable;
@@ -269,6 +272,76 @@ async fn test_delete_index_committed() {
     let path = config.join("docs");
     let documents = std::fs::read_dir(path).unwrap().collect::<Vec<_>>();
     assert_eq!(documents.len(), 1);
+
+    drop(test_context);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_index_promotion_with_committed_and_uncommitted_data() {
+    init_log();
+
+    let test_context = TestContext::new().await;
+
+    let collection_client = test_context.create_collection().await.unwrap();
+
+    let index_client = collection_client.create_index().await.unwrap();
+
+    let temp_index_client = collection_client.create_temp_index(index_client.index_id).await.unwrap();
+
+    let docs = (0..20)
+        .map(|i| {
+            json!({
+                "id": i.to_string(),
+                "text": "text",
+                "metadata": { "is_good": i % 2 == 0 }
+            })
+        })
+        .collect::<Vec<_>>();
+    temp_index_client
+        .insert_documents(docs.try_into().unwrap())
+        .await
+        .unwrap();
+    test_context.commit_all().await.unwrap();
+
+    let docs = (20..40)
+        .map(|i| {
+            json!({
+                "id": i.to_string(),
+                "text": "text",
+                "metadata": { "is_good": i % 2 == 0 }
+            })
+        })
+        .collect::<Vec<_>>();
+    temp_index_client
+        .insert_documents(docs.try_into().unwrap())
+        .await
+        .unwrap();
+    collection_client.replace_index(index_client.index_id, temp_index_client.index_id).await.unwrap();
+
+    sleep(Duration::from_secs(1)).await; // Wait for the replace to be effective
+
+    test_context.commit_all().await.unwrap();
+
+    let collection_id = collection_client.collection_id;
+    let write_api_key = collection_client.write_api_key;
+    let read_api_key = collection_client.read_api_key;
+    let test_context = test_context.reload().await;
+
+    let collection_client = test_context
+        .get_test_collection_client(collection_id, write_api_key, read_api_key)
+        .unwrap();
+
+    let result = collection_client
+        .search(
+            json!({
+                "term": "text",
+            })
+            .try_into()
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(result.count, 40);
 
     drop(test_context);
 }
