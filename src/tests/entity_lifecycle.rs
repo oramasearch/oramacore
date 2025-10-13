@@ -286,7 +286,10 @@ async fn test_index_promotion_with_committed_and_uncommitted_data() {
 
     let index_client = collection_client.create_index().await.unwrap();
 
-    let temp_index_client = collection_client.create_temp_index(index_client.index_id).await.unwrap();
+    let temp_index_client = collection_client
+        .create_temp_index(index_client.index_id)
+        .await
+        .unwrap();
 
     let docs = (0..20)
         .map(|i| {
@@ -316,7 +319,10 @@ async fn test_index_promotion_with_committed_and_uncommitted_data() {
         .insert_documents(docs.try_into().unwrap())
         .await
         .unwrap();
-    collection_client.replace_index(index_client.index_id, temp_index_client.index_id).await.unwrap();
+    collection_client
+        .replace_index(index_client.index_id, temp_index_client.index_id)
+        .await
+        .unwrap();
 
     sleep(Duration::from_secs(1)).await; // Wait for the replace to be effective
 

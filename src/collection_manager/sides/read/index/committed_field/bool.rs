@@ -25,37 +25,25 @@ impl CommittedBoolField {
         false_docs: HashSet<DocumentId>,
         data_dir: PathBuf,
     ) -> Result<Self> {
-        info!("CommittedBoolField::from_data called");
-        info!("  field_path: {:?}", field_path);
-        info!("  data_dir: {:?}", data_dir);
-        info!("  true_docs count: {}", true_docs.len());
-        info!("  false_docs count: {}", false_docs.len());
-
         let mut map = HashMap::with_capacity(2);
         map.insert(false, false_docs);
         map.insert(true, true_docs);
 
-        let result = Self {
+        let field = Self {
             field_path,
             map,
             data_dir,
         };
 
-        info!("  -> Created CommittedBoolField with data_dir: {:?}", result.data_dir);
-        info!("  -> Committing to write files");
-        result.commit().context("Failed to commit bool field")?;
+        field.commit().context("Failed to commit bool field")?;
 
-        Ok(result)
+        Ok(field)
     }
 
     pub fn from_iter<I>(field_path: Box<[String]>, iter: I, data_dir: PathBuf) -> Result<Self>
     where
         I: Iterator<Item = (BoolWrapper, HashSet<DocumentId>)>,
     {
-        info!("CommittedBoolField::from_iter called");
-        info!("  field_path: {:?}", field_path);
-        info!("  data_dir: {:?}", data_dir);
-
         let mut map = HashMap::with_capacity(2);
         map.insert(false, HashSet::new());
         map.insert(true, HashSet::new());
@@ -72,31 +60,24 @@ impl CommittedBoolField {
             }
         }
 
-        let s = Self {
+        let field = Self {
             field_path,
             map,
             data_dir: data_dir.clone(),
         };
 
-        info!("  -> Committing to data_dir: {:?}", data_dir);
-        s.commit().context("Failed to commit bool field")?;
+        field.commit().context("Failed to commit bool field")?;
 
-        Ok(s)
+        Ok(field)
     }
 
     #[allow(deprecated)]
     pub fn try_load(info: BoolFieldInfo) -> Result<Self> {
         let data_dir = info.data_dir;
 
-        info!("CommittedBoolField::try_load called");
-        info!("  Loading committed bool field from data_dir: {:?}", data_dir);
-        info!("  field_path: {:?}", info.field_path);
         let map = match std::fs::File::open(data_dir.join("bool_map.bin")) {
-            Ok(file) => {
-                info!("Found bool_map.bin, loading from it");
-                bincode::deserialize_from::<_, HashMap<bool, HashSet<DocumentId>>>(file)
-                    .context("Failed to deserialize bool_map.bin")?
-            }
+            Ok(file) => bincode::deserialize_from::<_, HashMap<bool, HashSet<DocumentId>>>(file)
+                .context("Failed to deserialize bool_map.bin")?,
             Err(_) => {
                 info!("bool_map.bin not found, reconstructing from OrderedKeyIndex");
                 use oramacore_lib::data_structures::ordered_key::OrderedKeyIndex;
@@ -104,7 +85,6 @@ impl CommittedBoolField {
                 {
                     Ok(index) => index,
                     Err(e) => {
-                        info!("---- Failed to load OrderedKeyIndex: {}", e);
                         return Err(anyhow::anyhow!(
                             "Failed to load OrderedKeyIndex for bool field: {}",
                             e
@@ -156,28 +136,20 @@ impl CommittedBoolField {
 
     fn commit(&self) -> Result<()> {
         // Ensure the data directory exists
-        info!("CommittedBoolField::commit called");
-        info!("  Writing to data_dir: {:?}", self.data_dir);
         create_if_not_exists(&self.data_dir).context("Failed to create data directory")?;
 
         let file_path = self.data_dir.join("bool_map.bin");
-        info!("  Creating file: {:?}", file_path);
         let file = std::fs::File::create(&file_path).context("Failed to create bool_map.bin")?;
         bincode::serialize_into(file, &self.map).context("Failed to serialize bool map")?;
-        info!("  Successfully wrote bool_map.bin");
 
         Ok(())
     }
 
     pub fn get_field_info(&self) -> BoolFieldInfo {
-        let result = BoolFieldInfo {
+        BoolFieldInfo {
             field_path: self.field_path.clone(),
             data_dir: self.data_dir.clone(),
-        };
-        info!("CommittedBoolField::get_field_info called");
-        info!("  Returning field_path: {:?}", result.field_path);
-        info!("  Returning data_dir: {:?}", result.data_dir);
-        result
+        }
     }
 
     pub fn field_path(&self) -> &[String] {
