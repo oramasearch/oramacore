@@ -8,7 +8,6 @@ use crate::{
     ai::AIService,
     collection_manager::sides::{read::context::ReadSideContext, Offset},
     lock::{OramaAsyncLock, OramaAsyncLockReadGuard},
-    metrics::{commit::COMMIT_CALCULATION_TIME, Empty},
     types::{ApiKey, CollectionId},
 };
 
@@ -159,16 +158,12 @@ impl CollectionsReader {
                     format!("Cannot create directory for collection '{}'", id.as_str())
                 })?;
 
-            let m = COMMIT_CALCULATION_TIME.create(Empty);
-
             match collection.commit(offset).await {
                 Ok(_) => {}
                 Err(error) => {
                     error!(error = ?error, collection_id=?id, "Cannot commit collection {:?}: {:?}", id, error);
                 }
             }
-
-            drop(m);
         }
 
         let guard = self.last_reindexed_collections.read("commit").await;

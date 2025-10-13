@@ -889,6 +889,7 @@ fn start_receive_operations(
                     }
                 };
                 trace!(?op, "Received operation");
+                let offset = op.0;
                 if let Err(e) = read_side.update(op).await {
                     error!(error = ?e, "Cannot update read side");
                     e.chain()
@@ -896,7 +897,7 @@ fn start_receive_operations(
                         .for_each(|cause| eprintln!("because: {cause}"));
                 }
 
-                trace!("Operation applied");
+                info!("Operation applied {:?}", offset);
             }
 
             warn!("Operation receiver is closed.");

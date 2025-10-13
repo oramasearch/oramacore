@@ -234,7 +234,7 @@ impl CollectionReader {
             count += index.document_count();
             index_ids.push(index.id());
             let dir = indexes_dir.join(index.id().as_str());
-            index.commit(dir, offset).await?;
+            index.commit(dir, offset, self.id).await?;
         }
         drop(indexes_lock);
 
@@ -267,7 +267,7 @@ impl CollectionReader {
             }
             temp_index_ids.push(index.id());
             let dir = temp_indexes_dir.join(index.id().as_str());
-            index.commit(dir, offset).await?;
+            index.commit(dir, offset, self.id).await?;
         }
         drop(temp_indexes_lock);
 

@@ -394,6 +394,8 @@ pub fn merge_bool_field(
     uncommitted_document_deletions: &HashSet<DocumentId>,
     is_promoted: bool,
 ) -> Result<Option<CommittedBoolField>> {
+    use tracing::info;
+
     match (uncommitted, committed) {
         (None, None) => {
             bail!("Both uncommitted and committed bool fields are None. Never should happen");
@@ -402,6 +404,7 @@ pub fn merge_bool_field(
             bail!("Both uncommitted field is None. Never should happen");
         }
         (Some(uncommitted), None) => {
+            info!("  -> Path: uncommitted only, creating new field");
             let (true_docs, false_docs) = uncommitted.clone_inner();
             let iter = vec![
                 (BoolWrapper::False, false_docs),
@@ -446,7 +449,8 @@ pub fn merge_bool_field(
                         .overwrite(true);
                     copy_items(&[old_dir], data_dir.parent().unwrap(), &options)?;
                     // And move the field to the new directory
-                    info.data_dir = data_dir;
+                    info.data_dir = data_dir.clone();
+                    info!("  -> Updated info.data_dir to: {:?}", info.data_dir);
 
                     return Ok(Some(
                         CommittedBoolField::try_load(info)
@@ -470,12 +474,14 @@ pub fn merge_bool_field(
                 "Uncommitted and committed field paths should be the same",
             );
 
-            Ok(Some(CommittedBoolField::from_data(
+            let result = CommittedBoolField::from_data(
                 committed.field_path().to_vec().into_boxed_slice(),
                 committed_true_docs,
                 committed_false_docs,
-                data_dir,
-            )?))
+                data_dir.clone(),
+            )?;
+
+            Ok(Some(result))
         }
     }
 }
