@@ -351,3 +351,93 @@ async fn test_index_promotion_with_committed_and_uncommitted_data() {
 
     drop(test_context);
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_unchanged_field_path_after_reload() {
+    init_log();
+
+    let test_context = TestContext::new().await;
+    let collection_client = test_context.create_collection().await.unwrap();
+    let index_client = collection_client.create_index().await.unwrap();
+
+    // Commit 1: Create field with data
+    index_client
+        .insert_documents(
+            json!([
+                {"id": "1", "number_field": 100},
+            ])
+            .try_into()
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    test_context.commit_all().await.unwrap(); // offset-0
+
+    // Commit 2: Add DIFFERENT field (number_field unchanged)
+    index_client
+        .insert_documents(
+            json!([
+                {"id": "2", "string_field": "test"},  // No number_field!
+            ])
+            .try_into()
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    test_context.commit_all().await.unwrap(); // offset-1
+
+    // number_field should return MergeResult::Unchanged
+    // and keep data_dir = offset-0
+
+    // Commit 3: Again, no changes to number_field
+    index_client
+        .insert_documents(
+            json!([
+                {"id": "3", "string_field": "test2"},
+            ])
+            .try_into()
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    test_context.commit_all().await.unwrap(); // offset-2
+
+    // Read index.json and check paths
+    let index_json_path = test_context
+        .config
+        .reader_side
+        .config
+        .data_dir
+        .join("collections")
+        .join(collection_client.collection_id.as_str())
+        .join("indexes")
+        .join(index_client.index_id.to_string())
+        .join("index.json");
+
+    let content = std::fs::read_to_string(&index_json_path).unwrap();
+    println!("index.json content:\n{content}");
+
+    // Check for mixed offsets
+    let offset_0_count = content.matches("offset-0").count();
+    let offset_1_count = content.matches("offset-1").count();
+    let offset_2_count = content.matches("offset-2").count();
+
+    println!("offset-0: {offset_0_count}, offset-1: {offset_1_count}, offset-2: {offset_2_count}");
+
+    // Reload
+    let test_context = test_context.reload().await;
+
+    // Try to search - this should work if paths are correct
+    let result = collection_client
+        .search(
+            json!({
+                "term": "test"
+            })
+            .try_into()
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(result.count, 2);
+}

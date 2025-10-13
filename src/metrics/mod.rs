@@ -42,6 +42,11 @@ create_label_struct!(CollectionCommitLabels, {
     collection: String,
     side: &'static str,
 });
+create_label_struct!(IndexCollectionCommitLabels, {
+    collection: String,
+    index: String,
+    side: &'static str,
+});
 create_label_struct!(CollectionFieldCommitLabels, {
     collection: SharedString,
     field_type: &'static str,
@@ -124,11 +129,19 @@ pub mod document_insertion {
 
 pub mod commit {
     use super::Empty;
-    use crate::{create_time_histogram, metrics::CollectionCommitLabels};
+    use crate::{
+        create_time_histogram,
+        metrics::{CollectionCommitLabels, IndexCollectionCommitLabels},
+    };
     create_time_histogram!(
         COMMIT_CALCULATION_TIME,
         "commit_calculation_time_sec",
         CollectionCommitLabels
+    );
+    create_time_histogram!(
+        INDEX_COMMIT_CALCULATION_TIME,
+        "index_commit_calculation_time_sec",
+        IndexCollectionCommitLabels
     );
     create_time_histogram!(
         DOCUMENT_COMMIT_CALCULATION_TIME,
