@@ -394,6 +394,22 @@ pub fn merge_bool_field(
     uncommitted_document_deletions: &HashSet<DocumentId>,
     is_promoted: bool,
 ) -> Result<Option<CommittedBoolField>> {
+    use tracing::info;
+
+    info!("=== merge_bool_field called ===");
+    info!("  is_promoted: {}", is_promoted);
+    info!("  target data_dir: {:?}", data_dir);
+    info!("  uncommitted present: {}", uncommitted.is_some());
+    info!("  committed present: {}", committed.is_some());
+    if let Some(committed) = committed {
+        let info = committed.get_field_info();
+        info!("  committed data_dir: {:?}", info.data_dir);
+        info!("  committed field_path: {:?}", info.field_path);
+    }
+    if let Some(uncommitted) = uncommitted {
+        info!("  uncommitted is_empty: {}", uncommitted.is_empty());
+    }
+
     match (uncommitted, committed) {
         (None, None) => {
             bail!("Both uncommitted and committed bool fields are None. Never should happen");
@@ -402,6 +418,7 @@ pub fn merge_bool_field(
             bail!("Both uncommitted field is None. Never should happen");
         }
         (Some(uncommitted), None) => {
+            info!("  -> Path: uncommitted only, creating new field");
             let (true_docs, false_docs) = uncommitted.clone_inner();
             let iter = vec![
                 (BoolWrapper::False, false_docs),
@@ -421,11 +438,14 @@ pub fn merge_bool_field(
         }
         (Some(uncommitted), Some(committed)) => {
             if uncommitted.is_empty() {
+                info!("  -> Path: uncommitted EMPTY");
                 if is_promoted {
+                    info!("  -> Path: PROMOTION with empty uncommitted - copying old data");
                     create_if_not_exists(&data_dir)
                         .context("Failed to create data directory for vector field")?;
 
                     let mut info = committed.get_field_info();
+                    info!("  -> Copying from old_dir: {:?} to new data_dir: {:?}", info.data_dir, data_dir);
                     debug_assert_ne!(
                         info.data_dir,
                         data_dir,
@@ -446,7 +466,8 @@ pub fn merge_bool_field(
                         .overwrite(true);
                     copy_items(&[old_dir], data_dir.parent().unwrap(), &options)?;
                     // And move the field to the new directory
-                    info.data_dir = data_dir;
+                    info.data_dir = data_dir.clone();
+                    info!("  -> Updated info.data_dir to: {:?}", info.data_dir);
 
                     return Ok(Some(
                         CommittedBoolField::try_load(info)
@@ -456,6 +477,9 @@ pub fn merge_bool_field(
 
                 return Ok(None);
             }
+
+            info!("  -> Path: uncommitted NOT empty, merging with committed");
+            info!("  -> BUG LOCATION: is_promoted={}, but NOT handling copy!", is_promoted);
 
             let (uncommitted_true_docs, uncommitted_false_docs) = uncommitted.clone_inner();
             let (mut committed_true_docs, mut committed_false_docs) = committed.clone_inner()?;
@@ -470,12 +494,19 @@ pub fn merge_bool_field(
                 "Uncommitted and committed field paths should be the same",
             );
 
-            Ok(Some(CommittedBoolField::from_data(
+            info!("  -> Creating new field with merged data at data_dir: {:?}", data_dir);
+            let result = CommittedBoolField::from_data(
                 committed.field_path().to_vec().into_boxed_slice(),
                 committed_true_docs,
                 committed_false_docs,
-                data_dir,
-            )?))
+                data_dir.clone(),
+            )?;
+
+            let result_info = result.get_field_info();
+            info!("  -> Result field info - data_dir: {:?}", result_info.data_dir);
+            info!("  -> Result field info - field_path: {:?}", result_info.field_path);
+
+            Ok(Some(result))
         }
     }
 }
