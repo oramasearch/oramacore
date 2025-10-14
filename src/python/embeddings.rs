@@ -62,6 +62,31 @@ impl Model {
     }
 }
 
+#[derive(Serialize, Deserialize)]
+pub enum Intent {
+    Passage,
+    Query,
+}
+
+impl Display for Intent {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Intent::Passage => write!(f, "passage"),
+            Intent::Query => write!(f, "query"),
+        }
+    }
+}
+
+impl Intent {
+    pub fn from_str(intent_name: &str) -> Option<Self> {
+        match intent_name {
+            "passage" => Some(Intent::Passage),
+            "query" => Some(Intent::Query),
+            _ => None,
+        }
+    }
+}
+
 pub struct Embeddings {
     instance: Py<PyAny>,
 }
@@ -112,12 +137,14 @@ impl Embeddings {
         &self,
         py: Python<'_>,
         input: Vec<String>,
-        intent: Option<String>,
+        intent: Option<Intent>,
         model: Model,
     ) -> PyResult<Vec<Vec<f32>>> {
         let instance = self.instance.bind(py);
+        let intent_str = intent.map(|i| i.to_string());
+
         let result =
-            instance.call_method1("calculate_embeddings", (input, intent, model.to_string()))?;
+            instance.call_method1("calculate_embeddings", (input, intent_str, model.to_string()))?;
 
         result.extract()
     }
@@ -238,14 +265,14 @@ mod tests {
             let result1 = embeddings.calculate_embeddings(
                 py,
                 vec!["Hello world".to_string()],
-                Some("passage".to_string()),
+                Some(Intent::Passage),
                 Model::MultilingualE5Small,
             )?;
 
             let result2 = embeddings.calculate_embeddings(
                 py,
                 vec!["Hello world".to_string()],
-                Some("query".to_string()),
+                Some(Intent::Query),
                 Model::MultilingualE5Small,
             )?;
 
