@@ -38,6 +38,8 @@ pub mod build_info;
 
 pub mod ai;
 
+pub mod python;
+
 #[cfg(test)]
 pub mod tests;
 
