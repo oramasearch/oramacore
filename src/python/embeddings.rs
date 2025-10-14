@@ -80,6 +80,7 @@ impl Embeddings {
         config.setattr("dynamically_load_models", true)?;
         embeddings_config.setattr("dynamically_load_models", true)?;
 
+        // @todo: make this configurable via the config.yaml file. We should support both CPU and CUDA execution providers.
         let execution_providers = py.eval(c"['CPUExecutionProvider']", None, None)?;
         embeddings_config.setattr("execution_providers", execution_providers)?;
 
