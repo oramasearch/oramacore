@@ -1,9 +1,114 @@
 use pyo3::{prelude::*, types::PyDict};
-use std::sync::{Arc, Mutex};
-
-use crate::python::{
-    EMBEDDINGS_CONFIG_CODE, EMBEDDINGS_LOADING_CODE, INIT_THREAD_EXECUTOR, VENV_DIR,
+use serde::{Deserialize, Serialize};
+use std::{
+    ffi::CStr,
+    fmt::{Display, Formatter},
+    sync::{Arc, Mutex},
 };
+
+// @todo: we will have to move all the python stuff elsewhere.
+// Also, we should ensure that we're rinning in the correct venv and Python version.
+static VENV_DIR: &str = "src/ai_server/.venv/lib/python3.11/site-packages";
+
+static INIT_THREAD_EXECUTOR: &CStr = c"
+from src.embeddings.embeddings import initialize_thread_executor
+initialize_thread_executor()
+";
+
+// @todo: enable GPU execution provider if a GPU is present
+static EMBEDDINGS_CONFIG_CODE: &CStr = c"
+class EmbeddingsConfig:
+    def __init__(self):
+        # Set to True to avoid loading models during test initialization
+        self.dynamically_load_models = True
+        self.embeddings = type('obj', (object,), {
+            'execution_providers': ['CPUExecutionProvider'],
+            'dynamically_load_models': True
+        })()
+
+config = EmbeddingsConfig()
+";
+
+static EMBEDDINGS_LOADING_CODE: &CStr = c"
+class ModelInfo:
+    def __init__(self, name, model_name):
+        self.name = name
+        self.value = {'model_name': model_name}
+
+models = [
+    # BGE Models
+    ModelInfo('BGESmall', 'BAAI/bge-small-en-v1.5'),
+    ModelInfo('BGEBase', 'BAAI/bge-base-en-v1.5'),
+    ModelInfo('BGELarge', 'BAAI/bge-large-en-v1.5'),
+
+    # Jina Models
+    ModelInfo('JinaEmbeddingsV2BaseCode', 'jinaai/jina-embeddings-v2-base-code'),
+    
+    # E5 Models
+    ModelInfo('MultilingualE5Small', 'intfloat/multilingual-e5-small'),
+    ModelInfo('MultilingualE5Base', 'intfloat/multilingual-e5-base'),
+    ModelInfo('MultilingualE5Large', 'intfloat/multilingual-e5-large'),
+    
+    # BERT Models
+    ModelInfo('MultilingualMiniLML12V2', 'sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2'),
+]
+";
+
+#[derive(Serialize, Deserialize)]
+pub enum Model {
+    BGESmall,
+    BGEBase,
+    BGELarge,
+    JinaEmbeddingsV2BaseCode,
+    MultilingualE5Small,
+    MultilingualE5Base,
+    MultilingualE5Large,
+    MultilingualMiniLML12V2,
+}
+
+impl Display for Model {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Model::BGESmall => write!(f, "BGESmall"),
+            Model::BGEBase => write!(f, "BGEBase"),
+            Model::BGELarge => write!(f, "BGELarge"),
+            Model::JinaEmbeddingsV2BaseCode => write!(f, "JinaEmbeddingsV2BaseCode"),
+            Model::MultilingualE5Small => write!(f, "MultilingualE5Small"),
+            Model::MultilingualE5Base => write!(f, "MultilingualE5Base"),
+            Model::MultilingualE5Large => write!(f, "MultilingualE5Large"),
+            Model::MultilingualMiniLML12V2 => write!(f, "MultilingualMiniLML12V2"),
+        }
+    }
+}
+
+impl Model {
+    pub fn from_str(model_name: &str) -> Option<Self> {
+        match model_name {
+            "BGESmall" => Some(Model::BGESmall),
+            "BGEBase" => Some(Model::BGEBase),
+            "BGELarge" => Some(Model::BGELarge),
+            "JinaEmbeddingsV2BaseCode" => Some(Model::JinaEmbeddingsV2BaseCode),
+            "MultilingualE5Small" => Some(Model::MultilingualE5Small),
+            "MultilingualE5Base" => Some(Model::MultilingualE5Base),
+            "MultilingualE5Large" => Some(Model::MultilingualE5Large),
+            "MultilingualMiniLML12V2" => Some(Model::MultilingualMiniLML12V2),
+            _ => None,
+        }
+    }
+
+    pub fn dimensions(&self) -> usize {
+        match self {
+            Model::BGESmall => 384,
+            Model::BGEBase => 768,
+            Model::BGELarge => 1024,
+            Model::JinaEmbeddingsV2BaseCode => 768,
+            Model::MultilingualE5Small => 384,
+            Model::MultilingualE5Base => 768,
+            Model::MultilingualE5Large => 1024,
+            Model::MultilingualMiniLML12V2 => 384,
+        }
+    }
+}
 
 #[derive(Clone)]
 pub struct Embeddings {
@@ -43,7 +148,7 @@ impl Embeddings {
         py: Python<'_>,
         input: Vec<String>,
         intent: Option<String>,
-        model_name: &str,
+        model: Model,
     ) -> PyResult<Vec<Vec<f32>>> {
         let instance_guard = self.instance.lock().map_err(|e| {
             PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!(
@@ -53,7 +158,8 @@ impl Embeddings {
         })?;
 
         let instance = instance_guard.bind(py);
-        let result = instance.call_method1("calculate_embeddings", (input, intent, model_name))?;
+        let result =
+            instance.call_method1("calculate_embeddings", (input, intent, model.to_string()))?;
 
         result.extract()
     }
@@ -74,23 +180,7 @@ impl Embeddings {
 
 #[cfg(test)]
 mod tests {
-    use crate::python::{EMBEDDINGS_CONFIG_CODE, EMBEDDINGS_LOADING_CODE};
-
     use super::*;
-    use pyo3::types::PyDict;
-
-    fn create_mock_config(py: Python<'_>) -> PyResult<Bound<'_, PyAny>> {
-        py.run(EMBEDDINGS_CONFIG_CODE, None, None)?;
-        let locals = PyDict::new(py);
-        py.run(EMBEDDINGS_CONFIG_CODE, None, Some(&locals))?;
-        Ok(locals.get_item("config")?.unwrap())
-    }
-
-    fn create_mock_models(py: Python<'_>) -> PyResult<Bound<'_, PyAny>> {
-        let locals = PyDict::new(py);
-        py.run(EMBEDDINGS_LOADING_CODE, None, Some(&locals))?;
-        Ok(locals.get_item("models")?.unwrap())
-    }
 
     #[test]
     fn test_embeddings_creation() -> PyResult<()> {
@@ -122,7 +212,7 @@ mod tests {
                 py,
                 vec!["Hello world".to_string()],
                 None,
-                "BGESmall",
+                Model::BGESmall,
             )?;
 
             assert_eq!(result.len(), 1);
@@ -148,7 +238,7 @@ mod tests {
                     "The quick brown fox jumps over the lazy dog".to_string(),
                 ],
                 None,
-                "BGESmall",
+                Model::BGESmall,
             )?;
 
             assert_eq!(result.len(), 2);
@@ -172,14 +262,14 @@ mod tests {
                 py,
                 vec!["Hello world".to_string()],
                 None,
-                "BGESmall",
+                Model::BGESmall,
             )?;
 
             let result2 = embeddings.calculate_embeddings(
                 py,
                 vec!["Hello world".to_string()],
                 None,
-                "JinaEmbeddingsV2BaseCode",
+                Model::JinaEmbeddingsV2BaseCode,
             )?;
 
             assert_eq!(result1.len(), 1);
@@ -205,14 +295,14 @@ mod tests {
                 py,
                 vec!["Hello world".to_string()],
                 Some("passage".to_string()),
-                "MultilingualE5Small",
+                Model::MultilingualE5Small,
             )?;
 
             let result2 = embeddings.calculate_embeddings(
                 py,
                 vec!["Hello world".to_string()],
                 Some("query".to_string()),
-                "MultilingualE5Small",
+                Model::MultilingualE5Small,
             )?;
 
             assert_eq!(result1.len(), 1);
