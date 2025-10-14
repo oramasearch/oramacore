@@ -1,7 +1,9 @@
-use pyo3::prelude::*;
+use pyo3::{prelude::*, types::PyDict};
 use std::sync::{Arc, Mutex};
 
-use crate::python::{INIT_THREAD_EXECUTOR, VENV_DIR};
+use crate::python::{
+    EMBEDDINGS_CONFIG_CODE, EMBEDDINGS_LOADING_CODE, INIT_THREAD_EXECUTOR, VENV_DIR,
+};
 
 #[derive(Clone)]
 pub struct Embeddings {
@@ -9,14 +11,12 @@ pub struct Embeddings {
 }
 
 impl Embeddings {
-    pub fn new(
-        py: Python<'_>,
-        config: Bound<'_, PyAny>,
-        selected_models: Bound<'_, PyAny>,
-    ) -> PyResult<Self> {
+    pub fn new(py: Python<'_>) -> PyResult<Self> {
+        let config = Self::create_config(py)?;
+        let models = Self::create_models(py)?;
         let models_module = py.import("src.embeddings.models")?;
         let embeddings_class = models_module.getattr("EmbeddingsModels")?;
-        let instance = embeddings_class.call1((config, selected_models))?;
+        let instance = embeddings_class.call1((config, models))?;
 
         Ok(Embeddings {
             instance: Arc::new(Mutex::new(instance.unbind())),
@@ -57,6 +57,19 @@ impl Embeddings {
 
         result.extract()
     }
+
+    fn create_config(py: Python<'_>) -> PyResult<Bound<'_, PyAny>> {
+        py.run(EMBEDDINGS_CONFIG_CODE, None, None)?;
+        let locals = PyDict::new(py);
+        py.run(EMBEDDINGS_CONFIG_CODE, None, Some(&locals))?;
+        Ok(locals.get_item("config")?.unwrap())
+    }
+
+    fn create_models(py: Python<'_>) -> PyResult<Bound<'_, PyAny>> {
+        let locals = PyDict::new(py);
+        py.run(EMBEDDINGS_LOADING_CODE, None, Some(&locals))?;
+        Ok(locals.get_item("models")?.unwrap())
+    }
 }
 
 #[cfg(test)]
@@ -74,9 +87,8 @@ mod tests {
     }
 
     fn create_mock_models(py: Python<'_>) -> PyResult<Bound<'_, PyAny>> {
-        let models_code = EMBEDDINGS_LOADING_CODE;
         let locals = PyDict::new(py);
-        py.run(models_code, None, Some(&locals))?;
+        py.run(EMBEDDINGS_LOADING_CODE, None, Some(&locals))?;
         Ok(locals.get_item("models")?.unwrap())
     }
 
@@ -87,10 +99,7 @@ mod tests {
         Python::attach(|py| {
             Embeddings::initialize_python_env(py)?;
 
-            let config = create_mock_config(py)?;
-            let models = create_mock_models(py)?;
-
-            let embeddings = Embeddings::new(py, config, models)?;
+            let embeddings = Embeddings::new(py)?;
             let instance_guard = embeddings.instance.lock().unwrap();
             let instance = instance_guard.bind(py);
 
@@ -107,9 +116,7 @@ mod tests {
         Python::attach(|py| {
             Embeddings::initialize_python_env(py)?;
 
-            let config = create_mock_config(py)?;
-            let models = create_mock_models(py)?;
-            let embeddings = Embeddings::new(py, config, models)?;
+            let embeddings = Embeddings::new(py)?;
 
             let result = embeddings.calculate_embeddings(
                 py,
@@ -132,9 +139,7 @@ mod tests {
         Python::attach(|py| {
             Embeddings::initialize_python_env(py)?;
 
-            let config = create_mock_config(py)?;
-            let models = create_mock_models(py)?;
-            let embeddings = Embeddings::new(py, config, models)?;
+            let embeddings = Embeddings::new(py)?;
 
             let result = embeddings.calculate_embeddings(
                 py,
@@ -161,9 +166,7 @@ mod tests {
         Python::attach(|py| {
             Embeddings::initialize_python_env(py)?;
 
-            let config = create_mock_config(py)?;
-            let models = create_mock_models(py)?;
-            let embeddings = Embeddings::new(py, config, models)?;
+            let embeddings = Embeddings::new(py)?;
 
             let result1 = embeddings.calculate_embeddings(
                 py,
@@ -196,9 +199,7 @@ mod tests {
         Python::attach(|py| {
             Embeddings::initialize_python_env(py)?;
 
-            let config = create_mock_config(py)?;
-            let models = create_mock_models(py)?;
-            let embeddings = Embeddings::new(py, config, models)?;
+            let embeddings = Embeddings::new(py)?;
 
             let result1 = embeddings.calculate_embeddings(
                 py,
