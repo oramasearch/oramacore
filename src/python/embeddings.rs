@@ -97,7 +97,8 @@ class MockModelInfo:
         self.value = {'model_name': model_name}
 
 models = [
-    MockModelInfo('BGESmall', 'BAAI/bge-small-en-v1.5')
+    MockModelInfo('BGESmall', 'BAAI/bge-small-en-v1.5'),
+    MockModelInfo('JinaEmbeddingsV2BaseCode', 'jinaai/jina-embeddings-v2-base-code'),
 ]
 ";
         let locals = PyDict::new(py);
@@ -116,9 +117,9 @@ models = [
             let models = create_mock_models(py)?;
 
             let embeddings = Embeddings::new(py, config, models)?;
-
             let instance_guard = embeddings.instance.lock().unwrap();
             let instance = instance_guard.bind(py);
+
             assert!(instance.hasattr("calculate_embeddings")?);
 
             Ok(())
@@ -144,7 +145,71 @@ models = [
             )?;
 
             assert_eq!(result.len(), 1);
-            assert!(result[0].len() > 0);
+            assert_eq!(result[0].len(), 384);
+
+            Ok(())
+        })
+    }
+
+    #[test]
+    fn test_calculate_embeddings_with_multiple_strings() -> PyResult<()> {
+        Python::initialize();
+
+        Python::attach(|py| {
+            Embeddings::initialize_python_env(py)?;
+
+            let config = create_mock_config(py)?;
+            let models = create_mock_models(py)?;
+            let embeddings = Embeddings::new(py, config, models)?;
+
+            let result = embeddings.calculate_embeddings(
+                py,
+                vec![
+                    "Hello world".to_string(),
+                    "The quick brown fox jumps over the lazy dog".to_string(),
+                ],
+                None,
+                "BGESmall",
+            )?;
+
+            assert_eq!(result.len(), 2);
+            assert_eq!(result[0].len(), 384);
+            assert_eq!(result[1].len(), 384);
+
+            Ok(())
+        })
+    }
+
+    #[test]
+    fn test_calculate_embeddings_with_multiple_models() -> PyResult<()> {
+        Python::initialize();
+
+        Python::attach(|py| {
+            Embeddings::initialize_python_env(py)?;
+
+            let config = create_mock_config(py)?;
+            let models = create_mock_models(py)?;
+            let embeddings = Embeddings::new(py, config, models)?;
+
+            let result1 = embeddings.calculate_embeddings(
+                py,
+                vec!["Hello world".to_string()],
+                None,
+                "BGESmall",
+            )?;
+
+            let result2 = embeddings.calculate_embeddings(
+                py,
+                vec!["Hello world".to_string()],
+                None,
+                "JinaEmbeddingsV2BaseCode",
+            )?;
+
+            assert_eq!(result1.len(), 1);
+            assert_eq!(result1[0].len(), 384);
+
+            assert_eq!(result2.len(), 1);
+            assert_eq!(result2[0].len(), 768);
 
             Ok(())
         })

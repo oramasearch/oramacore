@@ -1,4 +1,4 @@
-# Python 3.14 suggested
+# Python 3.11 suggested
 
 numpy==2.2.2
 
