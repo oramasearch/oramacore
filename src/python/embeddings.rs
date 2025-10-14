@@ -7,6 +7,20 @@ pub struct Embeddings {
 }
 
 impl Embeddings {
+    pub fn new(
+        py: Python<'_>,
+        config: Bound<'_, PyAny>,
+        selected_models: Bound<'_, PyAny>,
+    ) -> PyResult<Self> {
+        let models_module = py.import("src.embeddings.models")?;
+        let embeddings_class = models_module.getattr("EmbeddingsModels")?;
+        let instance = embeddings_class.call1((config, selected_models))?;
+
+        Ok(Embeddings {
+            instance: Arc::new(Mutex::new(instance.unbind())),
+        })
+    }
+
     pub fn initialize_python_env(py: Python<'_>) -> PyResult<()> {
         let sys = py.import("sys")?;
         let path = sys.getattr("path")?;
@@ -28,20 +42,6 @@ initialize_thread_executor()
         )?;
 
         Ok(())
-    }
-
-    pub fn new(
-        py: Python<'_>,
-        config: Bound<'_, PyAny>,
-        selected_models: Bound<'_, PyAny>,
-    ) -> PyResult<Self> {
-        let models_module = py.import("src.embeddings.models")?;
-        let embeddings_class = models_module.getattr("EmbeddingsModels")?;
-        let instance = embeddings_class.call1((config, selected_models))?;
-
-        Ok(Embeddings {
-            instance: Arc::new(Mutex::new(instance.unbind())),
-        })
     }
 
     pub fn calculate_embeddings(
