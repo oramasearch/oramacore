@@ -68,6 +68,8 @@ pub struct Embeddings {
 
 impl Embeddings {
     pub fn new(py: Python<'_>) -> PyResult<Self> {
+        Self::initialize_python_env(py)?;
+
         let utils_module = py.import("src.utils")?;
         let config_class = utils_module.getattr("OramaAIConfig")?;
         let config = config_class.call0()?;

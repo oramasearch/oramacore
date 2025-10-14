@@ -18,6 +18,8 @@ use tracing::level_filters::LevelFilter;
 #[allow(unused_imports)]
 use tracing::{info, warn};
 use web_server::{HttpConfig, WebServer};
+
+use crate::python::embeddings::Embeddings;
 pub mod lock;
 
 pub mod types;
@@ -156,6 +158,9 @@ pub async fn build_orama(
         }
     };
 
+    pyo3::Python::initialize();
+    let embeddings_service = Arc::new(pyo3::Python::attach(|py| Embeddings::new(py))?);
+
     #[cfg(feature = "writer")]
     let writer_sender_config: Option<OutputSideChannelType> =
         Some(config.writer_side.output.clone());
@@ -192,6 +197,7 @@ pub async fn build_orama(
             nlp_service.clone(),
             llm_service.clone(),
             automatic_embeddings_selector,
+            embeddings_service.clone(),
         )
         .await
         .context("Cannot create write side")?;
@@ -216,6 +222,7 @@ pub async fn build_orama(
             llm_service,
             config.reader_side,
             local_gpu_manager,
+            embeddings_service,
         )
         .await
         .context("Cannot create read side")?;

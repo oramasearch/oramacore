@@ -45,6 +45,7 @@ pub use context::WriteSideContext;
 
 use crate::collection_manager::sides::write::document_storage::ZeboDocument;
 use crate::lock::OramaAsyncLock;
+use crate::python::embeddings::Embeddings;
 use crate::{
     ai::{
         automatic_embeddings_selector::AutomaticEmbeddingsSelector,
@@ -164,6 +165,8 @@ pub struct WriteSide {
     write_operation_counter: AtomicU32,
 
     jwt_manager: JwtManager,
+
+    embeddings_service: Arc<Embeddings>,
 }
 
 impl WriteSide {
@@ -174,6 +177,7 @@ impl WriteSide {
         nlp_service: Arc<NLPService>,
         llm_service: Arc<LLMService>,
         automatic_embeddings_selector: Arc<AutomaticEmbeddingsSelector>,
+        embeddings_service: Arc<Embeddings>,
     ) -> Result<Arc<Self>> {
         let master_api_key = config.master_api_key;
         let collections_writer_config = config.config;
@@ -274,6 +278,7 @@ impl WriteSide {
             stop_done_receiver: OramaAsyncLock::new("stop_done_receiver", stop_done_receiver),
             write_operation_counter: AtomicU32::new(0),
             jwt_manager,
+            embeddings_service,
         };
 
         let write_side = Arc::new(write_side);

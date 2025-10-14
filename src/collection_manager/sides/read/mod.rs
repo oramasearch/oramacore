@@ -51,6 +51,7 @@ use crate::collection_manager::sides::read::search::Search;
 use crate::lock::{OramaAsyncLock, OramaAsyncMutex};
 use crate::metrics::operations::OPERATION_COUNT;
 use crate::metrics::Empty;
+use crate::python::embeddings::Embeddings;
 use crate::types::{
     ApiKey, CollectionStatsRequest, InteractionLLMConfig, SearchMode, SearchModeResult,
     SearchResult,
@@ -139,6 +140,8 @@ pub struct ReadSide {
     // This is used to stop the read side when the server is shutting down
     stop_sender: tokio::sync::broadcast::Sender<()>,
     stop_done_receiver: OramaAsyncLock<tokio::sync::mpsc::Receiver<()>>,
+
+    embeddings_service: Arc<Embeddings>,
 }
 
 impl ReadSide {
@@ -149,6 +152,7 @@ impl ReadSide {
         llm_service: Arc<LLMService>,
         config: ReadSideConfig,
         local_gpu_manager: Arc<LocalGPUManager>,
+        embeddings_service: Arc<Embeddings>,
     ) -> Result<Arc<Self>> {
         let mut document_storage = DocumentStorage::try_new(DocumentStorageConfig {
             data_dir: config.config.data_dir.join("docs"),
@@ -238,6 +242,7 @@ impl ReadSide {
 
             stop_sender,
             stop_done_receiver: OramaAsyncLock::new("stop_done_receiver", stop_done_receiver),
+            embeddings_service,
         };
 
         let operation_receiver = operation_receiver_creator.create(last_offset).await?;
