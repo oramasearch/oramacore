@@ -117,7 +117,6 @@ models = [
 
             let embeddings = Embeddings::new(py, config, models)?;
 
-            // Test that we can access the instance
             let instance_guard = embeddings.instance.lock().unwrap();
             let instance = instance_guard.bind(py);
             assert!(instance.hasattr("calculate_embeddings")?);
