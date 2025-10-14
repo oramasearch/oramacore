@@ -30,27 +30,24 @@ config = EmbeddingsConfig()
 ";
 
 static EMBEDDINGS_LOADING_CODE: &CStr = c"
-class ModelInfo:
-    def __init__(self, name, model_name):
-        self.name = name
-        self.value = {'model_name': model_name}
+from src.embeddings.embeddings import OramaModelInfo
 
 models = [
     # BGE Models
-    ModelInfo('BGESmall', 'BAAI/bge-small-en-v1.5'),
-    ModelInfo('BGEBase', 'BAAI/bge-base-en-v1.5'),
-    ModelInfo('BGELarge', 'BAAI/bge-large-en-v1.5'),
+    OramaModelInfo.BGESmall,
+    OramaModelInfo.BGEBase,
+    OramaModelInfo.BGELarge,
 
     # Jina Models
-    ModelInfo('JinaEmbeddingsV2BaseCode', 'jinaai/jina-embeddings-v2-base-code'),
-    
+    OramaModelInfo.JinaEmbeddingsV2BaseCode,
+
     # E5 Models
-    ModelInfo('MultilingualE5Small', 'intfloat/multilingual-e5-small'),
-    ModelInfo('MultilingualE5Base', 'intfloat/multilingual-e5-base'),
-    ModelInfo('MultilingualE5Large', 'intfloat/multilingual-e5-large'),
-    
+    OramaModelInfo.MultilingualE5Small,
+    OramaModelInfo.MultilingualE5Base,
+    OramaModelInfo.MultilingualE5Large,
+
     # BERT Models
-    ModelInfo('MultilingualMiniLML12V2', 'sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2'),
+    OramaModelInfo.MultilingualMiniLML12V2,
 ]
 ";
 
