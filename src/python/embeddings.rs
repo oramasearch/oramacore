@@ -99,6 +99,7 @@ class MockModelInfo:
 models = [
     MockModelInfo('BGESmall', 'BAAI/bge-small-en-v1.5'),
     MockModelInfo('JinaEmbeddingsV2BaseCode', 'jinaai/jina-embeddings-v2-base-code'),
+    MockModelInfo('MultilingualE5Small', 'intfloat/multilingual-e5-small'),
 ]
 ";
         let locals = PyDict::new(py);
@@ -210,6 +211,39 @@ models = [
 
             assert_eq!(result2.len(), 1);
             assert_eq!(result2[0].len(), 768);
+
+            Ok(())
+        })
+    }
+
+    #[test]
+    fn test_calculate_embeddings_with_different_intent() -> PyResult<()> {
+        Python::initialize();
+
+        Python::attach(|py| {
+            Embeddings::initialize_python_env(py)?;
+
+            let config = create_mock_config(py)?;
+            let models = create_mock_models(py)?;
+            let embeddings = Embeddings::new(py, config, models)?;
+
+            let result1 = embeddings.calculate_embeddings(
+                py,
+                vec!["Hello world".to_string()],
+                Some("passage".to_string()),
+                "MultilingualE5Small",
+            )?;
+
+            let result2 = embeddings.calculate_embeddings(
+                py,
+                vec!["Hello world".to_string()],
+                Some("query".to_string()),
+                "MultilingualE5Small",
+            )?;
+
+            assert_eq!(result1.len(), 1);
+            assert_eq!(result2.len(), 1);
+            assert_ne!(result1, result2);
 
             Ok(())
         })
