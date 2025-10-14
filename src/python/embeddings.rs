@@ -29,28 +29,6 @@ class EmbeddingsConfig:
 config = EmbeddingsConfig()
 ";
 
-static EMBEDDINGS_LOADING_CODE: &CStr = c"
-from src.embeddings.embeddings import OramaModelInfo
-
-models = [
-    # BGE Models
-    OramaModelInfo.BGESmall,
-    OramaModelInfo.BGEBase,
-    OramaModelInfo.BGELarge,
-
-    # Jina Models
-    OramaModelInfo.JinaEmbeddingsV2BaseCode,
-
-    # E5 Models
-    OramaModelInfo.MultilingualE5Small,
-    OramaModelInfo.MultilingualE5Base,
-    OramaModelInfo.MultilingualE5Large,
-
-    # BERT Models
-    OramaModelInfo.MultilingualMiniLML12V2,
-]
-";
-
 #[derive(Serialize, Deserialize)]
 pub enum Model {
     BGESmall,
@@ -115,10 +93,9 @@ pub struct Embeddings {
 impl Embeddings {
     pub fn new(py: Python<'_>) -> PyResult<Self> {
         let config = Self::create_config(py)?;
-        let models = Self::create_models(py)?;
         let models_module = py.import("src.embeddings.models")?;
         let embeddings_class = models_module.getattr("EmbeddingsModels")?;
-        let instance = embeddings_class.call1((config, models))?;
+        let instance = embeddings_class.call1((config,))?;
 
         Ok(Embeddings {
             instance: Arc::new(Mutex::new(instance.unbind())),
@@ -166,12 +143,6 @@ impl Embeddings {
         let locals = PyDict::new(py);
         py.run(EMBEDDINGS_CONFIG_CODE, None, Some(&locals))?;
         Ok(locals.get_item("config")?.unwrap())
-    }
-
-    fn create_models(py: Python<'_>) -> PyResult<Bound<'_, PyAny>> {
-        let locals = PyDict::new(py);
-        py.run(EMBEDDINGS_LOADING_CODE, None, Some(&locals))?;
-        Ok(locals.get_item("models")?.unwrap())
     }
 }
 

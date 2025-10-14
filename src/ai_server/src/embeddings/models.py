@@ -1,7 +1,7 @@
 import os
 import logging
 import threading
-from typing import List
+from typing import List, Optional
 from fastembed import TextEmbedding
 
 from src.utils import OramaAIConfig
@@ -11,11 +11,12 @@ logger = logging.getLogger(__name__)
 
 
 class EmbeddingsModels:
-    def __init__(self, config: OramaAIConfig, selected_models: List[OramaModelInfo]):
+    def __init__(self, config: OramaAIConfig, selected_models: Optional[List[OramaModelInfo]] = None):
         logger.info("Initializing EmbeddingsModels...")
         self.config = config
-        self.selected_models = selected_models
-        self.selected_model_names = [item.name for item in selected_models]
+        # Use ModelGroups.all as default if no models are provided
+        self.selected_models = selected_models if selected_models is not None else ModelGroups.all.value
+        self.selected_model_names = [item.name for item in self.selected_models]
 
         logger.info(f"Creating cache directory: /tmp/fastembed_cache")
         os.makedirs("/tmp/fastembed_cache", exist_ok=True)
