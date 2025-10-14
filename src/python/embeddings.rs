@@ -1,6 +1,8 @@
 use pyo3::prelude::*;
 use std::sync::{Arc, Mutex};
 
+use crate::python::{INIT_THREAD_EXECUTOR, VENV_DIR};
+
 #[derive(Clone)]
 pub struct Embeddings {
     instance: Arc<Mutex<Py<PyAny>>>,
@@ -25,21 +27,13 @@ impl Embeddings {
         let sys = py.import("sys")?;
         let path = sys.getattr("path")?;
 
-        let venv_site_packages = "src/ai_server/.venv/lib/python3.11/site-packages";
-        if std::path::Path::new(venv_site_packages).exists() {
-            path.call_method1("insert", (0, venv_site_packages))?;
+        if std::path::Path::new(VENV_DIR).exists() {
+            path.call_method1("insert", (0, VENV_DIR))?;
         }
 
         path.call_method1("insert", (0, "src/ai_server"))?;
 
-        py.run(
-            c"
-from src.embeddings.embeddings import initialize_thread_executor
-initialize_thread_executor()
-",
-            None,
-            None,
-        )?;
+        py.run(INIT_THREAD_EXECUTOR, None, None)?;
 
         Ok(())
     }
@@ -67,41 +61,20 @@ initialize_thread_executor()
 
 #[cfg(test)]
 mod tests {
+    use crate::python::{EMBEDDINGS_CONFIG_CODE, EMBEDDINGS_LOADING_CODE};
+
     use super::*;
     use pyo3::types::PyDict;
 
     fn create_mock_config(py: Python<'_>) -> PyResult<Bound<'_, PyAny>> {
-        let config_code = c"
-class MockConfig:
-    def __init__(self):
-        # Set to True to avoid loading models during test initialization
-        self.dynamically_load_models = True
-        self.embeddings = type('obj', (object,), {
-            'execution_providers': ['CPUExecutionProvider'],
-            'dynamically_load_models': True
-        })()
-
-config = MockConfig()
-";
-        py.run(config_code, None, None)?;
+        py.run(EMBEDDINGS_CONFIG_CODE, None, None)?;
         let locals = PyDict::new(py);
-        py.run(config_code, None, Some(&locals))?;
+        py.run(EMBEDDINGS_CONFIG_CODE, None, Some(&locals))?;
         Ok(locals.get_item("config")?.unwrap())
     }
 
     fn create_mock_models(py: Python<'_>) -> PyResult<Bound<'_, PyAny>> {
-        let models_code = c"
-class MockModelInfo:
-    def __init__(self, name, model_name):
-        self.name = name
-        self.value = {'model_name': model_name}
-
-models = [
-    MockModelInfo('BGESmall', 'BAAI/bge-small-en-v1.5'),
-    MockModelInfo('JinaEmbeddingsV2BaseCode', 'jinaai/jina-embeddings-v2-base-code'),
-    MockModelInfo('MultilingualE5Small', 'intfloat/multilingual-e5-small'),
-]
-";
+        let models_code = EMBEDDINGS_LOADING_CODE;
         let locals = PyDict::new(py);
         py.run(models_code, None, Some(&locals))?;
         Ok(locals.get_item("models")?.unwrap())
