@@ -1,9 +1,6 @@
 use pyo3::prelude::*;
 use serde::{Deserialize, Serialize};
-use std::{
-    fmt::{Display, Formatter},
-    sync::{Arc, Mutex},
-};
+use std::fmt::{Display, Formatter};
 
 // @todo: we will have to move all the python stuff elsewhere.
 // Also, we should ensure that we're rinning in the correct venv and Python version.
@@ -65,9 +62,8 @@ impl Model {
     }
 }
 
-#[derive(Clone)]
 pub struct Embeddings {
-    instance: Arc<Mutex<Py<PyAny>>>,
+    instance: Py<PyAny>,
 }
 
 impl Embeddings {
@@ -89,7 +85,7 @@ impl Embeddings {
         let instance = embeddings_class.call1((config,))?;
 
         Ok(Embeddings {
-            instance: Arc::new(Mutex::new(instance.unbind())),
+            instance: instance.unbind(),
         })
     }
 
@@ -117,14 +113,7 @@ impl Embeddings {
         intent: Option<String>,
         model: Model,
     ) -> PyResult<Vec<Vec<f32>>> {
-        let instance_guard = self.instance.lock().map_err(|e| {
-            PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!(
-                "Failed to acquire lock: {}",
-                e
-            ))
-        })?;
-
-        let instance = instance_guard.bind(py);
+        let instance = self.instance.bind(py);
         let result =
             instance.call_method1("calculate_embeddings", (input, intent, model.to_string()))?;
 
@@ -144,8 +133,7 @@ mod tests {
             Embeddings::initialize_python_env(py)?;
 
             let embeddings = Embeddings::new(py)?;
-            let instance_guard = embeddings.instance.lock().unwrap();
-            let instance = instance_guard.bind(py);
+            let instance = embeddings.instance.bind(py);
 
             assert!(instance.hasattr("calculate_embeddings")?);
 
