@@ -1,4 +1,4 @@
-use pyo3::{prelude::*, types::PyDict};
+use pyo3::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::{
     ffi::CStr,
@@ -13,20 +13,6 @@ static VENV_DIR: &str = "src/ai_server/.venv/lib/python3.11/site-packages";
 static INIT_THREAD_EXECUTOR: &CStr = c"
 from src.embeddings.embeddings import initialize_thread_executor
 initialize_thread_executor()
-";
-
-// @todo: enable GPU execution provider if a GPU is present
-static EMBEDDINGS_CONFIG_CODE: &CStr = c"
-class EmbeddingsConfig:
-    def __init__(self):
-        # Set to True to avoid loading models during test initialization
-        self.dynamically_load_models = True
-        self.embeddings = type('obj', (object,), {
-            'execution_providers': ['CPUExecutionProvider'],
-            'dynamically_load_models': True
-        })()
-
-config = EmbeddingsConfig()
 ";
 
 #[derive(Serialize, Deserialize)]
@@ -92,7 +78,17 @@ pub struct Embeddings {
 
 impl Embeddings {
     pub fn new(py: Python<'_>) -> PyResult<Self> {
-        let config = Self::create_config(py)?;
+        let utils_module = py.import("src.utils")?;
+        let config_class = utils_module.getattr("OramaAIConfig")?;
+        let config = config_class.call0()?;
+        let embeddings_config = config.getattr("embeddings")?;
+
+        config.setattr("dynamically_load_models", true)?;
+        embeddings_config.setattr("dynamically_load_models", true)?;
+
+        let execution_providers = py.eval(c"['CPUExecutionProvider']", None, None)?;
+        embeddings_config.setattr("execution_providers", execution_providers)?;
+
         let models_module = py.import("src.embeddings.models")?;
         let embeddings_class = models_module.getattr("EmbeddingsModels")?;
         let instance = embeddings_class.call1((config,))?;
@@ -136,13 +132,6 @@ impl Embeddings {
             instance.call_method1("calculate_embeddings", (input, intent, model.to_string()))?;
 
         result.extract()
-    }
-
-    fn create_config(py: Python<'_>) -> PyResult<Bound<'_, PyAny>> {
-        py.run(EMBEDDINGS_CONFIG_CODE, None, None)?;
-        let locals = PyDict::new(py);
-        py.run(EMBEDDINGS_CONFIG_CODE, None, Some(&locals))?;
-        Ok(locals.get_item("config")?.unwrap())
     }
 }
 
