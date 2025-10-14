@@ -1,7 +1,6 @@
 use pyo3::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::{
-    ffi::CStr,
     fmt::{Display, Formatter},
     sync::{Arc, Mutex},
 };
@@ -9,11 +8,6 @@ use std::{
 // @todo: we will have to move all the python stuff elsewhere.
 // Also, we should ensure that we're rinning in the correct venv and Python version.
 static VENV_DIR: &str = "src/ai_server/.venv/lib/python3.11/site-packages";
-
-static INIT_THREAD_EXECUTOR: &CStr = c"
-from src.embeddings.embeddings import initialize_thread_executor
-initialize_thread_executor()
-";
 
 #[derive(Serialize, Deserialize)]
 pub enum Model {
@@ -108,7 +102,9 @@ impl Embeddings {
 
         path.call_method1("insert", (0, "src/ai_server"))?;
 
-        py.run(INIT_THREAD_EXECUTOR, None, None)?;
+        let embeddings_module = py.import("src.embeddings.embeddings")?;
+        let init_fn = embeddings_module.getattr("initialize_thread_executor")?;
+        init_fn.call0()?;
 
         Ok(())
     }
