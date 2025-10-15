@@ -10,22 +10,15 @@ use tokio::time::sleep;
 use tracing::{level_filters::LevelFilter, warn};
 
 use oramacore::{
-    ai::{AIServiceConfig, AIServiceLLMConfig, OramaModel},
-    build_orama,
-    collection_manager::sides::{
-        read::{IndexesConfig, OffloadFieldConfig, ReadSideConfig, SearchRequest},
-        write::{
-            CollectionsWriterConfig, OramaModelSerializable, TempIndexCleanupConfig,
+    LogConfig, OramacoreConfig, ai::{AIServiceConfig, AIServiceLLMConfig}, build_orama, collection_manager::sides::{
+        InputSideChannelType, OutputSideChannelType, read::{IndexesConfig, OffloadFieldConfig, ReadSideConfig, SearchRequest}, write::{
+            CollectionsWriterConfig, TempIndexCleanupConfig,
             WriteSideConfig,
-        },
-        InputSideChannelType, OutputSideChannelType,
-    },
-    types::{
+        }
+    }, python::embeddings::Model, types::{
         ApiKey, CollectionId, CreateCollection, CreateIndexRequest, DeleteDocuments, DocumentList,
         IndexEmbeddingsCalculation, IndexId, LanguageDTO, SearchParams, WriteApiKey,
-    },
-    web_server::HttpConfig,
-    LogConfig, OramacoreConfig,
+    }, web_server::HttpConfig
 };
 
 // Configuration constants
@@ -121,7 +114,7 @@ fn create_test_config(build: bool) -> OramacoreConfig {
             config: CollectionsWriterConfig {
                 data_dir: temp_dir.join("write"),
                 embedding_queue_limit: 50,
-                default_embedding_model: OramaModelSerializable(OramaModel::BgeSmall),
+                default_embedding_model: Model::BGESmall,
                 insert_batch_commit_size: 100,
                 javascript_queue_limit: 1000,
                 commit_interval: Duration::from_secs(60),

@@ -27,27 +27,20 @@ use tonic::{transport::Server, Status};
 use tracing::warn;
 
 use crate::{
-    ai::{AIServiceConfig, AIServiceLLMConfig, OramaModel},
-    build_orama,
-    collection_manager::sides::{
-        read::{
+    OramacoreConfig, ai::{AIServiceConfig, AIServiceLLMConfig}, build_orama, collection_manager::sides::{
+        InputSideChannelType, OutputSideChannelType, ReplaceIndexReason, read::{
             CollectionStats, IndexesConfig, OffloadFieldConfig, ReadSide, ReadSideConfig,
             SearchRequest,
-        },
-        write::{
-            CollectionsWriterConfig, OramaModelSerializable, TempIndexCleanupConfig, WriteError,
+        }, write::{
+            CollectionsWriterConfig, TempIndexCleanupConfig, WriteError,
             WriteSide, WriteSideConfig,
-        },
-        InputSideChannelType, OutputSideChannelType, ReplaceIndexReason,
-    },
-    types::{
+        }
+    }, python::embeddings::Model, types::{
         ApiKey, CollectionId, CollectionStatsRequest, CreateCollection, CreateIndexRequest,
         DescribeCollectionResponse, DocumentList, IndexId, InsertDocumentsResult, LanguageDTO,
         ReplaceIndexRequest, SearchParams, SearchResult, TypeParsingStrategies,
         UpdateDocumentRequest, UpdateDocumentsResult, WriteApiKey,
-    },
-    web_server::HttpConfig,
-    OramacoreConfig,
+    }, web_server::HttpConfig
 };
 use crate::{collection_manager::sides::read::ReadError, types::SearchResultHit};
 use anyhow::Context;
@@ -118,7 +111,7 @@ pub fn create_oramacore_config() -> OramacoreConfig {
             config: CollectionsWriterConfig {
                 data_dir: generate_new_path(),
                 embedding_queue_limit: 50,
-                default_embedding_model: OramaModelSerializable(OramaModel::BgeSmall),
+                default_embedding_model: Model::BGESmall,
                 // Lot of tests commit to test it.
                 // So, we put an high value to avoid problems.
                 insert_batch_commit_size: 10_000,
@@ -472,7 +465,7 @@ impl TestContext {
                     read_api_key,
                     write_api_key,
                     language: None,
-                    embeddings_model: Some(OramaModelSerializable(OramaModel::BgeSmall)),
+                    embeddings_model: Some(Model::BGESmall),
                 },
             )
             .await?;
@@ -756,7 +749,7 @@ impl TestCollectionClient {
                 self.write_api_key,
                 self.collection_id,
                 language,
-                OramaModel::BgeSmall,
+                Model::BGESmall,
                 None,
             )
             .await?;

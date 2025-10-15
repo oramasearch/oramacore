@@ -10,6 +10,7 @@ use oramacore::{
         Index, ReadSideContext,
     },
     types::{DocumentId, IndexId},
+    python::embeddings::EmbeddingsService,
     OramacoreConfig,
 };
 
@@ -96,8 +97,11 @@ async fn main() -> anyhow::Result<()> {
 
             let nlp_service = Arc::new(NLPService::new());
 
+            let embeddings_model = Arc::new(EmbeddingsService::new()?);
+
             let context = ReadSideContext {
                 ai_service,
+                embeddings_service: embeddings_model.clone(),
                 nlp_service: nlp_service.clone(),
                 llm_service: llm_service.clone(),
                 notifier: None,

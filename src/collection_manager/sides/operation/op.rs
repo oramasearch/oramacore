@@ -520,7 +520,7 @@ mod tests {
                         field_path: field_path.clone(),
                         is_array: false,
                         field_type: IndexWriteOperationFieldType::Embedding(
-                            OramaModelSerializable(crate::ai::OramaModel::BgeSmall),
+                            Model::BGESmall,
                         ),
                     },
                 ),
