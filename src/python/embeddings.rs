@@ -49,6 +49,19 @@ impl Model {
         }
     }
 
+    pub fn sequence_length(&self) -> usize {
+        match self {
+            Model::BGESmall => 512,
+            Model::BGEBase => 512,
+            Model::BGELarge => 512,
+            Model::JinaEmbeddingsV2BaseCode => 512,
+            Model::MultilingualE5Small => 512,
+            Model::MultilingualE5Base => 512,
+            Model::MultilingualE5Large => 512,
+            Model::MultilingualMiniLML12V2 => 128,
+        }
+    }
+
     pub fn dimensions(&self) -> usize {
         match self {
             Model::BGESmall => 384,
@@ -63,7 +76,7 @@ impl Model {
     }
 
     pub fn overlap(&self) -> usize {
-        self.dimensions() * 2 / 100
+        self.sequence_length() * 2 / 100
     }
 }
 

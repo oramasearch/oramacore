@@ -829,7 +829,7 @@ impl EmbeddingField {
         calculation: EmbeddingStringCalculation,
         context: WriteSideContext,
     ) -> Self {
-        let max_tokens = model.dimensions();
+        let max_tokens = model.sequence_length();
         let overlap = model.overlap();
 
         let chunker = Chunker::try_new(ChunkerConfig {
