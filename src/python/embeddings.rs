@@ -92,31 +92,36 @@ pub struct Embeddings {
 }
 
 impl Embeddings {
-    pub fn new(py: Python<'_>) -> PyResult<Self> {
-        Self::initialize_python_env(py)?;
+    pub fn new() -> PyResult<Self> {
+        Python::attach(|py| {
+            Self::initialize_python_env(py)?;
 
-        let utils_module = py.import("src.utils")?;
-        let config_class = utils_module.getattr("OramaAIConfig")?;
-        let config = config_class.call0()?;
-        let embeddings_config = config.getattr("embeddings")?;
+            let utils_module = py.import("src.utils")?;
+            let config_class = utils_module.getattr("OramaAIConfig")?;
+            let config = config_class.call0()?;
+            let embeddings_config = config.getattr("embeddings")?;
 
-        config.setattr("dynamically_load_models", true)?;
-        embeddings_config.setattr("dynamically_load_models", true)?;
+            config.setattr("dynamically_load_models", true)?;
+            embeddings_config.setattr("dynamically_load_models", true)?;
 
-        // @todo: make this configurable via the config.yaml file. We should support both CPU and CUDA execution providers.
-        let execution_providers = py.eval(c"['CPUExecutionProvider']", None, None)?;
-        embeddings_config.setattr("execution_providers", execution_providers)?;
+            // @todo: make this configurable via the config.yaml file. We should support both CPU and CUDA execution providers.
+            let execution_providers = py.eval(c"['CPUExecutionProvider']", None, None)?;
+            embeddings_config.setattr("execution_providers", execution_providers)?;
 
-        let models_module = py.import("src.embeddings.models")?;
-        let embeddings_class = models_module.getattr("EmbeddingsModels")?;
-        let instance = embeddings_class.call1((config,))?;
+            let models_module = py.import("src.embeddings.models")?;
+            let embeddings_class = models_module.getattr("EmbeddingsModels")?;
+            let instance = embeddings_class.call1((config,))?;
 
-        Ok(Embeddings {
-            instance: instance.unbind(),
+            Ok(Embeddings {
+                instance: instance.unbind(),
+            })
         })
     }
 
     pub fn initialize_python_env(py: Python<'_>) -> PyResult<()> {
+        // @todo: move this to lib.rs and call it only once during the application startup.
+        Python::initialize();
+
         let sys = py.import("sys")?;
         let path = sys.getattr("path")?;
 
@@ -135,18 +140,21 @@ impl Embeddings {
 
     pub fn calculate_embeddings(
         &self,
-        py: Python<'_>,
         input: Vec<String>,
         intent: Option<Intent>,
         model: Model,
     ) -> PyResult<Vec<Vec<f32>>> {
-        let instance = self.instance.bind(py);
-        let intent_str = intent.map(|i| i.to_string());
+        Python::attach(|py| {
+            let instance = self.instance.bind(py);
+            let intent_str = intent.map(|i| i.to_string());
 
-        let result =
-            instance.call_method1("calculate_embeddings", (input, intent_str, model.to_string()))?;
+            let result = instance.call_method1(
+                "calculate_embeddings",
+                (input, intent_str, model.to_string()),
+            )?;
 
-        result.extract()
+            result.extract()
+        })
     }
 }
 
@@ -155,132 +163,85 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_embeddings_creation() -> PyResult<()> {
-        Python::initialize();
-
-        Python::attach(|py| {
-            Embeddings::initialize_python_env(py)?;
-
-            let embeddings = Embeddings::new(py)?;
-            let instance = embeddings.instance.bind(py);
-
-            assert!(instance.hasattr("calculate_embeddings")?);
-
-            Ok(())
-        })
-    }
-
-    #[test]
     fn test_calculate_embeddings_with_single_string() -> PyResult<()> {
-        Python::initialize();
+        let embeddings = Embeddings::new()?;
+        let result = embeddings.calculate_embeddings(
+            vec!["Hello world".to_string()],
+            None,
+            Model::BGESmall,
+        )?;
 
-        Python::attach(|py| {
-            Embeddings::initialize_python_env(py)?;
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].len(), 384);
 
-            let embeddings = Embeddings::new(py)?;
-
-            let result = embeddings.calculate_embeddings(
-                py,
-                vec!["Hello world".to_string()],
-                None,
-                Model::BGESmall,
-            )?;
-
-            assert_eq!(result.len(), 1);
-            assert_eq!(result[0].len(), 384);
-
-            Ok(())
-        })
+        Ok(())
     }
 
     #[test]
     fn test_calculate_embeddings_with_multiple_strings() -> PyResult<()> {
-        Python::initialize();
+        let embeddings = Embeddings::new()?;
 
-        Python::attach(|py| {
-            Embeddings::initialize_python_env(py)?;
+        let result = embeddings.calculate_embeddings(
+            vec![
+                "Hello world".to_string(),
+                "The quick brown fox jumps over the lazy dog".to_string(),
+            ],
+            None,
+            Model::BGESmall,
+        )?;
 
-            let embeddings = Embeddings::new(py)?;
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0].len(), 384);
+        assert_eq!(result[1].len(), 384);
 
-            let result = embeddings.calculate_embeddings(
-                py,
-                vec![
-                    "Hello world".to_string(),
-                    "The quick brown fox jumps over the lazy dog".to_string(),
-                ],
-                None,
-                Model::BGESmall,
-            )?;
-
-            assert_eq!(result.len(), 2);
-            assert_eq!(result[0].len(), 384);
-            assert_eq!(result[1].len(), 384);
-
-            Ok(())
-        })
+        Ok(())
     }
 
     #[test]
     fn test_calculate_embeddings_with_multiple_models() -> PyResult<()> {
-        Python::initialize();
+        let embeddings = Embeddings::new()?;
 
-        Python::attach(|py| {
-            Embeddings::initialize_python_env(py)?;
+        let result1 = embeddings.calculate_embeddings(
+            vec!["Hello world".to_string()],
+            None,
+            Model::BGESmall,
+        )?;
 
-            let embeddings = Embeddings::new(py)?;
+        let result2 = embeddings.calculate_embeddings(
+            vec!["Hello world".to_string()],
+            None,
+            Model::JinaEmbeddingsV2BaseCode,
+        )?;
 
-            let result1 = embeddings.calculate_embeddings(
-                py,
-                vec!["Hello world".to_string()],
-                None,
-                Model::BGESmall,
-            )?;
+        assert_eq!(result1.len(), 1);
+        assert_eq!(result1[0].len(), 384);
 
-            let result2 = embeddings.calculate_embeddings(
-                py,
-                vec!["Hello world".to_string()],
-                None,
-                Model::JinaEmbeddingsV2BaseCode,
-            )?;
+        assert_eq!(result2.len(), 1);
+        assert_eq!(result2[0].len(), 768);
 
-            assert_eq!(result1.len(), 1);
-            assert_eq!(result1[0].len(), 384);
-
-            assert_eq!(result2.len(), 1);
-            assert_eq!(result2[0].len(), 768);
-
-            Ok(())
-        })
+        Ok(())
     }
 
     #[test]
     fn test_calculate_embeddings_with_different_intent() -> PyResult<()> {
-        Python::initialize();
+        let embeddings = Embeddings::new()?;
 
-        Python::attach(|py| {
-            Embeddings::initialize_python_env(py)?;
+        let result1 = embeddings.calculate_embeddings(
+            vec!["Hello world".to_string()],
+            Some(Intent::Passage),
+            Model::MultilingualE5Small,
+        )?;
 
-            let embeddings = Embeddings::new(py)?;
+        let result2 = embeddings.calculate_embeddings(
+            vec!["Hello world".to_string()],
+            Some(Intent::Query),
+            Model::MultilingualE5Small,
+        )?;
 
-            let result1 = embeddings.calculate_embeddings(
-                py,
-                vec!["Hello world".to_string()],
-                Some(Intent::Passage),
-                Model::MultilingualE5Small,
-            )?;
+        assert_eq!(result1.len(), 1);
+        assert_eq!(result2.len(), 1);
+        assert_ne!(result1, result2);
 
-            let result2 = embeddings.calculate_embeddings(
-                py,
-                vec!["Hello world".to_string()],
-                Some(Intent::Query),
-                Model::MultilingualE5Small,
-            )?;
-
-            assert_eq!(result1.len(), 1);
-            assert_eq!(result2.len(), 1);
-            assert_ne!(result1, result2);
-
-            Ok(())
-        })
+        Ok(())
     }
 }

@@ -158,8 +158,7 @@ pub async fn build_orama(
         }
     };
 
-    pyo3::Python::initialize();
-    let embeddings_service = Arc::new(pyo3::Python::attach(|py| Embeddings::new(py))?);
+    let embeddings_service = Arc::new(Embeddings::new()?);
 
     #[cfg(feature = "writer")]
     let writer_sender_config: Option<OutputSideChannelType> =
