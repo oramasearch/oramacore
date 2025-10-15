@@ -1,6 +1,7 @@
 use anyhow::Result;
 use oramacore::ai::llm_service_client::LlmServiceClient;
-use oramacore::ai::{EmbeddingRequest, HealthCheckRequest, OramaIntent, OramaModel};
+use oramacore::ai::{EmbeddingRequest, HealthCheckRequest, OramaIntent};
+use oramacore::python::embeddings::Model;
 use std::time::Instant;
 use tonic::Request;
 
@@ -52,11 +53,10 @@ async fn main() -> Result<()> {
           }
         }
     ".to_string();
-    let model = OramaModel::BgeSmall;
     let start_embedding = Instant::now();
     let request = Request::new(EmbeddingRequest {
         input: vec![input_text],
-        model: model.into(),
+        model: 1i32,
         intent: OramaIntent::Passage.into(),
     });
     let _embedding = embeddings_service_client.get_embedding(request).await?;

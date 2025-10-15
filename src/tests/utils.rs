@@ -27,20 +27,27 @@ use tonic::{transport::Server, Status};
 use tracing::warn;
 
 use crate::{
-    OramacoreConfig, ai::{AIServiceConfig, AIServiceLLMConfig}, build_orama, collection_manager::sides::{
-        InputSideChannelType, OutputSideChannelType, ReplaceIndexReason, read::{
+    ai::{AIServiceConfig, AIServiceLLMConfig},
+    build_orama,
+    collection_manager::sides::{
+        read::{
             CollectionStats, IndexesConfig, OffloadFieldConfig, ReadSide, ReadSideConfig,
             SearchRequest,
-        }, write::{
-            CollectionsWriterConfig, TempIndexCleanupConfig, WriteError,
-            WriteSide, WriteSideConfig,
-        }
-    }, python::embeddings::Model, types::{
+        },
+        write::{
+            CollectionsWriterConfig, TempIndexCleanupConfig, WriteError, WriteSide, WriteSideConfig,
+        },
+        InputSideChannelType, OutputSideChannelType, ReplaceIndexReason,
+    },
+    python::embeddings::Model,
+    types::{
         ApiKey, CollectionId, CollectionStatsRequest, CreateCollection, CreateIndexRequest,
         DescribeCollectionResponse, DocumentList, IndexId, InsertDocumentsResult, LanguageDTO,
         ReplaceIndexRequest, SearchParams, SearchResult, TypeParsingStrategies,
         UpdateDocumentRequest, UpdateDocumentsResult, WriteApiKey,
-    }, web_server::HttpConfig
+    },
+    web_server::HttpConfig,
+    OramacoreConfig,
 };
 use crate::{collection_manager::sides::read::ReadError, types::SearchResultHit};
 use anyhow::Context;

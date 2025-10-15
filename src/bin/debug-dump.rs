@@ -9,8 +9,8 @@ use oramacore::{
         document_storage::{DocumentStorage, DocumentStorageConfig},
         Index, ReadSideContext,
     },
-    types::{DocumentId, IndexId},
     python::embeddings::EmbeddingsService,
+    types::{DocumentId, IndexId},
     OramacoreConfig,
 };
 

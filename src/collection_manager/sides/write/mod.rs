@@ -3,7 +3,6 @@ mod collections;
 pub mod document_storage;
 mod embedding;
 pub mod index;
-pub use index::OramaModelSerializable;
 use oramacore_lib::hook_storage::{HookWriter, HookWriterError};
 use oramacore_lib::nlp::NLPService;
 use thiserror::Error;
@@ -52,7 +51,6 @@ use crate::{
         llms::LLMService,
         tools::{CollectionToolsRuntime, ToolsRuntime},
         training_sets::TrainingSetInterface,
-        AIService,
     },
     collection_manager::sides::{
         system_prompts::CollectionSystemPromptsInterface,
@@ -173,7 +171,6 @@ impl WriteSide {
     pub async fn try_load(
         op_sender_creator: OperationSenderCreator,
         config: WriteSideConfig,
-        ai_service: Arc<AIService>,
         nlp_service: Arc<NLPService>,
         llm_service: Arc<LLMService>,
         automatic_embeddings_selector: Arc<AutomaticEmbeddingsSelector>,

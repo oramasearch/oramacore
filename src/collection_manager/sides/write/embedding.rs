@@ -56,7 +56,7 @@ async fn process<I>(
             // If something goes wrong, we will just log it and continue
             // We should put a circuit breaker here like https://docs.rs/tokio-retry2/latest/tokio_retry2/
             // TODO: Add circuit breaker
-            match embeddings_service.calculate_embeddings(
+            let _ = match embeddings_service.calculate_embeddings(
                 text_inputs,
                 Some(Intent::Passage),
                 model.clone(),

@@ -11,10 +11,7 @@ use serde_json::{Map, Value};
 use tokio::sync::mpsc::Sender;
 
 use crate::{
-    ai::{
-        automatic_embeddings_selector::{AutomaticEmbeddingsSelector, ChosenProperties},
-        OramaModel,
-    },
+    ai::automatic_embeddings_selector::{AutomaticEmbeddingsSelector, ChosenProperties},
     collection_manager::sides::{
         write::{embedding::MultiEmbeddingCalculationRequest, WriteSideContext},
         Term, TermStringField,
@@ -1106,28 +1103,4 @@ fn join_vec_strings(v: &[&String]) -> String {
         final_str.push_str(s);
     }
     final_str
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct OramaModelSerializable(pub OramaModel);
-
-impl Serialize for OramaModelSerializable {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::ser::Serializer,
-    {
-        self.0.as_str_name().serialize(serializer)
-    }
-}
-
-impl<'de> Deserialize<'de> for OramaModelSerializable {
-    fn deserialize<D>(deserializer: D) -> Result<OramaModelSerializable, D::Error>
-    where
-        D: serde::de::Deserializer<'de>,
-    {
-        let model_name = String::deserialize(deserializer)?;
-        let model = OramaModel::from_str_name(&model_name)
-            .ok_or_else(|| serde::de::Error::custom("Invalid model name"))?;
-        Ok(OramaModelSerializable(model))
-    }
 }

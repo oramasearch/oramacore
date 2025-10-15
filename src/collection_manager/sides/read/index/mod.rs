@@ -18,7 +18,7 @@ use tracing::{debug, error, info, trace, warn};
 use uncommitted_field::*;
 
 use crate::{
-    ai::{llms, OramaModel},
+    ai::llms,
     collection_manager::{
         bm25::BM25Scorer,
         sides::{

@@ -24,7 +24,6 @@ use serde_json::{Map, Value};
 use tracing::{info, instrument, trace, warn};
 
 use crate::{
-    ai::OramaModel,
     collection_manager::sides::{
         field_names_to_paths, write::context::WriteSideContext, CollectionWriteOperation,
         DocumentStorageWriteOperation, IndexWriteOperation, IndexWriteOperationFieldType,
@@ -40,7 +39,7 @@ use crate::{
 use oramacore_lib::fs::BufferedFile;
 use oramacore_lib::nlp::{locales::Locale, TextParser};
 
-pub use fields::{EnumStrategy, FieldType, GeoPoint, IndexedValue, OramaModelSerializable};
+pub use fields::{EnumStrategy, FieldType, GeoPoint, IndexedValue};
 use oramacore_lib::pin_rules::{PinRuleOperation, PinRulesWriter};
 
 #[derive(Clone)]

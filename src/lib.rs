@@ -192,7 +192,6 @@ pub async fn build_orama(
         let write_side = WriteSide::try_load(
             sender_creator,
             config.writer_side,
-            ai_service.clone(),
             nlp_service.clone(),
             llm_service.clone(),
             automatic_embeddings_selector,

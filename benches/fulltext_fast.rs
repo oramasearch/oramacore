@@ -14,16 +14,14 @@ use anyhow::Context;
 use duration_string::DurationString;
 use http::uri::Scheme;
 use oramacore::{
-    ai::{AIServiceConfig, AIServiceLLMConfig, OramaModel},
+    ai::{AIServiceConfig, AIServiceLLMConfig},
     build_orama,
     collection_manager::sides::{
         read::{IndexesConfig, OffloadFieldConfig, ReadSideConfig, SearchRequest},
-        write::{
-            CollectionsWriterConfig, OramaModelSerializable, TempIndexCleanupConfig,
-            WriteSideConfig,
-        },
+        write::{CollectionsWriterConfig, TempIndexCleanupConfig, WriteSideConfig},
         InputSideChannelType, OutputSideChannelType,
     },
+    python::embeddings::Model,
     types::{
         ApiKey, CollectionId, CollectionStatsRequest, CreateCollection, CreateIndexRequest,
         IndexId, WriteApiKey,
@@ -72,7 +70,7 @@ pub fn create_minimal_config() -> OramacoreConfig {
             config: CollectionsWriterConfig {
                 data_dir: generate_new_path(),
                 embedding_queue_limit: 10,
-                default_embedding_model: OramaModelSerializable(OramaModel::BgeSmall),
+                default_embedding_model: Model::BGESmall,
                 insert_batch_commit_size: 500,
                 javascript_queue_limit: 100,
                 commit_interval: Duration::from_secs(60),

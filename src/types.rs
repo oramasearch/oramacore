@@ -4,7 +4,6 @@ use crate::ai::RemoteLLMProvider;
 use crate::ai::automatic_embeddings_selector::ChosenProperties;
 
 use crate::collection_manager::sides::write::index::{EnumStrategy, FieldType, GeoPoint};
-use crate::collection_manager::sides::write::OramaModelSerializable;
 use crate::collection_manager::sides::{deserialize_api_key, serialize_api_key};
 use crate::python::embeddings::Model;
 use anyhow::{bail, Context, Result};
@@ -524,7 +523,7 @@ pub enum DocumentFields {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EmbeddingTypedField {
-    pub model: OramaModelSerializable,
+    pub model: Model,
     pub document_fields: DocumentFields,
 }
 
@@ -541,7 +540,7 @@ pub enum TypedField {
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct CreateCollectionEmbeddings {
-    pub model: Option<OramaModelSerializable>,
+    pub model: Option<Model>,
     pub document_fields: Vec<String>,
 }
 
