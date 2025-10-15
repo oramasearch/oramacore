@@ -10,7 +10,6 @@ use crate::{
 
 #[derive(Clone)]
 pub struct ReadSideContext {
-    pub ai_service: Arc<AIService>,
     pub embeddings_service: Arc<EmbeddingsService>,
     pub nlp_service: Arc<NLPService>,
     pub llm_service: Arc<LLMService>,

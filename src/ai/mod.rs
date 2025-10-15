@@ -10,18 +10,13 @@ use serde::{Deserialize, Deserializer, Serialize};
 use anyhow::{anyhow, Context, Result};
 use strum_macros::Display;
 use tonic::{transport::Channel, Request};
-use tracing::{debug, info, trace};
+use tracing::{debug, info};
 
-use crate::metrics::{
-    ai::{EMBEDDING_CALCULATION_PARALLEL_COUNT, EMBEDDING_CALCULATION_TIME},
-    EmbeddingCalculationLabels,
-};
 use crate::types::InteractionLLMConfig;
 
 pub mod advanced_autoquery;
 pub mod answer;
 pub mod automatic_embeddings_selector;
-pub mod context_evaluator;
 pub mod gpu;
 pub mod llms;
 pub mod ragat;
@@ -149,66 +144,6 @@ impl AIService {
                 }
             }
         }
-    }
-
-    async fn embed(
-        &self,
-        model: OramaModel,
-        input: Vec<&String>,
-        intent: OramaIntent,
-    ) -> Result<Vec<Vec<f32>>> {
-        let mut conn = self.pool.get().await.context("Cannot get connection")?;
-
-        let time_metric = EMBEDDING_CALCULATION_TIME.create(EmbeddingCalculationLabels {
-            model: model.as_str_name().into(),
-        });
-        EMBEDDING_CALCULATION_PARALLEL_COUNT.track_usize(
-            EmbeddingCalculationLabels {
-                model: model.as_str_name().into(),
-            },
-            input.len(),
-        );
-
-        let request = EmbeddingRequest {
-            input: input.iter().map(|s| s.to_string()).collect(),
-            model: model.into(),
-            intent: intent.into(),
-        };
-        trace!("Requesting embeddings: {:?}", request);
-        let request = Request::new(request);
-        let v = conn
-            .get_embedding(request)
-            .await
-            .map(|response| response.into_inner())
-            .context("Cannot get embeddings")?;
-
-        drop(time_metric);
-
-        trace!("Received embeddings");
-
-        let v = v
-            .embeddings_result
-            .into_iter()
-            .map(|embedding| embedding.embeddings)
-            .collect();
-
-        Ok(v)
-    }
-
-    pub async fn embed_query(
-        &self,
-        model: OramaModel,
-        input: Vec<&String>,
-    ) -> Result<Vec<Vec<f32>>> {
-        self.embed(model, input, OramaIntent::Query).await
-    }
-
-    pub async fn embed_passage(
-        &self,
-        model: OramaModel,
-        input: Vec<&String>,
-    ) -> Result<Vec<Vec<f32>>> {
-        self.embed(model, input, OramaIntent::Passage).await
     }
 }
 

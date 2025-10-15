@@ -52,12 +52,12 @@ use crate::lock::{OramaAsyncLock, OramaAsyncMutex};
 use crate::metrics::operations::OPERATION_COUNT;
 use crate::metrics::Empty;
 use crate::python::embeddings::EmbeddingsService;
+use crate::types::CollectionId;
 use crate::types::{
     ApiKey, CollectionStatsRequest, InteractionLLMConfig, SearchMode, SearchModeResult,
     SearchResult,
 };
 use crate::types::{IndexId, NLPSearchRequest};
-use crate::{ai::AIService, types::CollectionId};
 use oramacore_lib::fs::BufferedFile;
 use oramacore_lib::generic_kv::{KVConfig, KV};
 use oramacore_lib::nlp::NLPService;
@@ -147,7 +147,6 @@ pub struct ReadSide {
 impl ReadSide {
     pub async fn try_load(
         operation_receiver_creator: OperationReceiverCreator,
-        ai_service: Arc<AIService>,
         nlp_service: Arc<NLPService>,
         llm_service: Arc<LLMService>,
         config: ReadSideConfig,
@@ -171,7 +170,6 @@ impl ReadSide {
         }
 
         let context = ReadSideContext {
-            ai_service: ai_service.clone(),
             embeddings_service: embeddings_service.clone(),
             nlp_service: nlp_service.clone(),
             llm_service: llm_service.clone(),
@@ -532,12 +530,6 @@ impl ReadSide {
                 log_sender,
             )
             .await
-    }
-
-    // This is wrong. We should not expose the ai service to the read side.
-    // @todo: Remove this method.
-    pub fn get_ai_service(&self) -> Arc<AIService> {
-        self.collections.get_ai_service()
     }
 
     // This is wrong. We should not expose the vllm service to the read side.

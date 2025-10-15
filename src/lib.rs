@@ -2,7 +2,7 @@ use std::{collections::HashMap, path::PathBuf, sync::Arc};
 
 use ai::{
     automatic_embeddings_selector::AutomaticEmbeddingsSelector, gpu::LocalGPUManager,
-    llms::LLMService, AIService, AIServiceConfig,
+    llms::LLMService, AIServiceConfig,
 };
 use anyhow::{Context, Result};
 use collection_manager::sides::{
@@ -132,11 +132,6 @@ pub async fn build_orama(
     }
 
     info!("Building ai_service");
-    let ai_service = AIService::new(config.ai_server.clone());
-
-    ai_service.wait_ready().await?;
-
-    let ai_service = Arc::new(ai_service);
 
     let local_gpu_manager = Arc::new(LocalGPUManager::new());
 
@@ -215,7 +210,6 @@ pub async fn build_orama(
         let receiver_creator = receiver_creator.expect("Receiver is not created");
         let read_side = ReadSide::try_load(
             receiver_creator,
-            ai_service,
             nlp_service,
             llm_service,
             config.reader_side,
