@@ -1,6 +1,7 @@
 use pyo3::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::fmt::{Display, Formatter};
+use tracing::info;
 
 // @todo: we will have to move all the python stuff elsewhere.
 // Also, we should ensure that we're rinning in the correct venv and Python version.
@@ -101,6 +102,11 @@ impl EmbeddingsService {
         Python::initialize();
 
         Python::attach(|py| {
+            let sys = py.import("sys")?;
+            let version = sys.getattr("version")?.extract::<String>()?;
+            let version_number = version.split_whitespace().next().unwrap_or(&version);
+            info!("Detected local Python version: v{}", version_number);
+
             Self::initialize_python_env(py)?;
 
             let utils_module = py.import("src.utils")?;
