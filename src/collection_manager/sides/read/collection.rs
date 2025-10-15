@@ -746,7 +746,7 @@ impl CollectionReader {
             // This should only happen on the first iteration
             if embedding_model.is_none() {
                 if let Some(model) = i.get_model().await {
-                    let serializable_model = model.as_str_name();
+                    let serializable_model = model.to_string();
                     embedding_model = Some(serializable_model.to_string());
                 }
             }

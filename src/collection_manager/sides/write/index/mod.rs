@@ -31,6 +31,7 @@ use crate::{
         WriteOperation,
     },
     lock::{OramaAsyncLock, OramaAsyncLockReadGuard, OramaAsyncLockWriteGuard},
+    python::embeddings::Model,
     types::{
         CollectionId, DescribeCollectionIndexResponse, Document, DocumentId, DocumentList, FieldId,
         IndexEmbeddingsCalculation, IndexFieldType, IndexId, OramaDate,
@@ -248,7 +249,7 @@ impl Index {
     pub async fn add_embedding_field(
         &self,
         field_path: Box<[String]>,
-        model: OramaModel,
+        model: Model,
         embedding_calculation: IndexEmbeddingsCalculation,
     ) -> Result<()> {
         let field_id = self
@@ -289,9 +290,7 @@ impl Index {
                         field_id,
                         field_path,
                         is_array: false,
-                        field_type: IndexWriteOperationFieldType::Embedding(
-                            OramaModelSerializable(model),
-                        ),
+                        field_type: IndexWriteOperationFieldType::Embedding(model),
                     },
                 ),
             ))
@@ -770,9 +769,7 @@ impl Index {
                             field_type: match &score {
                                 IndexScoreField::String(_) => IndexWriteOperationFieldType::String,
                                 IndexScoreField::Embedding(f) => {
-                                    IndexWriteOperationFieldType::Embedding(OramaModelSerializable(
-                                        f.get_model(),
-                                    ))
+                                    IndexWriteOperationFieldType::Embedding(f.get_model())
                                 }
                             },
                         },

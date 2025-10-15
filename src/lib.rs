@@ -19,7 +19,7 @@ use tracing::level_filters::LevelFilter;
 use tracing::{info, warn};
 use web_server::{HttpConfig, WebServer};
 
-use crate::python::embeddings::Embeddings;
+use crate::python::embeddings::EmbeddingsService;
 pub mod lock;
 
 pub mod types;
@@ -158,7 +158,7 @@ pub async fn build_orama(
         }
     };
 
-    let embeddings_service = Arc::new(Embeddings::new()?);
+    let embeddings_service = Arc::new(EmbeddingsService::new()?);
 
     #[cfg(feature = "writer")]
     let writer_sender_config: Option<OutputSideChannelType> =

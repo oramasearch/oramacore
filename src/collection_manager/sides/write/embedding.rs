@@ -4,10 +4,10 @@ use tokio::sync::mpsc::Receiver;
 use tracing::{error, info, trace, warn};
 
 use crate::{
-    ai::{AIService, OramaModel},
     collection_manager::sides::{
         CollectionWriteOperation, IndexWriteOperation, OperationSender, WriteOperation,
     },
+    python::embeddings::{EmbeddingsService, Intent, Model},
     types::{CollectionId, DocumentId, FieldId, IndexId},
 };
 
@@ -19,7 +19,7 @@ pub struct EmbeddingCalculationRequestInput {
 
 #[derive(Debug)]
 pub struct MultiEmbeddingCalculationRequest {
-    pub model: OramaModel,
+    pub model: Model,
     pub coll_id: CollectionId,
     pub doc_id: DocumentId,
     pub field_id: FieldId,
@@ -27,11 +27,14 @@ pub struct MultiEmbeddingCalculationRequest {
     pub text: Vec<String>,
 }
 
-async fn process<I>(op_sender: &OperationSender, ai_service: Arc<AIService>, cache: I)
-where
+async fn process<I>(
+    op_sender: &OperationSender,
+    embeddings_service: Arc<EmbeddingsService>,
+    cache: I,
+) where
     I: Iterator<
         Item = (
-            OramaModel,
+            Model,
             HashMap<(CollectionId, IndexId), Vec<EmbeddingCalculationRequestInput>>,
         ),
     >,
@@ -39,7 +42,7 @@ where
     info!("Processing embedding batch");
 
     for (model, inputs_per_collection_index) in cache {
-        let model_name = model.as_str_name();
+        let model_name = model.clone().to_string();
 
         let mut res: HashMap<
             (CollectionId, IndexId),
@@ -47,32 +50,37 @@ where
         > = HashMap::new();
         for ((collection_id, index_id), inputs) in inputs_per_collection_index {
             trace!(model_name = ?model_name, inputs = ?inputs.len(), "Process embedding batch");
-            let text_inputs: Vec<&String> = inputs.iter().map(|input| &input.text).collect();
+            let text_inputs: Vec<String> =
+                inputs.iter().map(|input| input.text.to_string()).collect(); // @todo: to_string() here is used to clone the string, check if we can remove this cloning
 
             // If something goes wrong, we will just log it and continue
             // We should put a circuit breaker here like https://docs.rs/tokio-retry2/latest/tokio_retry2/
             // TODO: Add circuit breaker
-            let output = ai_service.embed_passage(model, text_inputs).await;
+            match embeddings_service.calculate_embeddings(
+                text_inputs,
+                Some(Intent::Passage),
+                model.clone(),
+            ) {
+                Ok(embeddings) => {
+                    let output = inputs.into_iter().zip(embeddings.into_iter());
 
-            let output = match output {
-                Ok(output) => output,
+                    for (req, embeddings) in output {
+                        let EmbeddingCalculationRequestInput {
+                            doc_id, field_id, ..
+                        } = req;
+                        let entry = res.entry((collection_id, index_id)).or_default();
+                        let entry = entry.entry(field_id).or_default();
+                        let entry = entry.entry(doc_id).or_default();
+                        entry.push(embeddings);
+                    }
+
+                    Ok(())
+                }
                 Err(e) => {
-                    warn!("Failed to calculate embedding {:?}", e);
-                    continue;
+                    warn!("Failed to calculate embeddings: {:?}", e);
+                    Err(e)
                 }
             };
-
-            let output = inputs.into_iter().zip(output.into_iter());
-
-            for (req, embeddings) in output {
-                let EmbeddingCalculationRequestInput {
-                    doc_id, field_id, ..
-                } = req;
-                let entry = res.entry((collection_id, index_id)).or_default();
-                let entry = entry.entry(field_id).or_default();
-                let entry = entry.entry(doc_id).or_default();
-                entry.push(embeddings);
-            }
         }
 
         let ops = res
@@ -104,7 +112,7 @@ where
 }
 
 pub fn start_calculate_embedding_loop(
-    ai_service: Arc<AIService>,
+    embeddings_service: Arc<EmbeddingsService>,
     mut receiver: Receiver<MultiEmbeddingCalculationRequest>,
     op_sender: OperationSender,
     limit: u32,
@@ -119,7 +127,7 @@ pub fn start_calculate_embedding_loop(
 
         let mut buffer = Vec::with_capacity(limit as usize);
         let mut cache: HashMap<
-            OramaModel,
+            Model,
             HashMap<(CollectionId, IndexId), Vec<EmbeddingCalculationRequestInput>>,
         > = Default::default();
 
@@ -164,7 +172,7 @@ pub fn start_calculate_embedding_loop(
                 }
             }
 
-            process(&op_sender, ai_service.clone(), cache.drain()).await;
+            process(&op_sender, embeddings_service.clone(), cache.drain()).await;
         }
 
         loop {
@@ -200,7 +208,7 @@ pub fn start_calculate_embedding_loop(
             }
         }
 
-        process(&op_sender, ai_service.clone(), cache.drain()).await;
+        process(&op_sender, embeddings_service.clone(), cache.drain()).await;
 
         warn!("Stop embedding calculation loop");
 

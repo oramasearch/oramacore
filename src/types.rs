@@ -6,6 +6,7 @@ use crate::ai::automatic_embeddings_selector::ChosenProperties;
 use crate::collection_manager::sides::write::index::{EnumStrategy, FieldType, GeoPoint};
 use crate::collection_manager::sides::write::OramaModelSerializable;
 use crate::collection_manager::sides::{deserialize_api_key, serialize_api_key};
+use crate::python::embeddings::Model;
 use anyhow::{bail, Context, Result};
 use arrayvec::ArrayString;
 
@@ -633,7 +634,7 @@ pub struct CreateCollection {
     pub write_api_key: ApiKey,
 
     pub language: Option<LanguageDTO>,
-    pub embeddings_model: Option<OramaModelSerializable>,
+    pub embeddings_model: Option<Model>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -644,7 +645,7 @@ pub struct CollectionCreated {
 #[derive(Debug, Deserialize, Clone)]
 pub struct ReindexConfig {
     pub language: LanguageDTO,
-    pub embedding_model: OramaModelSerializable,
+    pub embedding_model: Model,
     pub reference: Option<String>,
 }
 

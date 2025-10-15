@@ -6,7 +6,7 @@ use std::fmt::{Display, Formatter};
 // Also, we should ensure that we're rinning in the correct venv and Python version.
 static VENV_DIR: &str = "src/ai_server/.venv/lib/python3.11/site-packages";
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone, Copy, Hash, PartialEq, Eq, Debug)]
 pub enum Model {
     BGESmall,
     BGEBase,
@@ -60,6 +60,10 @@ impl Model {
             Model::MultilingualMiniLML12V2 => 384,
         }
     }
+
+    pub fn overlap(&self) -> usize {
+        self.dimensions() * 2 / 100
+    }
 }
 
 #[derive(Serialize, Deserialize)]
@@ -87,12 +91,15 @@ impl Intent {
     }
 }
 
-pub struct Embeddings {
+pub struct EmbeddingsService {
     instance: Py<PyAny>,
 }
 
-impl Embeddings {
+impl EmbeddingsService {
     pub fn new() -> PyResult<Self> {
+        // @todo: move this to lib.rs and call it only once during the application startup.
+        Python::initialize();
+
         Python::attach(|py| {
             Self::initialize_python_env(py)?;
 
@@ -112,16 +119,13 @@ impl Embeddings {
             let embeddings_class = models_module.getattr("EmbeddingsModels")?;
             let instance = embeddings_class.call1((config,))?;
 
-            Ok(Embeddings {
+            Ok(EmbeddingsService {
                 instance: instance.unbind(),
             })
         })
     }
 
     pub fn initialize_python_env(py: Python<'_>) -> PyResult<()> {
-        // @todo: move this to lib.rs and call it only once during the application startup.
-        Python::initialize();
-
         let sys = py.import("sys")?;
         let path = sys.getattr("path")?;
 
@@ -164,7 +168,7 @@ mod tests {
 
     #[test]
     fn test_calculate_embeddings_with_single_string() -> PyResult<()> {
-        let embeddings = Embeddings::new()?;
+        let embeddings = EmbeddingsService::new()?;
         let result = embeddings.calculate_embeddings(
             vec!["Hello world".to_string()],
             None,
@@ -179,7 +183,7 @@ mod tests {
 
     #[test]
     fn test_calculate_embeddings_with_multiple_strings() -> PyResult<()> {
-        let embeddings = Embeddings::new()?;
+        let embeddings = EmbeddingsService::new()?;
 
         let result = embeddings.calculate_embeddings(
             vec![
@@ -199,7 +203,7 @@ mod tests {
 
     #[test]
     fn test_calculate_embeddings_with_multiple_models() -> PyResult<()> {
-        let embeddings = Embeddings::new()?;
+        let embeddings = EmbeddingsService::new()?;
 
         let result1 = embeddings.calculate_embeddings(
             vec!["Hello world".to_string()],
@@ -224,7 +228,7 @@ mod tests {
 
     #[test]
     fn test_calculate_embeddings_with_different_intent() -> PyResult<()> {
-        let embeddings = Embeddings::new()?;
+        let embeddings = EmbeddingsService::new()?;
 
         let result1 = embeddings.calculate_embeddings(
             vec!["Hello world".to_string()],

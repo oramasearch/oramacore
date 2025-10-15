@@ -8,11 +8,12 @@ use crate::{
     collection_manager::sides::{
         write::embedding::MultiEmbeddingCalculationRequest, OperationSender,
     },
+    python::embeddings::EmbeddingsService,
 };
 
 #[derive(Clone)]
 pub struct WriteSideContext {
-    pub ai_service: Arc<AIService>,
+    pub embeddings_service: Arc<EmbeddingsService>,
     pub embedding_sender: Sender<MultiEmbeddingCalculationRequest>,
     pub op_sender: OperationSender,
     pub nlp_service: Arc<NLPService>,

@@ -3,6 +3,7 @@ use crate::{
         index::{EnumStrategy, IndexedValue},
         OramaModelSerializable,
     },
+    python::embeddings::Model,
     types::{
         ApiKey, CollectionId, DocumentFields, DocumentId, FieldId, IndexId, Number, RawJSONDocument,
     },
@@ -127,7 +128,7 @@ pub enum IndexWriteOperationFieldType {
     Date,
     GeoPoint,
     String,
-    Embedding(OramaModelSerializable),
+    Embedding(Model),
 }
 
 #[derive(Clone, Serialize, Deserialize)]
