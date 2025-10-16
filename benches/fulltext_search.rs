@@ -61,11 +61,6 @@ pub fn create_oramacore_config() -> OramacoreConfig {
             with_prometheus: false,
         },
         ai_server: AIServiceConfig {
-            host: "0.0.0.0".parse().unwrap(),
-            port: 0,
-            api_key: None,
-            max_connections: 1,
-            scheme: Scheme::HTTP,
             embeddings: None,
             llm: AIServiceLLMConfig {
                 local: true,

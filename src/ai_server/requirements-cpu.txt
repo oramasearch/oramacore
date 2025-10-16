@@ -2,10 +2,6 @@
 
 numpy==2.2.2
 
-grpcio-tools==1.69.0
-grpcio==1.69.0
-grpcio-reflection== 1.69.0
-
 python-dotenv==1.0.1
 fastembed==0.5.1
 argparse==1.4.0

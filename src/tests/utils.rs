@@ -16,7 +16,6 @@ use fastembed::{
 };
 use futures::{future::BoxFuture, FutureExt};
 use grpc_def::Embedding;
-use http::uri::Scheme;
 use oramacore_lib::hook_storage::HookType;
 use tokio::{
     sync::{mpsc, RwLock},
@@ -96,11 +95,6 @@ pub fn create_oramacore_config() -> OramacoreConfig {
             with_prometheus: false,
         },
         ai_server: AIServiceConfig {
-            host: "0.0.0.0".parse().unwrap(),
-            port: 0,
-            api_key: None,
-            max_connections: 1,
-            scheme: Scheme::HTTP,
             embeddings: None,
             llm: AIServiceLLMConfig {
                 local: true,
@@ -242,16 +236,6 @@ pub async fn create_grpc_server() -> Result<SocketAddr> {
             .await
             .expect("Nooope");
     });
-
-    // Waiting for the server to start
-    loop {
-        let c =
-            grpc_def::llm_service_client::LlmServiceClient::connect(format!("http://{addr}")).await;
-        if c.is_ok() {
-            break;
-        }
-        sleep(Duration::from_millis(100)).await;
-    }
 
     Ok(addr)
 }
@@ -415,12 +399,6 @@ impl TestContext {
     }
 
     pub async fn new_with_config(mut config: OramacoreConfig) -> Self {
-        if config.ai_server.port == 0 {
-            let address = create_grpc_server().await.unwrap();
-            config.ai_server.host = address.ip().to_string();
-            config.ai_server.port = address.port();
-        }
-
         let master_api_key = config.writer_side.master_api_key;
         let (writer, reader) = build_orama(config.clone()).await.unwrap();
         let writer = writer.unwrap();

@@ -98,11 +98,6 @@ fn create_test_config(build: bool) -> OramacoreConfig {
             with_prometheus: false,
         },
         ai_server: AIServiceConfig {
-            host: "0.0.0.0".parse().unwrap(),
-            port: 50051,
-            api_key: None,
-            max_connections: 1,
-            scheme: http::uri::Scheme::HTTP,
             embeddings: None,
             llm: AIServiceLLMConfig {
                 local: true,

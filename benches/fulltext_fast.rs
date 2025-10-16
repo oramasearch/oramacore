@@ -12,7 +12,6 @@ use tokio::time::sleep;
 
 use anyhow::Context;
 use duration_string::DurationString;
-use http::uri::Scheme;
 use oramacore::{
     ai::{AIServiceConfig, AIServiceLLMConfig},
     build_orama,
@@ -49,11 +48,6 @@ pub fn create_minimal_config() -> OramacoreConfig {
             with_prometheus: false,
         },
         ai_server: AIServiceConfig {
-            host: "0.0.0.0".parse().unwrap(),
-            port: 0,
-            api_key: None,
-            max_connections: 1,
-            scheme: Scheme::HTTP,
             embeddings: None,
             llm: AIServiceLLMConfig {
                 local: false,
