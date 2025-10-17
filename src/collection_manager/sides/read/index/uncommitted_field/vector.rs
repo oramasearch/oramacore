@@ -62,8 +62,6 @@ impl UncommittedVectorField {
         output: &mut HashMap<DocumentId, f32>,
         uncommitted_deleted_documents: &HashSet<DocumentId>,
     ) -> Result<()> {
-        let magnetude = calculate_magnetude(target);
-
         for (id, vectors) in &self.data {
             if filtered_doc_ids.is_some_and(|ids| !ids.contains(id)) {
                 continue;
@@ -72,7 +70,7 @@ impl UncommittedVectorField {
                 continue;
             }
 
-            for (m, vector) in vectors {
+            for (_m, vector) in vectors {
                 let mut score = score_vector(vector, target)?;
 
                 // Rescale E5 model scores from [0.7, 1.0] to [0.0, 1.0]
@@ -83,8 +81,6 @@ impl UncommittedVectorField {
                 if score < similarity {
                     continue;
                 }
-
-                let score = score / (m * magnetude);
 
                 let s = output.entry(*id).or_insert(0.0);
                 *s += score;

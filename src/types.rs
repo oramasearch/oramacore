@@ -827,7 +827,7 @@ pub struct Similarity(pub f32);
 
 impl Default for Similarity {
     fn default() -> Self {
-        Similarity(0.8)
+        Similarity(0.7)
     }
 }
 
@@ -1058,11 +1058,11 @@ impl SearchMode {
                 tolerance: None,
             }),
             "vector" => SearchMode::Vector(VectorMode {
-                similarity: Similarity(0.8),
+                similarity: Similarity(0.7),
                 term,
             }),
             "hybrid" => SearchMode::Hybrid(HybridMode {
-                similarity: Similarity(0.8),
+                similarity: Similarity(0.7),
                 term,
                 threshold: None,
                 exact: false,

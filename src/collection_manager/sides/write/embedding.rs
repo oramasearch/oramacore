@@ -58,7 +58,7 @@ async fn process<I>(
             // TODO: Add circuit breaker
             let _ = match embeddings_service.calculate_embeddings(
                 text_inputs,
-                Some(Intent::Passage),
+                Intent::Passage,
                 model.clone(),
             ) {
                 Ok(embeddings) => {

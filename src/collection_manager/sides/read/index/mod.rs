@@ -1151,14 +1151,14 @@ impl Index {
                     }),
                     "hybrid" => SearchMode::Hybrid(HybridMode {
                         term: mode_result.term.clone(),
-                        similarity: Similarity(0.8),
+                        similarity: Similarity(0.7),
                         threshold: None,
                         exact: false,
                         tolerance: None,
                     }),
                     "vector" => SearchMode::Vector(VectorMode {
                         term: mode_result.term.clone(),
-                        similarity: Similarity(0.8),
+                        similarity: Similarity(0.7),
                     }),
                     _ => anyhow::bail!("Invalid search mode"),
                 }
@@ -2320,7 +2320,7 @@ impl Index {
             // TODO: think about this.
             let targets = self.context.embeddings_service.calculate_embeddings(
                 vec![term.to_string()],
-                Some(Intent::Query),
+                Intent::Query,
                 model,
             )?;
 

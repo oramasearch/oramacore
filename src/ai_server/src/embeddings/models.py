@@ -93,7 +93,7 @@ class EmbeddingsModels:
             )
 
         if model_name in self.loaded_models:
-            return list(embed_alternative(self.loaded_models[model_name], input_array))
+            return list(embed_alternative(self.loaded_models[model_name], input_with_instructions))
 
         if self.config.embeddings.dynamically_load_models:
             with self.model_loading_lock:
@@ -104,6 +104,6 @@ class EmbeddingsModels:
 
                     )
 
-                return list(embed_alternative(self.loaded_models[model_name], input_array))
+                return list(embed_alternative(self.loaded_models[model_name], input_with_instructions))
         else:
             raise ValueError(f"Model {model_name} is not loaded")

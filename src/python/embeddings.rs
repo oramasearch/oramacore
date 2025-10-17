@@ -164,16 +164,15 @@ impl EmbeddingsService {
     pub fn calculate_embeddings(
         &self,
         input: Vec<String>,
-        intent: Option<Intent>,
+        intent: Intent,
         model: Model,
     ) -> PyResult<Vec<Vec<f32>>> {
         Python::attach(|py| {
             let instance = self.instance.bind(py);
-            let intent_str = intent.map(|i| i.to_string());
 
             let result = instance.call_method1(
                 "calculate_embeddings",
-                (input, intent_str, model.to_string()),
+                (input, intent.to_string(), model.to_string()),
             )?;
 
             result.extract()
@@ -190,7 +189,7 @@ mod tests {
         let embeddings = EmbeddingsService::new()?;
         let result = embeddings.calculate_embeddings(
             vec!["Hello world".to_string()],
-            None,
+            Intent::Passage,
             Model::BGESmall,
         )?;
 
@@ -209,7 +208,7 @@ mod tests {
                 "Hello world".to_string(),
                 "The quick brown fox jumps over the lazy dog".to_string(),
             ],
-            None,
+            Intent::Passage,
             Model::BGESmall,
         )?;
 
@@ -226,13 +225,13 @@ mod tests {
 
         let result1 = embeddings.calculate_embeddings(
             vec!["Hello world".to_string()],
-            None,
+            Intent::Passage,
             Model::BGESmall,
         )?;
 
         let result2 = embeddings.calculate_embeddings(
             vec!["Hello world".to_string()],
-            None,
+            Intent::Passage,
             Model::JinaEmbeddingsV2BaseCode,
         )?;
 
@@ -250,14 +249,14 @@ mod tests {
         let embeddings = EmbeddingsService::new()?;
 
         let result1 = embeddings.calculate_embeddings(
-            vec!["Hello world".to_string()],
-            Some(Intent::Passage),
+            vec!["The process of photosynthesis in plants converts carbon dioxide and water into glucose and oxygen using sunlight energy, primarily occurring in chloroplasts through light-dependent and light-independent reactions.".to_string()],
+            Intent::Passage,
             Model::MultilingualE5Small,
         )?;
 
         let result2 = embeddings.calculate_embeddings(
-            vec!["Hello world".to_string()],
-            Some(Intent::Query),
+            vec!["The process of photosynthesis in plants converts carbon dioxide and water into glucose and oxygen using sunlight energy, primarily occurring in chloroplasts through light-dependent and light-independent reactions.".to_string()],
+            Intent::Query,
             Model::MultilingualE5Small,
         )?;
 
