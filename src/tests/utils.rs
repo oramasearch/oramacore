@@ -398,7 +398,7 @@ impl TestContext {
         Self::new_with_config(config).await
     }
 
-    pub async fn new_with_config(mut config: OramacoreConfig) -> Self {
+    pub async fn new_with_config(config: OramacoreConfig) -> Self {
         let master_api_key = config.writer_side.master_api_key;
         let (writer, reader) = build_orama(config.clone()).await.unwrap();
         let writer = writer.unwrap();

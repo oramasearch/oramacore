@@ -1,4 +1,5 @@
 use assert_approx_eq::assert_approx_eq;
+use fastembed::output;
 use futures::FutureExt;
 use serde_json::json;
 use tokio::time::sleep;
@@ -129,15 +130,15 @@ async fn test_vector_search_should_work_after_commit() {
             json!([
                 json!({
                     "id": "1",
-                    "text": "The cat is sleeping on the table.",
+                    "text": "The process of photosynthesis in plants converts carbon dioxide and water into glucose and oxygen using sunlight energy, primarily occurring in chloroplasts through light-dependent and light-independent reactions.",
                 }),
                 json!({
                     "id": "2",
-                    "text": "A cat rests peacefully on the sofa.",
+                    "text": "Machine learning models require extensive training data and computational resources, with deep neural networks often needing millions of parameters to achieve state-of-the-art performance on complex tasks.",
                 }),
                 json!({
                     "id": "3",
-                    "text": "The dog is barking loudly in the yard.",
+                    "text": "The Renaissance period in Italy saw unprecedented artistic innovation, with masters like Leonardo da Vinci and Michelangelo combining scientific observation with artistic technique to create revolutionary works.",
                 }),
             ])
             .try_into()
@@ -151,14 +152,18 @@ async fn test_vector_search_should_work_after_commit() {
     let output1 = collection_client
         .search(
             json!({
-                "term": "A cat sleeps",
-                "mode": "vector"
+                "term": "How do plants make food from sunlight?",
+                "mode": "vector",
+                "similarity": 0.01,
             })
             .try_into()
             .unwrap(),
         )
         .await
         .unwrap();
+
+    dbg!("Output1: {:?}", &output1);
+
     assert_eq!(output1.count, 1);
     assert_eq!(output1.hits.len(), 1);
     assert_eq!(
@@ -172,7 +177,7 @@ async fn test_vector_search_should_work_after_commit() {
     let output2 = collection_client
         .search(
             json!({
-                "term": "A cat sleeps",
+                "term": "How do plants make food from sunlight?",
                 "mode": "vector",
             })
             .try_into()
@@ -180,6 +185,7 @@ async fn test_vector_search_should_work_after_commit() {
         )
         .await
         .unwrap();
+
     assert_eq!(output2.count, 1);
     assert_eq!(output2.hits.len(), 1);
     assert_eq!(
@@ -201,7 +207,7 @@ async fn test_vector_search_should_work_after_commit() {
     let output3 = collection_client
         .search(
             json!({
-                "term": "A cat sleeps",
+                "term": "How do plants make food from sunlight?",
                 "mode": "vector",
             })
             .try_into()
