@@ -24,6 +24,15 @@ jobs:
       - name: apt-get install
         run: |
           sudo apt-get install -y libssl3 pkg-config libssl-dev g++ build-essential ca-certificates librocksdb-dev libgflags-dev libsnappy-dev zlib1g-dev libbz2-dev libzstd-dev libxml2-dev protobuf-compiler
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
       - name: Install Rust
         uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
@@ -36,6 +45,8 @@ jobs:
         run: |
           gcc --version
           g++ --version
+          python --version
+          pip --version
           rustc --version
           cargo --version
       - name: Check & Fmt & Clippy
