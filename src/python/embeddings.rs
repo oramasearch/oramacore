@@ -5,7 +5,7 @@ use tracing::info;
 
 // @todo: we will have to move all the python stuff elsewhere.
 // Also, we should ensure that we're rinning in the correct venv and Python version.
-static VENV_DIR: &str = "src/ai_server/.venv/lib/python3.11/site-packages";
+static VENV_DIR: &str = ".venv/lib/python3.11/site-packages";
 
 #[derive(Serialize, Deserialize, Clone, Copy, Hash, PartialEq, Eq, Debug)]
 pub enum Model {
@@ -152,7 +152,7 @@ impl EmbeddingsService {
             path.call_method1("insert", (0, VENV_DIR))?;
         }
 
-        path.call_method1("insert", (0, "src/ai_server"))?;
+        path.call_method1("insert", (0, "src/python/scripts"))?;
 
         let embeddings_module = py.import("src.embeddings.embeddings")?;
         let init_fn = embeddings_module.getattr("initialize_thread_executor")?;

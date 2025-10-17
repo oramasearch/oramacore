@@ -1,6 +1,6 @@
 # Python 3.11 suggested
 
-numpy==2.2.2
+numpy==2.3.4
 
 python-dotenv==1.0.1
 fastembed==0.5.1

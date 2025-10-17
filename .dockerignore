@@ -4,7 +4,6 @@
 .fastembed_cache
 __pycache__
 target
-./src/ai_server/.venv
 .embeddings_models
 .github
 .local-demo
@@ -15,9 +14,7 @@ docs
 tests
 otel
 .embeddings_models_cache
-./src/ai_server/.env
 .python-version
-./src/ai_server/**/__pycache__
 **/.dataset
 **/.data
 **/.custom_models
