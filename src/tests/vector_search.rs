@@ -64,13 +64,18 @@ async fn test_vector_search_basic() {
     })
     .await
     .unwrap();
-    assert_eq!(output.count, 1);
-    assert_eq!(output.hits.len(), 1);
+    assert_eq!(output.count, 2);
+    assert_eq!(output.hits.len(), 2);
     assert_eq!(
         output.hits[0].id,
         format!("{}:{}", index_client.index_id, "1")
     );
+    assert_eq!(
+        output.hits[1].id,
+        format!("{}:{}", index_client.index_id, "2")
+    );
     assert!(output.hits[0].score > 0.);
+    assert!(output.hits[1].score > 0.);
 
     let output = wait_for(&collection_client, |collection_client| {
         async {
@@ -161,8 +166,6 @@ async fn test_vector_search_should_work_after_commit() {
         )
         .await
         .unwrap();
-
-    dbg!("Output1: {:?}", &output1);
 
     assert_eq!(output1.count, 1);
     assert_eq!(output1.hits.len(), 1);
