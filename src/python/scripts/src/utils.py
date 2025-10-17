@@ -4,12 +4,12 @@ from pathlib import Path
 from typing import List, Optional
 from dataclasses import dataclass, field
 
-DEFAULT_CONFIG_PATH = "../../config.yaml"
+DEFAULT_CONFIG_PATH = "../../../config.yaml"
 
 
 @dataclass
 class EmbeddingsConfig:
-    default_model_group: Optional[str] = "en"
+    default_model_group: Optional[str] = "all"
     dynamically_load_models: Optional[bool] = False
     execution_providers: List[str] = field(default_factory=lambda: ["CUDAExecutionProvider"])
     total_threads: Optional[int] = 8
