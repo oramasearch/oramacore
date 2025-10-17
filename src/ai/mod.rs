@@ -89,7 +89,7 @@ pub struct AIServiceConfig {
 pub struct AIService {}
 
 impl AIService {
-    pub fn new(config: AIServiceConfig) -> Self {
+    pub fn new(_config: AIServiceConfig) -> Self {
         Self {}
     }
 }
