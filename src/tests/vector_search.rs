@@ -1,8 +1,6 @@
 use assert_approx_eq::assert_approx_eq;
-use fastembed::output;
 use futures::FutureExt;
 use serde_json::json;
-use tokio::time::sleep;
 
 use crate::collection_manager::sides::read::IndexFieldStatsType;
 use crate::tests::utils::init_log;
@@ -152,7 +150,34 @@ async fn test_vector_search_should_work_after_commit() {
         .await
         .unwrap();
 
-    sleep(std::time::Duration::from_millis(500)).await;
+    wait_for(&collection_client, |collection_client| {
+        async {
+            let mut result = collection_client
+                .reader_stats()
+                .await
+                .unwrap()
+                .indexes_stats
+                .into_iter()
+                .find(|i| i.id == index_client.index_id)
+                .unwrap();
+            let IndexFieldStatsType::UncommittedVector(stats) = result.fields_stats.remove(0).stats
+            else {
+                return Err(anyhow::anyhow!("Expected committed vector field stats"));
+            };
+
+            if stats.vector_count > 0 {
+                Ok(())
+            } else {
+                Err(anyhow::anyhow!(
+                    "Expected 3 vectors, found {}",
+                    stats.vector_count
+                ))
+            }
+        }
+        .boxed()
+    })
+    .await
+    .unwrap();
 
     let output1 = collection_client
         .search(

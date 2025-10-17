@@ -53,6 +53,10 @@ async fn process<I>(
             let text_inputs: Vec<String> =
                 inputs.iter().map(|input| input.text.to_string()).collect(); // @todo: to_string() here is used to clone the string, check if we can remove this cloning
 
+            // tokio::task::spawn_blocking(|f| {
+
+            // })?;
+
             // If something goes wrong, we will just log it and continue
             // We should put a circuit breaker here like https://docs.rs/tokio-retry2/latest/tokio_retry2/
             // TODO: Add circuit breaker
