@@ -47,6 +47,12 @@ create_label_struct!(IndexCollectionCommitLabels, {
     index: String,
     side: &'static str,
 });
+create_label_struct!(FieldIndexCollectionCommitLabels, {
+    collection: String,
+    index: String,
+    field_type: &'static str,
+    side: &'static str,
+});
 create_label_struct!(CollectionFieldCommitLabels, {
     collection: SharedString,
     field_type: &'static str,
@@ -131,7 +137,9 @@ pub mod commit {
     use super::Empty;
     use crate::{
         create_time_histogram,
-        metrics::{CollectionCommitLabels, IndexCollectionCommitLabels},
+        metrics::{
+            CollectionCommitLabels, FieldIndexCollectionCommitLabels, IndexCollectionCommitLabels,
+        },
     };
     create_time_histogram!(
         COMMIT_CALCULATION_TIME,
@@ -142,6 +150,11 @@ pub mod commit {
         INDEX_COMMIT_CALCULATION_TIME,
         "index_commit_calculation_time_sec",
         IndexCollectionCommitLabels
+    );
+    create_time_histogram!(
+        FIELD_INDEX_COMMIT_CALCULATION_TIME,
+        "field_index_commit_calculation_time_sec",
+        FieldIndexCollectionCommitLabels
     );
     create_time_histogram!(
         DOCUMENT_COMMIT_CALCULATION_TIME,
