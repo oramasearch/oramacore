@@ -23,7 +23,7 @@ jobs:
         run: sudo apt-get update
       - name: apt-get install
         run: |
-          sudo apt-get install -y libssl3 pkg-config libssl-dev g++ build-essential ca-certificates librocksdb-dev libgflags-dev libsnappy-dev zlib1g-dev libbz2-dev libzstd-dev libxml2-dev protobuf-compiler python3-dev
+          sudo apt-get install -y libssl3 pkg-config libssl-dev g++ build-essential ca-certificates librocksdb-dev libgflags-dev libsnappy-dev zlib1g-dev libbz2-dev libzstd-dev libxml2-dev protobuf-compiler python3-dev libpython3.11-dev libpython3.11
       - name: Set up Python 3.11
         uses: actions/setup-python@v5
         with:
@@ -35,6 +35,10 @@ jobs:
           python -m venv .venv
           source .venv/bin/activate
           pip install -r requirements.txt
+      - name: Set Python environment variables for linking
+        run: |
+          echo "LD_LIBRARY_PATH=$(python -c 'import sysconfig; print(sysconfig.get_config_var("LIBDIR"))')${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" >> $GITHUB_ENV
+          echo "LIBRARY_PATH=$(python -c 'import sysconfig; print(sysconfig.get_config_var("LIBDIR"))')${LIBRARY_PATH:+:$LIBRARY_PATH}" >> $GITHUB_ENV
       - name: Install Rust
         uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
