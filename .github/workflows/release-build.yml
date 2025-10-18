@@ -16,10 +16,17 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Install Protocol Buffers Compiler
+      - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y protobuf-compiler
+          sudo apt-get install -y protobuf-compiler python3.11 python3.11-dev python3.11-venv libssl-dev pkg-config g++ build-essential ca-certificates librocksdb-dev libgflags-dev libsnappy-dev zlib1g-dev libbz2-dev libzstd-dev libxml2-dev
+
+      - name: Install Python dependencies
+        run: |
+          python3.11 -m pip install --upgrade pip
+          python3.11 -m venv .venv
+          source .venv/bin/activate
+          pip install -r requirements.txt
 
       - name: Setup Rust
         uses: actions-rs/toolchain@v1
