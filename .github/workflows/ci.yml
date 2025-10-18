@@ -23,7 +23,7 @@ jobs:
         run: sudo apt-get update
       - name: apt-get install
         run: |
-          sudo apt-get install -y libssl3 pkg-config libssl-dev g++ build-essential ca-certificates librocksdb-dev libgflags-dev libsnappy-dev zlib1g-dev libbz2-dev libzstd-dev libxml2-dev protobuf-compiler python3.11-dev
+          sudo apt-get install -y libssl3 pkg-config libssl-dev g++ build-essential ca-certificates librocksdb-dev libgflags-dev libsnappy-dev zlib1g-dev libbz2-dev libzstd-dev libxml2-dev protobuf-compiler python3-dev
       - name: Set up Python 3.11
         uses: actions/setup-python@v5
         with:
