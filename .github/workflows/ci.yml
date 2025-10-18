@@ -21,12 +21,12 @@ jobs:
       - uses: actions/checkout@v4
       - name: apt-get update
         run: sudo apt-get update
-      - name: Fix Python apt dependencies
+      - name: Fix Python apt dependencies and add deadsnakes PPA
         run: |
           sudo apt-get install -y software-properties-common python3-apt
-      - name: Add deadsnakes PPA for Python 3.11
-        run: |
-          sudo add-apt-repository ppa:deadsnakes/ppa -y
+          echo "deb http://ppa.launchpad.net/deadsnakes/ppa/ubuntu noble main" | sudo tee /etc/apt/sources.list.d/deadsnakes-ppa.list
+          echo "deb-src http://ppa.launchpad.net/deadsnakes/ppa/ubuntu noble main" | sudo tee -a /etc/apt/sources.list.d/deadsnakes-ppa.list
+          sudo apt-key adv --keyserver keyserver.ubuntu.com --recv-keys F23C5A6CF475977595C89F51BA6932366A755776
           sudo apt-get update
       - name: apt-get install
         run: |
