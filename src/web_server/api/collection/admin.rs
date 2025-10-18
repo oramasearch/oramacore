@@ -193,7 +193,7 @@ async fn reindex(
             write_api_key,
             collection_id,
             json.language,
-            json.embedding_model.0,
+            json.embedding_model,
             json.reference,
         )
         .await

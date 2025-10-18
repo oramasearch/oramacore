@@ -11,15 +11,12 @@ use serde::{Deserialize, Serialize};
 use tracing::{debug, info};
 
 use crate::{
-    ai::OramaModel,
-    collection_manager::sides::{
-        read::{
-            index::committed_field::offload_utils::{InnerCommittedField, LoadedField},
-            OffloadFieldConfig,
-        },
-        write::OramaModelSerializable,
+    collection_manager::sides::read::{
+        index::committed_field::offload_utils::{InnerCommittedField, LoadedField},
+        OffloadFieldConfig,
     },
     lock::OramaSyncLock,
+    python::embeddings::Model,
     types::DocumentId,
 };
 use oramacore_lib::fs::{create_if_not_exists, BufferedFile};
@@ -35,7 +32,7 @@ pub struct LoadedCommittedVectorField {
     field_path: Box<[String]>,
     inner: HNSW2Index<DocumentId>,
     data_dir: PathBuf,
-    model: OramaModel,
+    model: Model,
 }
 
 impl Debug for LoadedCommittedVectorField {
@@ -53,7 +50,7 @@ impl CommittedVectorField {
     pub fn from_iter<I>(
         field_path: Box<[String]>,
         iter: I,
-        model: OramaModel,
+        model: Model,
         data_dir: PathBuf,
         offload_config: OffloadFieldConfig,
     ) -> Result<Self>
@@ -72,7 +69,7 @@ impl CommittedVectorField {
         data_dir: PathBuf,
         iter: impl ExactSizeIterator<Item = (DocumentId, Vec<Vec<f32>>)>,
         uncommitted_document_deletions: &HashSet<DocumentId>,
-        model: OramaModel,
+        model: Model,
         new_data_dir: PathBuf,
         offload_config: OffloadFieldConfig,
     ) -> Result<Self> {
@@ -195,14 +192,14 @@ impl CommittedVectorField {
 pub struct VectorFieldInfo {
     pub field_path: Box<[String]>,
     pub data_dir: PathBuf,
-    pub model: OramaModelSerializable,
+    pub model: Model,
 }
 
 impl LoadedCommittedVectorField {
     pub fn from_iter<I>(
         field_path: Box<[String]>,
         iter: I,
-        model: OramaModel,
+        model: Model,
         data_dir: PathBuf,
     ) -> Result<Self>
     where
@@ -235,7 +232,7 @@ impl LoadedCommittedVectorField {
         data_dir: PathBuf,
         iter: impl ExactSizeIterator<Item = (DocumentId, Vec<Vec<f32>>)>,
         uncommitted_document_deletions: &HashSet<DocumentId>,
-        model: OramaModel,
+        model: Model,
         new_data_dir: PathBuf,
     ) -> Result<Self> {
         let dump_file_path = data_dir.join("index.hnsw");
@@ -286,7 +283,7 @@ impl LoadedCommittedVectorField {
             field_path: info.field_path,
             inner,
             data_dir: info.data_dir,
-            model: info.model.0,
+            model: info.model,
         })
     }
 
@@ -298,16 +295,14 @@ impl LoadedCommittedVectorField {
         VectorFieldInfo {
             field_path: self.field_path.clone(),
             data_dir: self.data_dir.clone(),
-            model: OramaModelSerializable(self.model),
+            model: self.model,
         }
     }
 
     fn is_e5_model(&self) -> bool {
         matches!(
             self.model,
-            OramaModel::MultilingualE5Small
-                | OramaModel::MultilingualE5Base
-                | OramaModel::MultilingualE5Large
+            Model::MultilingualE5Small | Model::MultilingualE5Base | Model::MultilingualE5Large
         )
     }
 

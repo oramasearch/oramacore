@@ -655,7 +655,7 @@ pub fn merge_vector_field(
             // uncommitted and committed model has to be the same
             debug_assert_eq!(
                 uncommitted.get_model(),
-                info.model.0,
+                info.model,
                 "Uncommitted and committed models should be the same",
             );
 

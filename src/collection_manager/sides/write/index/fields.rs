@@ -11,15 +11,13 @@ use serde_json::{Map, Value};
 use tokio::sync::mpsc::Sender;
 
 use crate::{
-    ai::{
-        automatic_embeddings_selector::{AutomaticEmbeddingsSelector, ChosenProperties},
-        OramaModel,
-    },
+    ai::automatic_embeddings_selector::{AutomaticEmbeddingsSelector, ChosenProperties},
     collection_manager::sides::{
         write::{embedding::MultiEmbeddingCalculationRequest, WriteSideContext},
         Term, TermStringField,
     },
     lock::OramaAsyncLock,
+    python::embeddings::Model,
     types::{CollectionId, DocumentId, FieldId, IndexId, Number, OramaDate, SerializableNumber},
 };
 
@@ -91,7 +89,7 @@ pub enum SerializedScoreFieldType {
     String(SerializedFilterFieldIndexer, Locale),
     Embedding(
         SerializedFilterFieldIndexer,
-        OramaModelSerializable,
+        Model,
         SerializedEmbeddingStringCalculation,
     ),
 }
@@ -611,7 +609,7 @@ impl IndexScoreField {
         index_id: IndexId,
         field_id: FieldId,
         field_path: Box<[String]>,
-        model: OramaModel,
+        model: Model,
         context: WriteSideContext,
         calculation: EmbeddingStringCalculation,
     ) -> Self {
@@ -644,7 +642,7 @@ impl IndexScoreField {
                     is_array: self.is_array(),
                     field_type: FilterFieldType::Number,
                 },
-                OramaModelSerializable(f.model),
+                f.model,
                 match &f.calculation {
                     EmbeddingStringCalculation::AllProperties => {
                         SerializedEmbeddingStringCalculation::AllProperties
@@ -690,7 +688,7 @@ impl IndexScoreField {
                 index_id,
                 field.field_id,
                 field.field_path,
-                model.0,
+                model,
                 context,
                 match calc {
                     SerializedEmbeddingStringCalculation::AllProperties => {
@@ -814,7 +812,7 @@ pub struct EmbeddingField {
     collection_id: CollectionId,
     index_id: IndexId,
     field_path: Box<[String]>,
-    model: OramaModel,
+    model: Model,
     chunker: Chunker,
     calculation: EmbeddingStringCalculation,
     embedding_sender: Sender<MultiEmbeddingCalculationRequest>,
@@ -827,11 +825,11 @@ impl EmbeddingField {
         index_id: IndexId,
         field_id: FieldId,
         field_path: Box<[String]>,
-        model: OramaModel,
+        model: Model,
         calculation: EmbeddingStringCalculation,
         context: WriteSideContext,
     ) -> Self {
-        let max_tokens = model.senquence_length();
+        let max_tokens = model.sequence_length();
         let overlap = model.overlap();
 
         let chunker = Chunker::try_new(ChunkerConfig {
@@ -857,7 +855,7 @@ impl EmbeddingField {
         }
     }
 
-    pub fn get_model(&self) -> OramaModel {
+    pub fn get_model(&self) -> Model {
         self.model
     }
 
@@ -1105,47 +1103,4 @@ fn join_vec_strings(v: &[&String]) -> String {
         final_str.push_str(s);
     }
     final_str
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct OramaModelSerializable(pub OramaModel);
-
-impl Serialize for OramaModelSerializable {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::ser::Serializer,
-    {
-        self.0.as_str_name().serialize(serializer)
-    }
-}
-
-impl<'de> Deserialize<'de> for OramaModelSerializable {
-    fn deserialize<D>(deserializer: D) -> Result<OramaModelSerializable, D::Error>
-    where
-        D: serde::de::Deserializer<'de>,
-    {
-        let model_name = String::deserialize(deserializer)?;
-        let model = OramaModel::from_str_name(&model_name)
-            .ok_or_else(|| serde::de::Error::custom("Invalid model name"))?;
-        Ok(OramaModelSerializable(model))
-    }
-}
-
-impl OramaModel {
-    pub fn senquence_length(&self) -> usize {
-        match self {
-            OramaModel::MultilingualE5Small => 512,
-            OramaModel::MultilingualE5Base => 512,
-            OramaModel::MultilingualE5Large => 512,
-            OramaModel::BgeSmall => 512,
-            OramaModel::BgeBase => 512,
-            OramaModel::BgeLarge => 512,
-            OramaModel::MultilingualMiniLml12v2 => 128,
-            OramaModel::JinaEmbeddingsV2BaseCode => 512,
-        }
-    }
-
-    pub fn overlap(&self) -> usize {
-        self.senquence_length() * 2 / 100
-    }
 }

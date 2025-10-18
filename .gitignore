@@ -18,6 +18,7 @@ flamegraph.svg
 .envrc
 .npm
 .env
+.venv
 
 log.log
 .DS_Store
