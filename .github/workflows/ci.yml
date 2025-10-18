@@ -21,6 +21,9 @@ jobs:
       - uses: actions/checkout@v4
       - name: apt-get update
         run: sudo apt-get update
+      - name: Fix Python apt dependencies
+        run: |
+          sudo apt-get install -y software-properties-common python3-apt
       - name: Add deadsnakes PPA for Python 3.11
         run: |
           sudo add-apt-repository ppa:deadsnakes/ppa -y
