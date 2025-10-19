@@ -2,25 +2,24 @@ use crate::lock::OramaAsyncLock;
 use crate::types::IndexId;
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::Duration;
 
 #[derive(Clone, Debug)]
 pub struct S3 {
+    pub id: IndexId,
     pub bucket: String,
     pub region: String,
     pub access_key_id: String,
     pub secret_access_key: String,
     pub endpoint_url: Option<String>,
-    pub pull_interval: Duration,
 }
 
 #[derive(Clone, Debug)]
-pub enum Datasource {
+pub enum DatasourceKind {
     S3(S3),
 }
 
 pub struct DatasourceStorage {
-    map: Arc<OramaAsyncLock<HashMap<IndexId, Vec<Datasource>>>>,
+    map: Arc<OramaAsyncLock<HashMap<IndexId, Vec<DatasourceKind>>>>,
 }
 
 impl DatasourceStorage {
@@ -30,9 +29,25 @@ impl DatasourceStorage {
         }
     }
 
-    pub async fn insert(&mut self, index_id: IndexId, datasource: Datasource) {
+    pub async fn insert(&self, index_id: IndexId, datasource: DatasourceKind) {
         let mut m = self.map.write("insert").await;
         m.entry(index_id).or_default().push(datasource);
+    }
+
+    pub async fn remove_single(&self, index_id: IndexId, datasource_id: IndexId) {
+        let mut m = self.map.write("remove_single").await;
+        if let Some(entries) = m.get_mut(&index_id) {
+            entries.retain(|e| {
+                let id_matches = match e {
+                    DatasourceKind::S3(s3) => s3.id == datasource_id,
+                };
+                !id_matches
+            });
+
+            if entries.is_empty() {
+                m.remove(&index_id);
+            }
+        }
     }
 
     pub async fn remove(&self, index_id: IndexId) {
@@ -45,4 +60,3 @@ impl DatasourceStorage {
     //     m.get(&index_id)
     // }
 }
-

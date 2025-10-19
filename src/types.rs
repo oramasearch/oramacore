@@ -1769,6 +1769,17 @@ pub struct CreateIndexRequest {
     pub type_strategy: TypeParsingStrategies,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct AddDatasourceRequest {
+    #[serde(rename = "id")]
+    pub datasource_id: IndexId,
+    pub bucket: String,
+    pub region: String,
+    pub access_key_id: String,
+    pub secret_access_key: String,
+    pub endpoint_url: Option<String>,
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ReplaceIndexRequest {
     #[serde(rename = "target_index_id")]
