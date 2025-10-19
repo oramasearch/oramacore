@@ -446,18 +446,18 @@ impl WriteSide {
             .await
             .ok_or_else(|| WriteError::IndexNotFound(collection_id, index_id))?;
 
-        let s3_config = datasource_storage::S3 {
+        let datasource = datasource_storage::DatasourceEntry {
             id: req.datasource_id,
-            bucket: req.bucket,
-            region: req.region,
-            access_key_id: req.access_key_id,
-            secret_access_key: req.secret_access_key,
-            endpoint_url: req.endpoint_url,
+            datasource: datasource_storage::DatasourceKind::S3(datasource_storage::S3 {
+                bucket: req.bucket,
+                region: req.region,
+                access_key_id: req.access_key_id,
+                secret_access_key: req.secret_access_key,
+                endpoint_url: req.endpoint_url,
+            }),
         };
 
-        self.datasource_storage
-            .insert(index_id, datasource_storage::DatasourceKind::S3(s3_config))
-            .await;
+        self.datasource_storage.insert(index_id, datasource).await;
 
         Ok(())
     }

@@ -5,7 +5,6 @@ use std::sync::Arc;
 
 #[derive(Clone, Debug)]
 pub struct S3 {
-    pub id: IndexId,
     pub bucket: String,
     pub region: String,
     pub access_key_id: String,
@@ -18,8 +17,14 @@ pub enum DatasourceKind {
     S3(S3),
 }
 
+#[derive(Clone, Debug)]
+pub struct DatasourceEntry {
+    pub id: IndexId,
+    pub datasource: DatasourceKind,
+}
+
 pub struct DatasourceStorage {
-    map: Arc<OramaAsyncLock<HashMap<IndexId, Vec<DatasourceKind>>>>,
+    map: Arc<OramaAsyncLock<HashMap<IndexId, Vec<DatasourceEntry>>>>,
 }
 
 impl DatasourceStorage {
@@ -29,7 +34,7 @@ impl DatasourceStorage {
         }
     }
 
-    pub async fn insert(&self, index_id: IndexId, datasource: DatasourceKind) {
+    pub async fn insert(&self, index_id: IndexId, datasource: DatasourceEntry) {
         let mut m = self.map.write("insert").await;
         m.entry(index_id).or_default().push(datasource);
     }
@@ -37,12 +42,7 @@ impl DatasourceStorage {
     pub async fn remove_single(&self, index_id: IndexId, datasource_id: IndexId) {
         let mut m = self.map.write("remove_single").await;
         if let Some(entries) = m.get_mut(&index_id) {
-            entries.retain(|e| {
-                let id_matches = match e {
-                    DatasourceKind::S3(s3) => s3.id == datasource_id,
-                };
-                !id_matches
-            });
+            entries.retain(|e| e.id != datasource_id);
 
             if entries.is_empty() {
                 m.remove(&index_id);
