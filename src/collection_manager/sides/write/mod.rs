@@ -1,5 +1,6 @@
 pub mod collection;
 mod collections;
+mod datasource_storage;
 pub mod document_storage;
 mod embedding;
 pub mod index;
@@ -43,6 +44,7 @@ use embedding::{start_calculate_embedding_loop, MultiEmbeddingCalculationRequest
 
 pub use context::WriteSideContext;
 
+use crate::collection_manager::sides::write::datasource_storage::DatasourceStorage;
 use crate::collection_manager::sides::write::document_storage::ZeboDocument;
 use crate::lock::OramaAsyncLock;
 use crate::{
@@ -138,6 +140,7 @@ pub struct WriteSide {
     operation_counter: OramaAsyncLock<u64>,
     insert_batch_commit_size: u64,
 
+    datasource_storage: DatasourceStorage,
     document_storage: DocumentStorage,
     system_prompts: SystemPromptInterface,
     training_sets: TrainingSetInterface,
@@ -259,6 +262,7 @@ impl WriteSide {
         let write_side = Self {
             document_count,
             collections: collections_writer,
+            datasource_storage: DatasourceStorage::new(),
             document_storage,
             data_dir,
             insert_batch_commit_size,
@@ -277,6 +281,8 @@ impl WriteSide {
         };
 
         let write_side = Arc::new(write_side);
+
+        start_datasource_loop(write_side.clone());
 
         start_commit_loop(
             write_side.clone(),
@@ -630,6 +636,7 @@ impl WriteSide {
         let document_to_remove = collection.delete_index(index_id).await?;
 
         self.document_storage.remove(document_to_remove).await;
+        self.datasource_storage.remove(index_id).await;
 
         Ok(())
     }
@@ -1304,6 +1311,10 @@ impl WriteSide {
 
         Ok(())
     }
+}
+
+fn start_datasource_loop(write_side: Arc<WriteSide>) {
+    tokio::task::spawn(async move {});
 }
 
 fn start_commit_loop(
