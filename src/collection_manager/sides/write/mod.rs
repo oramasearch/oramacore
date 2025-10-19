@@ -62,9 +62,9 @@ use crate::{
     },
     metrics::{document_insertion::DOCUMENTS_INSERTION_TIME, Empty},
     types::{
-        ApiKey, CollectionCreated, CollectionId, CreateCollection, CreateIndexRequest,
-        DeleteDocuments, DescribeCollectionResponse, Document, DocumentId, DocumentList,
-        IndexEmbeddingsCalculation, IndexId, InsertDocumentsResult, LanguageDTO,
+        AddDatasourceRequest, ApiKey, CollectionCreated, CollectionId, CreateCollection,
+        CreateIndexRequest, DeleteDocuments, DescribeCollectionResponse, Document, DocumentId,
+        DocumentList, IndexEmbeddingsCalculation, IndexId, InsertDocumentsResult, LanguageDTO,
         ReplaceIndexRequest, UpdateDocumentRequest, UpdateDocumentsResult, WriteApiKey,
     },
 };
@@ -428,6 +428,57 @@ impl WriteSide {
         collection
             .create_index(index_id, embedding, type_strategy.enum_strategy)
             .await?;
+
+        Ok(())
+    }
+
+    pub async fn add_datasource_to_index(
+        &self,
+        write_api_key: WriteApiKey,
+        collection_id: CollectionId,
+        index_id: IndexId,
+        req: AddDatasourceRequest,
+    ) -> Result<(), WriteError> {
+        let collection = self.get_collection(collection_id, write_api_key).await?;
+
+        collection
+            .get_index(index_id)
+            .await
+            .ok_or_else(|| WriteError::IndexNotFound(collection_id, index_id))?;
+
+        let s3_config = datasource_storage::S3 {
+            id: req.datasource_id,
+            bucket: req.bucket,
+            region: req.region,
+            access_key_id: req.access_key_id,
+            secret_access_key: req.secret_access_key,
+            endpoint_url: req.endpoint_url,
+        };
+
+        self.datasource_storage
+            .insert(index_id, datasource_storage::DatasourceKind::S3(s3_config))
+            .await;
+
+        Ok(())
+    }
+
+    pub async fn remove_datasource_from_index(
+        &self,
+        write_api_key: WriteApiKey,
+        collection_id: CollectionId,
+        index_id: IndexId,
+        datasource_id: IndexId,
+    ) -> Result<(), WriteError> {
+        let collection = self.get_collection(collection_id, write_api_key).await?;
+
+        collection
+            .get_index(index_id)
+            .await
+            .ok_or_else(|| WriteError::IndexNotFound(collection_id, index_id))?;
+
+        self.datasource_storage
+            .remove_single(index_id, datasource_id)
+            .await;
 
         Ok(())
     }

@@ -15,9 +15,10 @@ use crate::{
         ReplaceIndexReason,
     },
     types::{
-        ApiKey, CollectionId, CreateCollection, CreateIndexRequest, DeleteCollection,
-        DeleteDocuments, DeleteIndex, DocumentList, IndexId, ListDocumentInCollectionRequest,
-        ReindexConfig, ReplaceIndexRequest, UpdateDocumentRequest, WriteApiKey,
+        AddDatasourceRequest, ApiKey, CollectionId, CreateCollection, CreateIndexRequest,
+        DeleteCollection, DeleteDocuments, DeleteIndex, DocumentList, IndexId,
+        ListDocumentInCollectionRequest, ReindexConfig, ReplaceIndexRequest, UpdateDocumentRequest,
+        WriteApiKey,
     },
 };
 
@@ -41,6 +42,14 @@ pub fn apis(write_side: Arc<WriteSide>) -> Router {
         .route(
             "/v1/collections/{collection_id}/indexes/delete",
             post(delete_index),
+        )
+        .route(
+            "/v1/collections/{collection_id}/indexes/{index_id}/datasource/create",
+            post(add_datasource_to_index),
+        )
+        .route(
+            "/v1/collections/{collection_id}/indexes/{index_id}/datasource/{datasource_id}/delete",
+            post(remove_datasource_from_index),
         )
         .route(
             "/v1/collections/{collection_id}/indexes/{index_id}/insert",
@@ -139,6 +148,29 @@ async fn delete_index(
 ) -> impl IntoResponse {
     write_side
         .delete_index(write_api_key, collection_id, json.id)
+        .await
+        .map(|_| Json(json!({})))
+}
+
+async fn remove_datasource_from_index(
+    Path((collection_id, index_id, datasource_id)): Path<(CollectionId, IndexId, IndexId)>,
+    write_side: State<Arc<WriteSide>>,
+    write_api_key: WriteApiKey,
+) -> impl IntoResponse {
+    write_side
+        .remove_datasource_from_index(write_api_key, collection_id, index_id, datasource_id)
+        .await
+        .map(|_| Json(json!({})))
+}
+
+async fn add_datasource_to_index(
+    Path((collection_id, index_id)): Path<(CollectionId, IndexId)>,
+    write_side: State<Arc<WriteSide>>,
+    write_api_key: WriteApiKey,
+    Json(json): Json<AddDatasourceRequest>,
+) -> impl IntoResponse {
+    write_side
+        .add_datasource_to_index(write_api_key, collection_id, index_id, json)
         .await
         .map(|_| Json(json!({})))
 }
