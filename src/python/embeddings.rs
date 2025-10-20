@@ -1,11 +1,14 @@
+use include_dir::{include_dir, Dir};
 use pyo3::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::fmt::{Display, Formatter};
+use std::path::PathBuf;
 use tracing::info;
 
 // @todo: we will have to move all the python stuff elsewhere.
 // Also, we should ensure that we're rinning in the correct venv and Python version.
 static VENV_DIR: &str = ".venv/lib/python3.11/site-packages";
+static PYTHON_SCRIPTS: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/src/python/scripts");
 
 #[derive(Serialize, Deserialize, Clone, Copy, Hash, PartialEq, Eq, Debug)]
 pub enum Model {
@@ -107,6 +110,7 @@ impl Intent {
 
 pub struct EmbeddingsService {
     instance: Py<PyAny>,
+    python_scripts_dir: PathBuf,
 }
 
 impl EmbeddingsService {
@@ -114,13 +118,21 @@ impl EmbeddingsService {
         // @todo: move this to lib.rs and call it only once during the application startup.
         Python::initialize();
 
+        // Extract Python scripts directory before attaching to Python
+        let python_scripts_dir = Self::extract_python_scripts().map_err(|e| {
+            PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!(
+                "Failed to extract Python scripts: {}",
+                e
+            ))
+        })?;
+
         Python::attach(|py| {
             let sys = py.import("sys")?;
             let version = sys.getattr("version")?.extract::<String>()?;
             let version_number = version.split_whitespace().next().unwrap_or(&version);
             info!("Detected local Python version: v{}", version_number);
 
-            Self::initialize_python_env(py)?;
+            Self::initialize_python_env(py, &python_scripts_dir)?;
 
             let utils_module = py.import("src.utils")?;
             let config_class = utils_module.getattr("OramaAIConfig")?;
@@ -140,11 +152,12 @@ impl EmbeddingsService {
 
             Ok(EmbeddingsService {
                 instance: instance.unbind(),
+                python_scripts_dir,
             })
         })
     }
 
-    pub fn initialize_python_env(py: Python<'_>) -> PyResult<()> {
+    pub fn initialize_python_env(py: Python<'_>, python_scripts_dir: &PathBuf) -> PyResult<()> {
         let sys = py.import("sys")?;
         let path = sys.getattr("path")?;
 
@@ -152,13 +165,43 @@ impl EmbeddingsService {
             path.call_method1("insert", (0, VENV_DIR))?;
         }
 
-        path.call_method1("insert", (0, "src/python/scripts"))?;
+        // Use the provided Python scripts directory
+        info!("Using Python scripts from: {:?}", python_scripts_dir);
+        path.call_method1("insert", (0, python_scripts_dir.to_string_lossy().as_ref()))?;
 
         let embeddings_module = py.import("src.embeddings.embeddings")?;
         let init_fn = embeddings_module.getattr("initialize_thread_executor")?;
         init_fn.call0()?;
 
         Ok(())
+    }
+
+    fn extract_python_scripts() -> anyhow::Result<PathBuf> {
+        let temp_base = std::env::temp_dir();
+        let scripts_dir =
+            temp_base.join(format!("oramacore_python_scripts_{}", std::process::id()));
+
+        info!("Extracting embedded Python scripts to: {:?}", scripts_dir);
+
+        // Try to extract embedded Python scripts (for distributed binary)
+        match PYTHON_SCRIPTS.extract(&scripts_dir) {
+            Ok(_) => {
+                info!("Python scripts extracted successfully");
+                Ok(scripts_dir)
+            }
+            Err(e) => {
+                // Fall back to local development path if extraction fails
+                info!(
+                    "Failed to extract embedded Python scripts ({}), falling back to local path",
+                    e
+                );
+                if std::path::Path::new("src/python/scripts").exists() {
+                    Ok(PathBuf::from("src/python/scripts"))
+                } else {
+                    anyhow::bail!("Python scripts not found. Extraction failed: {}", e);
+                }
+            }
+        }
     }
 
     pub fn calculate_embeddings(
