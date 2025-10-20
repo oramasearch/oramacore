@@ -165,7 +165,6 @@ impl EmbeddingsService {
             path.call_method1("insert", (0, VENV_DIR))?;
         }
 
-        // Use the provided Python scripts directory
         info!("Using Python scripts from: {:?}", python_scripts_dir);
         path.call_method1("insert", (0, python_scripts_dir.to_string_lossy().as_ref()))?;
 
@@ -181,24 +180,50 @@ impl EmbeddingsService {
         let scripts_dir =
             temp_base.join(format!("oramacore_python_scripts_{}", std::process::id()));
 
-        info!("Extracting embedded Python scripts to: {:?}", scripts_dir);
+        info!(
+            "Attempting to extract embedded Python scripts to: {:?}",
+            scripts_dir
+        );
 
-        // Try to extract embedded Python scripts (for distributed binary)
+        if let Err(e) = std::fs::create_dir_all(&scripts_dir) {
+            tracing::warn!("Failed to create directory for Python scripts: {}", e);
+        }
+
         match PYTHON_SCRIPTS.extract(&scripts_dir) {
             Ok(_) => {
-                info!("Python scripts extracted successfully");
+                info!("[PYTHON] Python scripts extracted successfully from embedded binary");
+                info!("[PYTHON] Location: {:?}", scripts_dir);
+                info!("[PYTHON] Source: Binary embedded");
                 Ok(scripts_dir)
             }
             Err(e) => {
+                // Check if we should allow fallback to local files
+                let allow_local_fallback = std::env::var("ORAMACORE_ALLOW_LOCAL_PYTHON_SCRIPTS")
+                    .unwrap_or_else(|_| "true".to_string())
+                    .to_lowercase()
+                    == "true";
+
+                if !allow_local_fallback {
+                    anyhow::bail!(
+                        "Failed to extract embedded Python scripts and local fallback is disabled. Error: {}",
+                        e
+                    );
+                }
+
                 // Fall back to local development path if extraction fails
-                info!(
-                    "Failed to extract embedded Python scripts ({}), falling back to local path",
+                tracing::warn!(
+                    "Failed to extract embedded Python scripts: {}. Falling back to local development path",
                     e
                 );
-                if std::path::Path::new("src/python/scripts").exists() {
-                    Ok(PathBuf::from("src/python/scripts"))
+
+                let local_path = PathBuf::from("src/python/scripts");
+                if local_path.exists() {
+                    tracing::warn!("[PYTHON] Using local Python scripts from: {:?}", local_path);
+                    tracing::warn!("[PYTHON] Source: Local filesystem (development mode)");
+                    tracing::warn!("[PYTHON] This should NOT happen in production!");
+                    Ok(local_path)
                 } else {
-                    anyhow::bail!("Python scripts not found. Extraction failed: {}", e);
+                    anyhow::bail!("Python scripts not found. Extraction failed: {}, and local path does not exist", e);
                 }
             }
         }
