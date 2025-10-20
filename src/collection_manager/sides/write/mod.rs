@@ -180,6 +180,7 @@ impl WriteSide {
         let master_api_key = config.master_api_key;
         let collections_writer_config = config.config;
         let data_dir = collections_writer_config.data_dir.clone();
+        let datasource_dir = data_dir.clone().join("datasource");
 
         let insert_batch_commit_size = collections_writer_config.insert_batch_commit_size;
         let temp_index_cleanup_config = collections_writer_config.temp_index_cleanup.clone();
@@ -284,6 +285,7 @@ impl WriteSide {
 
         datasource::start_datasource_loop(
             write_side.clone(),
+            datasource_dir,
             datasource_receiver,
             stop_done_sender.clone(),
         );

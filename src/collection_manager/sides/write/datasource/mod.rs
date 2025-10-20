@@ -4,11 +4,12 @@ use tokio::time::MissedTickBehavior;
 use tracing::info;
 
 use super::WriteSide;
-use std::{sync::Arc, time};
+use std::{path::PathBuf, sync::Arc, time};
 use tracing::error;
 
 pub fn start_datasource_loop(
     write_side: Arc<WriteSide>,
+    datasource_dir: PathBuf,
     mut stop_receiver: tokio::sync::broadcast::Receiver<()>,
     stop_done_sender: tokio::sync::mpsc::Sender<()>,
 ) {
@@ -44,6 +45,7 @@ pub fn start_datasource_loop(
                                 storage::DatasourceKind::S3(s3_datasource) => {
                                     if let Err(e) = s3::sync_s3_datasource(
                                         write_side.clone(),
+                                        &datasource_dir,
                                         *collection_id,
                                         *index_id,
                                         datasource.id,

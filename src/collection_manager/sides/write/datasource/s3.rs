@@ -17,6 +17,7 @@ use crate::types::{CollectionId, Document, DocumentList, IndexId, WriteApiKey};
 
 pub async fn sync_s3_datasource(
     write_side: Arc<WriteSide>,
+    datasource_dir: &PathBuf,
     collection_id: CollectionId,
     index_id: IndexId,
     datasource_id: IndexId,
@@ -46,7 +47,7 @@ pub async fn sync_s3_datasource(
     // The chunking should be done at this level.
     let mut keys_to_add: Vec<String> = Vec::new();
     let mut keys_to_remove: Vec<String> = Vec::new();
-    let db_path = PathBuf::from("./resy").join(datasource_id.as_str());
+    let db_path = datasource_dir.join(datasource_id.as_str());
     if let Err(e) = s3
         .stream_diff_and_update(db_path.as_path(), |change| {
             match change {
