@@ -4211,7 +4211,6 @@ dependencies = [
  "axum-extra",
  "backoff",
  "bincode",
- "cc",
  "chrono",
  "clap",
  "config",
