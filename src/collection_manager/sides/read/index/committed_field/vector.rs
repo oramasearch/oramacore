@@ -211,7 +211,9 @@ impl LoadedCommittedVectorField {
         let mut inner = HNSW2Index::new(model.dimensions());
         for (doc_id, vectors) in iter {
             for vector in vectors {
-                inner.add(&vector, doc_id).context("Cannot add vector")?;
+                inner
+                    .add_owned(vector, doc_id)
+                    .context("Cannot add vector")?;
             }
         }
         inner.build().context("Cannot build hnsw index")?;
