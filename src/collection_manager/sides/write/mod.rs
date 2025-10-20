@@ -457,7 +457,9 @@ impl WriteSide {
             }),
         };
 
-        self.datasource_storage.insert(index_id, datasource).await;
+        self.datasource_storage
+            .insert(collection_id, index_id, datasource)
+            .await;
 
         Ok(())
     }
@@ -477,7 +479,7 @@ impl WriteSide {
             .ok_or_else(|| WriteError::IndexNotFound(collection_id, index_id))?;
 
         self.datasource_storage
-            .remove_single(index_id, datasource_id)
+            .remove_datasource(collection_id, index_id, datasource_id)
             .await;
 
         Ok(())
@@ -687,7 +689,9 @@ impl WriteSide {
         let document_to_remove = collection.delete_index(index_id).await?;
 
         self.document_storage.remove(document_to_remove).await;
-        self.datasource_storage.remove(index_id).await;
+        self.datasource_storage
+            .remove_index(collection_id, index_id)
+            .await;
 
         Ok(())
     }
@@ -988,6 +992,10 @@ impl WriteSide {
 
             self.document_storage.remove(document_ids).await;
         }
+
+        self.datasource_storage
+            .remove_collection(collection_id)
+            .await;
 
         Ok(())
     }

@@ -1,5 +1,5 @@
 use crate::lock::OramaAsyncLock;
-use crate::types::IndexId;
+use crate::types::{CollectionId, IndexId};
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -24,7 +24,7 @@ pub struct DatasourceEntry {
 }
 
 pub struct DatasourceStorage {
-    map: Arc<OramaAsyncLock<HashMap<IndexId, Vec<DatasourceEntry>>>>,
+    map: Arc<OramaAsyncLock<HashMap<CollectionId, HashMap<IndexId, Vec<DatasourceEntry>>>>>,
 }
 
 impl DatasourceStorage {
@@ -34,25 +34,54 @@ impl DatasourceStorage {
         }
     }
 
-    pub async fn insert(&self, index_id: IndexId, datasource: DatasourceEntry) {
+    pub async fn insert(
+        &self,
+        collection_id: CollectionId,
+        index_id: IndexId,
+        datasource: DatasourceEntry,
+    ) {
         let mut m = self.map.write("insert").await;
-        m.entry(index_id).or_default().push(datasource);
+        m.entry(collection_id)
+            .or_default()
+            .entry(index_id)
+            .or_default()
+            .push(datasource);
     }
 
-    pub async fn remove_single(&self, index_id: IndexId, datasource_id: IndexId) {
-        let mut m = self.map.write("remove_single").await;
-        if let Some(entries) = m.get_mut(&index_id) {
-            entries.retain(|e| e.id != datasource_id);
+    pub async fn remove_collection(&self, collection_id: CollectionId) {
+        let mut m = self.map.write("remove_collection").await;
+        m.remove(&collection_id);
+    }
 
-            if entries.is_empty() {
-                m.remove(&index_id);
+    pub async fn remove_index(&self, collection_id: CollectionId, index_id: IndexId) {
+        let mut m = self.map.write("remove_index").await;
+        if let Some(collection_map) = m.get_mut(&collection_id) {
+            collection_map.remove(&index_id);
+            if collection_map.is_empty() {
+                m.remove(&collection_id);
             }
         }
     }
 
-    pub async fn remove(&self, index_id: IndexId) {
-        let mut m = self.map.write("remove").await;
-        m.remove(&index_id);
+    pub async fn remove_datasource(
+        &self,
+        collection_id: CollectionId,
+        index_id: IndexId,
+        datasource_id: IndexId,
+    ) {
+        let mut m = self.map.write("remove_datasource").await;
+        if let Some(collection_map) = m.get_mut(&collection_id) {
+            if let Some(entries) = collection_map.get_mut(&index_id) {
+                entries.retain(|e| e.id != datasource_id);
+
+                if entries.is_empty() {
+                    collection_map.remove(&index_id);
+                }
+            }
+            if collection_map.is_empty() {
+                m.remove(&collection_id);
+            }
+        }
     }
 
     // pub async fn get_datasources(&self, index_id: IndexId) -> Option<&Vec<Datasource>> {
@@ -60,3 +89,4 @@ impl DatasourceStorage {
     //     m.get(&index_id)
     // }
 }
+
