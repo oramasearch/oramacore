@@ -84,9 +84,25 @@ impl DatasourceStorage {
         }
     }
 
-    // pub async fn get_datasources(&self, index_id: IndexId) -> Option<&Vec<Datasource>> {
-    //     let m = self.map.write("get_datasources").await;
-    //     m.get(&index_id)
-    // }
-}
+    pub async fn get(&self) -> HashMap<CollectionId, HashMap<IndexId, Vec<DatasourceEntry>>> {
+        let m = self.map.read("get_by_type").await;
+        let mut result: HashMap<CollectionId, HashMap<IndexId, Vec<DatasourceEntry>>> =
+            HashMap::new();
 
+        for (collection_id, indexes) in m.iter() {
+            for (index_id, datasources) in indexes.iter() {
+                let filtered_datasources: Vec<DatasourceEntry> =
+                    datasources.iter().cloned().collect();
+
+                if !filtered_datasources.is_empty() {
+                    result
+                        .entry(*collection_id)
+                        .or_default()
+                        .insert(*index_id, filtered_datasources);
+                }
+            }
+        }
+
+        result
+    }
+}
