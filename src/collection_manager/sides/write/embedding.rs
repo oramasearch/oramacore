@@ -48,43 +48,53 @@ async fn process<I>(
             (CollectionId, IndexId),
             HashMap<FieldId, HashMap<DocumentId, Vec<Vec<f32>>>>,
         > = HashMap::new();
+
         for ((collection_id, index_id), inputs) in inputs_per_collection_index {
             trace!(model_name = ?model_name, inputs = ?inputs.len(), "Process embedding batch");
             let text_inputs: Vec<String> =
                 inputs.iter().map(|input| input.text.to_string()).collect(); // @todo: to_string() here is used to clone the string, check if we can remove this cloning
 
-            // tokio::task::spawn_blocking(|f| {
+            let local_embedding_service = embeddings_service.clone();
 
-            // })?;
+            let task_result = tokio::task::spawn_blocking(move || {
+                // If something goes wrong, we will just log it and continue
+                // We should put a circuit breaker here like https://docs.rs/tokio-retry2/latest/tokio_retry2/
+                // TODO: Add circuit breaker
+                match local_embedding_service.calculate_embeddings(
+                    text_inputs,
+                    Intent::Passage,
+                    model.clone(),
+                ) {
+                    Ok(embeddings) => {
+                        let mut local_res: HashMap<FieldId, HashMap<DocumentId, Vec<Vec<f32>>>> =
+                            HashMap::new();
+                        let output = inputs.into_iter().zip(embeddings.into_iter());
 
-            // If something goes wrong, we will just log it and continue
-            // We should put a circuit breaker here like https://docs.rs/tokio-retry2/latest/tokio_retry2/
-            // TODO: Add circuit breaker
-            let _ = match embeddings_service.calculate_embeddings(
-                text_inputs,
-                Intent::Passage,
-                model.clone(),
-            ) {
-                Ok(embeddings) => {
-                    let output = inputs.into_iter().zip(embeddings.into_iter());
+                        for (req, embeddings) in output {
+                            let EmbeddingCalculationRequestInput {
+                                doc_id, field_id, ..
+                            } = req;
+                            let entry = local_res.entry(field_id).or_default();
+                            let entry = entry.entry(doc_id).or_default();
+                            entry.push(embeddings);
+                        }
 
-                    for (req, embeddings) in output {
-                        let EmbeddingCalculationRequestInput {
-                            doc_id, field_id, ..
-                        } = req;
-                        let entry = res.entry((collection_id, index_id)).or_default();
-                        let entry = entry.entry(field_id).or_default();
-                        let entry = entry.entry(doc_id).or_default();
-                        entry.push(embeddings);
+                        Ok(local_res)
                     }
+                    Err(e) => {
+                        warn!("Failed to calculate embeddings: {:?}", e);
+                        Err(e)
+                    }
+                }
+            })
+            .await
+            .expect("Failed to join embedding calculation task");
 
-                    Ok(())
-                }
-                Err(e) => {
-                    warn!("Failed to calculate embeddings: {:?}", e);
-                    Err(e)
-                }
-            };
+            if let Ok(local_res) = task_result {
+                res.entry((collection_id, index_id))
+                    .or_default()
+                    .extend(local_res);
+            }
         }
 
         let ops = res
