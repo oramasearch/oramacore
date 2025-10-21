@@ -51,12 +51,13 @@ use crate::collection_manager::sides::read::search::Search;
 use crate::lock::{OramaAsyncLock, OramaAsyncMutex};
 use crate::metrics::operations::OPERATION_COUNT;
 use crate::metrics::Empty;
+use crate::python::embeddings::EmbeddingsService;
+use crate::types::CollectionId;
 use crate::types::{
     ApiKey, CollectionStatsRequest, InteractionLLMConfig, SearchMode, SearchModeResult,
     SearchResult,
 };
 use crate::types::{IndexId, NLPSearchRequest};
-use crate::{ai::AIService, types::CollectionId};
 use oramacore_lib::fs::BufferedFile;
 use oramacore_lib::generic_kv::{KVConfig, KV};
 use oramacore_lib::nlp::NLPService;
@@ -139,16 +140,18 @@ pub struct ReadSide {
     // This is used to stop the read side when the server is shutting down
     stop_sender: tokio::sync::broadcast::Sender<()>,
     stop_done_receiver: OramaAsyncLock<tokio::sync::mpsc::Receiver<()>>,
+
+    embeddings_service: Arc<EmbeddingsService>,
 }
 
 impl ReadSide {
     pub async fn try_load(
         operation_receiver_creator: OperationReceiverCreator,
-        ai_service: Arc<AIService>,
         nlp_service: Arc<NLPService>,
         llm_service: Arc<LLMService>,
         config: ReadSideConfig,
         local_gpu_manager: Arc<LocalGPUManager>,
+        embeddings_service: Arc<EmbeddingsService>,
     ) -> Result<Arc<Self>> {
         let mut document_storage = DocumentStorage::try_new(DocumentStorageConfig {
             data_dir: config.config.data_dir.join("docs"),
@@ -167,7 +170,7 @@ impl ReadSide {
         }
 
         let context = ReadSideContext {
-            ai_service: ai_service.clone(),
+            embeddings_service: embeddings_service.clone(),
             nlp_service: nlp_service.clone(),
             llm_service: llm_service.clone(),
             notifier,
@@ -238,6 +241,7 @@ impl ReadSide {
 
             stop_sender,
             stop_done_receiver: OramaAsyncLock::new("stop_done_receiver", stop_done_receiver),
+            embeddings_service,
         };
 
         let operation_receiver = operation_receiver_creator.create(last_offset).await?;
@@ -526,12 +530,6 @@ impl ReadSide {
                 log_sender,
             )
             .await
-    }
-
-    // This is wrong. We should not expose the ai service to the read side.
-    // @todo: Remove this method.
-    pub fn get_ai_service(&self) -> Arc<AIService> {
-        self.collections.get_ai_service()
     }
 
     // This is wrong. We should not expose the vllm service to the read side.

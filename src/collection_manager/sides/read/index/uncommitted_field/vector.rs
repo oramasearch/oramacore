@@ -4,21 +4,21 @@ use anyhow::{bail, Result};
 use oramacore_lib::filters::FilterResult;
 use serde::Serialize;
 
-use crate::{ai::OramaModel, types::DocumentId};
+use crate::{python::embeddings::Model, types::DocumentId};
 
 type VectorWithMagnetude = (f32, Vec<f32>);
 
 #[derive(Debug)]
 pub struct UncommittedVectorField {
     field_path: Box<[String]>,
-    model: OramaModel,
+    model: Model,
 
     pub data: Vec<(DocumentId, Vec<VectorWithMagnetude>)>,
     pub dimension: usize,
 }
 
 impl UncommittedVectorField {
-    pub fn empty(field_path: Box<[String]>, model: OramaModel) -> Self {
+    pub fn empty(field_path: Box<[String]>, model: Model) -> Self {
         Self {
             field_path,
             data: Vec::new(),
@@ -43,16 +43,14 @@ impl UncommittedVectorField {
         self.data = Default::default();
     }
 
-    pub fn get_model(&self) -> OramaModel {
+    pub fn get_model(&self) -> Model {
         self.model
     }
 
     fn is_e5_model(&self) -> bool {
         matches!(
             self.model,
-            OramaModel::MultilingualE5Small
-                | OramaModel::MultilingualE5Base
-                | OramaModel::MultilingualE5Large
+            Model::MultilingualE5Small | Model::MultilingualE5Base | Model::MultilingualE5Large
         )
     }
 
@@ -64,8 +62,6 @@ impl UncommittedVectorField {
         output: &mut HashMap<DocumentId, f32>,
         uncommitted_deleted_documents: &HashSet<DocumentId>,
     ) -> Result<()> {
-        let magnetude = calculate_magnetude(target);
-
         for (id, vectors) in &self.data {
             if filtered_doc_ids.is_some_and(|ids| !ids.contains(id)) {
                 continue;
@@ -74,7 +70,7 @@ impl UncommittedVectorField {
                 continue;
             }
 
-            for (m, vector) in vectors {
+            for (_m, vector) in vectors {
                 let mut score = score_vector(vector, target)?;
 
                 // Rescale E5 model scores from [0.7, 1.0] to [0.0, 1.0]
@@ -85,8 +81,6 @@ impl UncommittedVectorField {
                 if score < similarity {
                     continue;
                 }
-
-                let score = score / (m * magnetude);
 
                 let s = output.entry(*id).or_insert(0.0);
                 *s += score;
@@ -184,10 +178,8 @@ mod tests {
 
     #[test]
     fn test_uncommitted_vector() {
-        let mut index = UncommittedVectorField::empty(
-            vec!["".to_string()].into_boxed_slice(),
-            OramaModel::BgeSmall,
-        );
+        let mut index =
+            UncommittedVectorField::empty(vec!["".to_string()].into_boxed_slice(), Model::BGESmall);
         let mut v1 = vec![0.0; 384];
         v1[0] = 1.0;
         let mut v2 = vec![0.0; 384];

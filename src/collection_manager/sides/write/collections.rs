@@ -9,7 +9,6 @@ use futures::future::join_all;
 use serde::{Deserialize, Serialize};
 use tracing::{error, info};
 
-use crate::ai::OramaModel;
 use crate::collection_manager::sides::write::collection::CreateEmptyCollection;
 use crate::collection_manager::sides::write::context::WriteSideContext;
 use crate::collection_manager::sides::write::WriteError;
@@ -17,6 +16,7 @@ use crate::collection_manager::sides::{CollectionWriteOperation, OperationSender
 use crate::lock::{OramaAsyncLock, OramaAsyncLockReadGuard};
 use crate::metrics::commit::COMMIT_CALCULATION_TIME;
 use crate::metrics::CollectionCommitLabels;
+use crate::python::embeddings::Model;
 use crate::types::{CollectionId, DocumentId};
 use crate::types::{CreateCollection, DescribeCollectionResponse, LanguageDTO};
 use oramacore_lib::fs::{create_if_not_exists, BufferedFile};
@@ -29,7 +29,7 @@ pub struct CollectionsWriter {
     collections: OramaAsyncLock<HashMap<CollectionId, CollectionWriter>>,
     config: CollectionsWriterConfig,
     context: WriteSideContext,
-    default_model: OramaModel,
+    default_model: Model,
     data_dir: PathBuf,
 }
 
@@ -39,7 +39,7 @@ impl CollectionsWriter {
         context: WriteSideContext,
     ) -> Result<Self> {
         let mut collections: HashMap<CollectionId, CollectionWriter> = Default::default();
-        let default_model = config.default_embedding_model.0;
+        let default_model = config.default_embedding_model;
 
         let data_dir = config.data_dir.join("collections");
         create_if_not_exists(&data_dir).context("Cannot create data directory")?;
@@ -123,7 +123,7 @@ impl CollectionsWriter {
             id,
             description: description.clone(),
             default_locale,
-            embeddings_model: embeddings_model.map(|m| m.0).unwrap_or(self.default_model),
+            embeddings_model: embeddings_model.unwrap_or(self.default_model),
             write_api_key,
             read_api_key,
         };

@@ -1,11 +1,9 @@
 use std::{
     collections::{HashMap, HashSet},
     ops::Deref,
-    sync::Arc,
 };
 
 use crate::{
-    ai::AIService,
     collection_manager::sides::{read::context::ReadSideContext, Offset},
     lock::{OramaAsyncLock, OramaAsyncLockReadGuard},
     types::{ApiKey, CollectionId},
@@ -107,10 +105,6 @@ impl CollectionsReader {
                     .collect(),
             ),
         })
-    }
-
-    pub fn get_ai_service(&self) -> Arc<AIService> {
-        self.context.ai_service.clone()
     }
 
     pub async fn get_collection<'s, 'coll>(

@@ -3,9 +3,8 @@ use std::time::Duration;
 use serde_json::json;
 use tokio::time::sleep;
 
-use crate::ai::OramaModel;
-use crate::collection_manager::sides::write::OramaModelSerializable;
 use crate::collection_manager::sides::write::WriteError;
+use crate::python::embeddings::Model;
 use crate::tests::utils::init_log;
 use crate::tests::utils::TestContext;
 use crate::types::CreateCollection;
@@ -33,7 +32,7 @@ async fn test_collection_id_already_exists() {
                 },
                 description: None,
                 mcp_description: None,
-                embeddings_model: Some(OramaModelSerializable(OramaModel::BgeSmall)),
+                embeddings_model: Some(Model::BGESmall),
                 language: None,
             },
         )
