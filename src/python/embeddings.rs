@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use tracing::info;
 
 // @todo: we will have to move all the python stuff elsewhere.
-// Also, we should ensure that we're rinning in the correct venv and Python version.
+// Also, we should ensure that we're running in the correct venv and Python version.
 static VENV_DIR: &str = ".venv/lib/python3.11/site-packages";
 static PYTHON_SCRIPTS: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/src/python/scripts");
 
