@@ -1,33 +1,21 @@
-use std::{
-    net::{SocketAddr, TcpListener},
-    path::PathBuf,
-    sync::{Arc, OnceLock},
-    time::Duration,
-};
+use std::{net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
 
 use anyhow::{bail, Result};
 use axum::{response::sse::Event, Json};
 use duration_string::DurationString;
 use fake::Fake;
 use fake::Faker;
-use fastembed::{
-    EmbeddingModel, InitOptions, InitOptionsUserDefined, Pooling, TextEmbedding, TokenizerFiles,
-    UserDefinedEmbeddingModel,
-};
 use futures::{future::BoxFuture, FutureExt};
-use grpc_def::Embedding;
-use http::uri::Scheme;
 use oramacore_lib::hook_storage::HookType;
 use tokio::{
     sync::{mpsc, RwLock},
     time::sleep,
 };
 use tokio_stream::wrappers::ReceiverStream;
-use tonic::{transport::Server, Status};
 use tracing::warn;
 
 use crate::{
-    ai::{AIServiceConfig, AIServiceLLMConfig, OramaModel},
+    ai::{AIServiceConfig, AIServiceLLMConfig},
     build_orama,
     collection_manager::sides::{
         read::{
@@ -35,11 +23,11 @@ use crate::{
             SearchRequest,
         },
         write::{
-            CollectionsWriterConfig, OramaModelSerializable, TempIndexCleanupConfig, WriteError,
-            WriteSide, WriteSideConfig,
+            CollectionsWriterConfig, TempIndexCleanupConfig, WriteError, WriteSide, WriteSideConfig,
         },
         InputSideChannelType, OutputSideChannelType, ReplaceIndexReason,
     },
+    python::embeddings::Model,
     types::{
         ApiKey, CollectionId, CollectionStatsRequest, CreateCollection, CreateIndexRequest,
         DescribeCollectionResponse, DocumentList, IndexId, InsertDocumentsResult, LanguageDTO,
@@ -96,11 +84,6 @@ pub fn create_oramacore_config() -> OramacoreConfig {
             with_prometheus: false,
         },
         ai_server: AIServiceConfig {
-            host: "0.0.0.0".parse().unwrap(),
-            port: 0,
-            api_key: None,
-            max_connections: 1,
-            scheme: Scheme::HTTP,
             embeddings: None,
             llm: AIServiceLLMConfig {
                 local: true,
@@ -118,7 +101,7 @@ pub fn create_oramacore_config() -> OramacoreConfig {
             config: CollectionsWriterConfig {
                 data_dir: generate_new_path(),
                 embedding_queue_limit: 50,
-                default_embedding_model: OramaModelSerializable(OramaModel::BgeSmall),
+                default_embedding_model: Model::BGESmall,
                 // Lot of tests commit to test it.
                 // So, we put an high value to avoid problems.
                 insert_batch_commit_size: 10_000,
@@ -151,109 +134,6 @@ pub fn create_oramacore_config() -> OramacoreConfig {
             analytics: None,
         },
     }
-}
-
-static CELL: OnceLock<Result<(Arc<TextEmbedding>, Arc<TextEmbedding>)>> = OnceLock::new();
-pub async fn create_grpc_server() -> Result<SocketAddr> {
-    let model = EmbeddingModel::BGESmallENV15;
-
-    let text_embedding = CELL.get_or_init(|| {
-        let mut cwd = std::env::current_dir()
-            .unwrap()
-            // This join is needed for the blow loop.
-            .join("foo");
-
-        let cwd = loop {
-            let Some(parent) = cwd.parent() else {
-                break None;
-            };
-            if std::fs::exists(parent.join(".custom_models")).unwrap_or(false) {
-                break Some(parent.to_path_buf());
-            }
-            cwd = parent.to_path_buf();
-        };
-
-        let Some(cwd) = cwd else {
-            return Err(anyhow::anyhow!(
-                "Cache not found. Run 'download-test-model.sh' to create the cache locally"
-            ));
-        };
-
-        let cache_dir = cwd.join(".custom_models");
-        std::fs::create_dir_all(&cache_dir).expect("Cannot create cache dir");
-
-        let init_option = InitOptions::new(model.clone())
-            .with_cache_dir(cache_dir.clone())
-            .with_show_download_progress(false);
-
-        let context_evaluator_model_dir =
-            cache_dir.join("sentenceTransformersParaphraseMultilingualMiniLML12v2");
-        std::fs::create_dir_all(&context_evaluator_model_dir).expect("Cannot create cache dir");
-
-        let onnx_file = std::fs::read(context_evaluator_model_dir.join("model.onnx"))
-            .expect("Cache not found. Run 'download-test-model.sh' to create the cache locally");
-        let config_file = std::fs::read(context_evaluator_model_dir.join("config.json"))
-            .expect("Cache not found. Run 'download-test-model.sh' to create the cache locally");
-        let tokenizer_file = std::fs::read(context_evaluator_model_dir.join("tokenizer.json"))
-            .expect("Cache not found. Run 'download-test-model.sh' to create the cache locally");
-        let special_tokens_map_file = std::fs::read(
-            context_evaluator_model_dir.join("special_tokens_map.json"),
-        )
-        .expect("Cache not found. Run 'download-test-model.sh' to create the cache locally");
-        let tokenizer_config_file = std::fs::read(
-            context_evaluator_model_dir.join("tokenizer_config.json"),
-        )
-        .expect("Cache not found. Run 'download-test-model.sh' to create the cache locally");
-        let tokenizer_files = TokenizerFiles {
-            config_file,
-            special_tokens_map_file,
-            tokenizer_file,
-            tokenizer_config_file,
-        };
-        let user_defined_model =
-            UserDefinedEmbeddingModel::new(onnx_file, tokenizer_files).with_pooling(Pooling::Mean);
-
-        // Try creating a TextEmbedding instance from the user-defined model
-        let context_evaluator: TextEmbedding = TextEmbedding::try_new_from_user_defined(
-            user_defined_model,
-            InitOptionsUserDefined::default(),
-        )
-        .unwrap();
-
-        let text_embedding = TextEmbedding::try_new(init_option)
-            .with_context(|| format!("Failed to initialize the Fastembed: {model}"))?;
-        Ok((Arc::new(text_embedding), Arc::new(context_evaluator)))
-    });
-    let (text_embedding, context_evaluator) = text_embedding.as_ref().unwrap().clone();
-
-    let server = GRPCServer {
-        fastembed_model: text_embedding,
-        context_evaluator,
-    };
-
-    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-    let addr = listener.local_addr().unwrap();
-    drop(listener);
-
-    tokio::spawn(async move {
-        Server::builder()
-            .add_service(grpc_def::llm_service_server::LlmServiceServer::new(server))
-            .serve(addr)
-            .await
-            .expect("Nooope");
-    });
-
-    // Waiting for the server to start
-    loop {
-        let c =
-            grpc_def::llm_service_client::LlmServiceClient::connect(format!("http://{addr}")).await;
-        if c.is_ok() {
-            break;
-        }
-        sleep(Duration::from_millis(100)).await;
-    }
-
-    Ok(addr)
 }
 
 pub async fn create_ai_server_mock(
@@ -330,53 +210,6 @@ pub async fn create_ai_server_mock(
     Ok(addr)
 }
 
-pub mod grpc_def {
-    tonic::include_proto!("orama_ai_service");
-}
-
-pub struct GRPCServer {
-    fastembed_model: Arc<TextEmbedding>,
-    context_evaluator: Arc<TextEmbedding>,
-}
-
-#[tonic::async_trait]
-impl grpc_def::llm_service_server::LlmService for GRPCServer {
-    async fn check_health(
-        &self,
-        _req: tonic::Request<grpc_def::HealthCheckRequest>,
-    ) -> Result<tonic::Response<grpc_def::HealthCheckResponse>, Status> {
-        Ok(tonic::Response::new(grpc_def::HealthCheckResponse {
-            status: "ok".to_string(),
-        }))
-    }
-
-    async fn get_embedding(
-        &self,
-        req: tonic::Request<grpc_def::EmbeddingRequest>,
-    ) -> Result<tonic::Response<grpc_def::EmbeddingResponse>, Status> {
-        let req = req.into_inner();
-        // `0` means `BgeSmall`
-        // `6` means `SentenceTransformersParaphraseMultilingualMiniLML12v2`
-        let model = match req.model {
-            0 => self.fastembed_model.clone(),
-            6 => self.context_evaluator.clone(),
-            _ => return Err(Status::invalid_argument("Invalid model")),
-        };
-
-        let embed = model
-            .embed(req.input, None)
-            .map_err(|e| Status::internal(e.to_string()))?;
-
-        Ok(tonic::Response::new(grpc_def::EmbeddingResponse {
-            embeddings_result: embed
-                .into_iter()
-                .map(|v| Embedding { embeddings: v })
-                .collect(),
-            dimensions: 384,
-        }))
-    }
-}
-
 pub async fn wait_for<'i, 'b, I, R>(
     i: &'i I,
     f: impl Fn(&'i I) -> BoxFuture<'b, Result<R>>,
@@ -414,13 +247,7 @@ impl TestContext {
         Self::new_with_config(config).await
     }
 
-    pub async fn new_with_config(mut config: OramacoreConfig) -> Self {
-        if config.ai_server.port == 0 {
-            let address = create_grpc_server().await.unwrap();
-            config.ai_server.host = address.ip().to_string();
-            config.ai_server.port = address.port();
-        }
-
+    pub async fn new_with_config(config: OramacoreConfig) -> Self {
         let master_api_key = config.writer_side.master_api_key;
         let (writer, reader) = build_orama(config.clone()).await.unwrap();
         let writer = writer.unwrap();
@@ -472,7 +299,7 @@ impl TestContext {
                     read_api_key,
                     write_api_key,
                     language: None,
-                    embeddings_model: Some(OramaModelSerializable(OramaModel::BgeSmall)),
+                    embeddings_model: Some(Model::BGESmall),
                 },
             )
             .await?;
@@ -756,7 +583,7 @@ impl TestCollectionClient {
                 self.write_api_key,
                 self.collection_id,
                 language,
-                OramaModel::BgeSmall,
+                Model::BGESmall,
                 None,
             )
             .await?;

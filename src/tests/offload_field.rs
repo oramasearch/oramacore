@@ -274,7 +274,6 @@ async fn test_offload_vector_field() {
                 .search(
                     json!({
                         "mode": "vector",
-                        // The first document
                         "term": "Document about artificial intelligence and machine learning",
                     })
                     .try_into()
@@ -295,6 +294,7 @@ async fn test_offload_vector_field() {
     })
     .await
     .unwrap();
+
     assert_eq!(search_result.count, 1);
     assert_eq!(search_result.hits.len(), 1);
     assert_eq!(
@@ -446,10 +446,14 @@ async fn test_offload_vector_field() {
     .await
     .unwrap();
 
-    assert_eq!(search_result.hits.len(), 1);
+    assert_eq!(search_result.hits.len(), 2);
     assert_eq!(
         search_result.hits[0].id,
         format!("{}:{}", index_client.index_id, "2")
+    );
+    assert_eq!(
+        search_result.hits[1].id,
+        format!("{}:{}", index_client.index_id, "1")
     );
 
     drop(test_context);

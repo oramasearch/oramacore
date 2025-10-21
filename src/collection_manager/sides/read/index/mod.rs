@@ -18,7 +18,7 @@ use tracing::{debug, error, info, trace, warn};
 use uncommitted_field::*;
 
 use crate::{
-    ai::{llms, OramaModel},
+    ai::llms,
     collection_manager::{
         bm25::BM25Scorer,
         sides::{
@@ -43,6 +43,7 @@ use crate::{
         search::{MATCHING_COUNT_CALCULTATION_COUNT, MATCHING_PERC_CALCULATION_COUNT},
         CollectionLabels, FieldIndexCollectionCommitLabels, IndexCollectionCommitLabels,
     },
+    python::embeddings::{Intent, Model},
     types::{
         CollectionId, DocumentId, FacetDefinition, FacetResult, Filter, FulltextMode, HybridMode,
         IndexId, Limit, Number, NumberFilter, Properties, SearchMode, SearchModeResult,
@@ -305,7 +306,7 @@ impl Index {
 
             uncommitted_fields.vector_fields.insert(
                 field_id,
-                UncommittedVectorField::empty(info.field_path.clone(), info.model.0),
+                UncommittedVectorField::empty(info.field_path.clone(), info.model),
             );
             let field = CommittedVectorField::try_load(info, offload_config)
                 .context("Cannot load vector field")?;
@@ -977,7 +978,7 @@ impl Index {
                         );
                         uncommitted_fields
                             .vector_fields
-                            .insert(field_id, UncommittedVectorField::empty(field_path, model.0));
+                            .insert(field_id, UncommittedVectorField::empty(field_path, model));
                     }
                 };
             }
@@ -1150,7 +1151,7 @@ impl Index {
 
     // Since we only have one embedding model for all indexes in a collection,
     // we can get the first index model and return it early.
-    pub async fn get_model(&self) -> Option<OramaModel> {
+    pub async fn get_model(&self) -> Option<Model> {
         let uncommitted_fields = self.uncommitted_fields.read("get_model").await;
         uncommitted_fields
             .vector_fields
@@ -1199,14 +1200,14 @@ impl Index {
                     }),
                     "hybrid" => SearchMode::Hybrid(HybridMode {
                         term: mode_result.term.clone(),
-                        similarity: Similarity(0.8),
+                        similarity: Similarity(0.7),
                         threshold: None,
                         exact: false,
                         tolerance: None,
                     }),
                     "vector" => SearchMode::Vector(VectorMode {
                         term: mode_result.term.clone(),
-                        similarity: Similarity(0.8),
+                        similarity: Similarity(0.7),
                     }),
                     _ => anyhow::bail!("Invalid search mode"),
                 }
@@ -2366,11 +2367,11 @@ impl Index {
             // Anyway, if the user seach in different index, we are re-calculating the embedding.
             // We should put a sort of cache here.
             // TODO: think about this.
-            let targets = self
-                .context
-                .ai_service
-                .embed_query(model, vec![&term.to_string()])
-                .await?;
+            let targets = self.context.embeddings_service.calculate_embeddings(
+                vec![term.to_string()],
+                Intent::Query,
+                model,
+            )?;
 
             for target in targets {
                 uncommitted.search(
