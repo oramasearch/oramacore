@@ -10,7 +10,7 @@ permissions:
 jobs:
   build-and-patch-release:
     name: Build and Upload Release Assets
-    runs-on: [self-hosted, gpu, cuda]
+    runs-on: [self-hosted]
 
     steps:
       - name: Checkout code
@@ -68,7 +68,7 @@ jobs:
   build-docker-OramaCore-x86_64:
     needs: [build-and-patch-release]
     name: Build and Upload Docker Images
-    runs-on: [self-hosted, gpu, cuda]
+    runs-on: [self-hosted]
 
     steps:
       - name: Checkout code
@@ -88,7 +88,17 @@ jobs:
         id: get_version
         run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
 
-      - name: Build and push OramaCore x86_64
+      - name: Determine if this is a release candidate
+        id: check_rc
+        run: |
+          if [[ "${{ steps.get_version.outputs.VERSION }}" == *"-rc."* ]]; then
+            echo "is_rc=true" >> $GITHUB_OUTPUT
+          else
+            echo "is_rc=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Build and push OramaCore x86_64 (stable)
+        if: steps.check_rc.outputs.is_rc == 'false'
         uses: docker/build-push-action@v5
         with:
           context: .
@@ -98,6 +108,17 @@ jobs:
           tags: |
             oramasearch/oramacore:${{ steps.get_version.outputs.VERSION }}
             oramasearch/oramacore:latest
+
+      - name: Build and push OramaCore x86_64 (RC)
+        if: steps.check_rc.outputs.is_rc == 'true'
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./docker/Dockerfile-oramacore-x86
+          platforms: linux/amd64
+          push: true
+          tags: |
+            oramasearch/oramacore:${{ steps.get_version.outputs.VERSION }}
 
   build-docker-OramaCore-arm64:
     needs: [build-and-patch-release]
@@ -122,7 +143,17 @@ jobs:
         id: get_version
         run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
 
-      - name: Build and push OramaCore ARM64
+      - name: Determine if this is a release candidate
+        id: check_rc
+        run: |
+          if [[ "${{ steps.get_version.outputs.VERSION }}" == *"-rc."* ]]; then
+            echo "is_rc=true" >> $GITHUB_OUTPUT
+          else
+            echo "is_rc=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Build and push OramaCore ARM64 (stable)
+        if: steps.check_rc.outputs.is_rc == 'false'
         uses: docker/build-push-action@v5
         with:
           context: .
@@ -132,3 +163,14 @@ jobs:
           tags: |
             oramasearch/oramacore-arm64:${{ steps.get_version.outputs.VERSION }}
             oramasearch/oramacore-arm64:latest
+
+      - name: Build and push OramaCore ARM64 (RC)
+        if: steps.check_rc.outputs.is_rc == 'true'
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./docker/Dockerfile-oramacore-arm64
+          platforms: linux/arm64
+          push: true
+          tags: |
+            oramasearch/oramacore-arm64:${{ steps.get_version.outputs.VERSION }}
