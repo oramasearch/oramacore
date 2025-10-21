@@ -3894,6 +3894,7 @@ version = "0.4.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "73f88a1307638156682bada9d7604135552957b7818057dcef22705b4d509495"
 dependencies = [
+ "bytemuck",
  "num-traits",
 ]
 
@@ -4294,9 +4295,9 @@ dependencies = [
 
 [[package]]
 name = "oramacore_lib"
-version = "0.1.2"
+version = "0.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "28569f877def2882c2172c7d555e87899c1c43f7ac1346b58fa514369cb8ad0f"
+checksum = "c63d8a56f21ff2e30681fa0d90c11391375c094dd579ec47832595a3cfa204a8"
 dependencies = [
  "anyhow",
  "atomic-write-file",
@@ -4315,6 +4316,7 @@ dependencies = [
  "oramacore_ptrie",
  "ordered-float",
  "parking_lot",
+ "pulp",
  "rand 0.9.2",
  "rayon",
  "regex",
@@ -4991,6 +4993,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "pulp"
+version = "0.21.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "96b86df24f0a7ddd5e4b95c94fc9ed8a98f1ca94d3b01bdce2824097e7835907"
+dependencies = [
+ "bytemuck",
+ "cfg-if",
+ "libm",
+ "num-complex",
+ "reborrow",
+ "version_check",
+]
+
+[[package]]
 name = "pxfm"
 version = "0.1.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5418,6 +5434,12 @@ dependencies = [
  "crossbeam-deque",
  "crossbeam-utils",
 ]
+
+[[package]]
+name = "reborrow"
+version = "0.5.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "03251193000f4bd3b042892be858ee50e8b3719f2b08e5833ac4353724632430"
 
 [[package]]
 name = "redact"

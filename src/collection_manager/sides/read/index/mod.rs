@@ -39,9 +39,9 @@ use crate::{
     },
     lock::{OramaAsyncLock, OramaAsyncLockReadGuard},
     metrics::{
-        commit::INDEX_COMMIT_CALCULATION_TIME,
+        commit::{FIELD_INDEX_COMMIT_CALCULATION_TIME, INDEX_COMMIT_CALCULATION_TIME},
         search::{MATCHING_COUNT_CALCULTATION_COUNT, MATCHING_PERC_CALCULATION_COUNT},
-        CollectionLabels, IndexCollectionCommitLabels,
+        CollectionLabels, FieldIndexCollectionCommitLabels, IndexCollectionCommitLabels,
     },
     python::embeddings::{Intent, Model},
     types::{
@@ -432,7 +432,7 @@ impl Index {
 
         debug!("Committing index {:?}", self.id);
 
-        let m = INDEX_COMMIT_CALCULATION_TIME.create(IndexCollectionCommitLabels {
+        let total_m = INDEX_COMMIT_CALCULATION_TIME.create(IndexCollectionCommitLabels {
             collection: collection_id.as_str().to_string(),
             index: self.id.as_str().to_string(),
             side: "read",
@@ -445,6 +445,12 @@ impl Index {
             Unchanged,
         }
 
+        let m = FIELD_INDEX_COMMIT_CALCULATION_TIME.create(FieldIndexCollectionCommitLabels {
+            collection: collection_id.as_str().to_string(),
+            index: self.id.as_str().to_string(),
+            side: "read",
+            field_type: "bool",
+        });
         let mut merged_bools = HashMap::new();
         let bool_indexes: HashSet<_> = uncommitted_fields
             .bool_fields
@@ -470,7 +476,14 @@ impl Index {
                 merged_bools.insert(field_id, MergeResult::Unchanged);
             }
         }
+        drop(m);
 
+        let m = FIELD_INDEX_COMMIT_CALCULATION_TIME.create(FieldIndexCollectionCommitLabels {
+            collection: collection_id.as_str().to_string(),
+            index: self.id.as_str().to_string(),
+            side: "read",
+            field_type: "number",
+        });
         let mut merged_numbers = HashMap::new();
         let number_indexes: HashSet<_> = uncommitted_fields
             .number_fields
@@ -496,7 +509,14 @@ impl Index {
                 merged_numbers.insert(field_id, MergeResult::Unchanged);
             }
         }
+        drop(m);
 
+        let m = FIELD_INDEX_COMMIT_CALCULATION_TIME.create(FieldIndexCollectionCommitLabels {
+            collection: collection_id.as_str().to_string(),
+            index: self.id.as_str().to_string(),
+            side: "read",
+            field_type: "date",
+        });
         let mut merged_dates = HashMap::new();
         let date_indexes: HashSet<_> = uncommitted_fields
             .date_fields
@@ -522,7 +542,14 @@ impl Index {
                 merged_dates.insert(field_id, MergeResult::Unchanged);
             }
         }
+        drop(m);
 
+        let m = FIELD_INDEX_COMMIT_CALCULATION_TIME.create(FieldIndexCollectionCommitLabels {
+            collection: collection_id.as_str().to_string(),
+            index: self.id.as_str().to_string(),
+            side: "read",
+            field_type: "geopoint",
+        });
         let mut merged_geopoints = HashMap::new();
         let geopoint_indexes: HashSet<_> = uncommitted_fields
             .geopoint_fields
@@ -549,7 +576,14 @@ impl Index {
                 merged_geopoints.insert(field_id, MergeResult::Unchanged);
             }
         }
+        drop(m);
 
+        let m = FIELD_INDEX_COMMIT_CALCULATION_TIME.create(FieldIndexCollectionCommitLabels {
+            collection: collection_id.as_str().to_string(),
+            index: self.id.as_str().to_string(),
+            side: "read",
+            field_type: "string_filter",
+        });
         let mut merged_string_filters = HashMap::new();
         let string_filter_indexes: HashSet<_> = uncommitted_fields
             .string_filter_fields
@@ -575,7 +609,14 @@ impl Index {
                 merged_string_filters.insert(field_id, MergeResult::Unchanged);
             }
         }
+        drop(m);
 
+        let m = FIELD_INDEX_COMMIT_CALCULATION_TIME.create(FieldIndexCollectionCommitLabels {
+            collection: collection_id.as_str().to_string(),
+            index: self.id.as_str().to_string(),
+            side: "read",
+            field_type: "string",
+        });
         let mut merged_strings = HashMap::new();
         let string_indexes: HashSet<_> = uncommitted_fields
             .string_fields
@@ -602,7 +643,14 @@ impl Index {
                 merged_strings.insert(field_id, MergeResult::Unchanged);
             }
         }
+        drop(m);
 
+        let m = FIELD_INDEX_COMMIT_CALCULATION_TIME.create(FieldIndexCollectionCommitLabels {
+            collection: collection_id.as_str().to_string(),
+            index: self.id.as_str().to_string(),
+            side: "read",
+            field_type: "vector",
+        });
         let mut merged_vectors = HashMap::new();
         let vector_indexes: HashSet<_> = uncommitted_fields
             .vector_fields
@@ -629,6 +677,7 @@ impl Index {
                 merged_vectors.insert(field_id, MergeResult::Unchanged);
             }
         }
+        drop(m);
 
         // Once all changed in merged_* maps are collected,
         // we can proceed to replace the committed fields with the merged ones
@@ -794,7 +843,7 @@ impl Index {
             .store(false, Ordering::Relaxed);
         self.is_new.store(false, Ordering::Relaxed);
 
-        drop(m);
+        drop(total_m);
 
         debug!("Index committed: {:?}", self.id);
 
