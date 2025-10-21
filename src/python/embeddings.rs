@@ -220,7 +220,7 @@ impl EmbeddingsService {
                 if local_path.exists() {
                     tracing::warn!("[PYTHON] Using local Python scripts from: {:?}", local_path);
                     tracing::warn!("[PYTHON] Source: Local filesystem (development mode)");
-                    tracing::warn!("[PYTHON] This should NOT happen in production!");
+                    tracing::error!("[PYTHON] This should NOT happen in production!");
                     Ok(local_path)
                 } else {
                     anyhow::bail!("Python scripts not found. Extraction failed: {}, and local path does not exist", e);
