@@ -40,6 +40,7 @@ MODEL_PASSAGE_INSTRUCTIONS_MAP = {
     "JinaEmbeddingsV2BaseCode": JINAEMBEDDINGSV2BASECODE_PASSAGE_INSTRUCTIONS,
 }
 
+
 class EmbeddingsModels:
     def __init__(self, config: OramaAIConfig, selected_models: Optional[List[OramaModelInfo]] = None):
         logger.info("Initializing EmbeddingsModels...")
@@ -101,7 +102,6 @@ class EmbeddingsModels:
                     self.loaded_models[model_name] = TextEmbedding(
                         model_name=OramaModelInfo[model_name].value["model_name"],
                         providers=self.config.embeddings.execution_providers,
-
                     )
 
                 return list(embed_alternative(self.loaded_models[model_name], input_with_instructions))
