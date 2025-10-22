@@ -1734,10 +1734,10 @@ impl Index {
             };
 
             let variants: Vec<_> = uncommitted_groupable.get_values().collect();
-            if variants.len() > 50 {
-                // Should we group by a field with more than 50 variant???
+            if variants.len() > 500 {
+                // Should we group by a field with more than 500 variant???
                 // TODO: think about it. For now, no.
-                bail!("Cannot calculate groups on a field with more than 50 variant");
+                bail!("Cannot calculate groups on a field with more than 500 variant");
             }
 
             for variant in &variants {
