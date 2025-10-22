@@ -40,7 +40,7 @@ class OramaAIConfig:
     models_cache_dir: Optional[str] = "/tmp/fastembed_cache"
     embeddings: Optional[EmbeddingsConfig] = field(default_factory=EmbeddingsConfig)
     total_threads: Optional[int] = 12
-    config_path = os.getenv('CONFIG_PATH', DEFAULT_CONFIG_PATH)
+    config_path = os.getenv("CONFIG_PATH", DEFAULT_CONFIG_PATH)
 
     def __post_init__(self):
         if Path(self.config_path).exists():

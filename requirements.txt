@@ -12,7 +12,6 @@ opentelemetry-sdk==1.29.0
 
 python-dotenv==1.0.1
 fastembed-gpu==0.5.1
-argparse==1.4.0
 
 pyyaml==6.0.2
 cachetools==6.2.1
@@ -28,3 +27,4 @@ einops==0.8.0
 bitsandbytes==0.48.1
 
 fastmcp==2.12.5
+pydantic==2.11.7

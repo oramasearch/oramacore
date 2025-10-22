@@ -4,7 +4,6 @@ numpy==2.3.4
 
 python-dotenv==1.1.1
 fastembed==0.5.1
-argparse==1.4.0
 
 torch==2.9.0
 torchvision==0.24.0
@@ -22,3 +21,4 @@ accelerate==1.10.1
 einops==0.8.1
 
 fastmcp==2.12.5
+pydantic==2.11.7

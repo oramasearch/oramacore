@@ -4,6 +4,7 @@ use std::{path::PathBuf, sync::Arc};
 use tracing::info;
 
 pub mod embeddings;
+pub mod mcp;
 
 // @todo: we should ensure that we're running in the correct venv and Python version.
 static VENV_DIR: &str = ".venv/lib/python3.11/site-packages";

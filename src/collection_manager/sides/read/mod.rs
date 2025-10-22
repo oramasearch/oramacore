@@ -51,7 +51,6 @@ use crate::collection_manager::sides::read::search::Search;
 use crate::lock::{OramaAsyncLock, OramaAsyncMutex};
 use crate::metrics::operations::OPERATION_COUNT;
 use crate::metrics::Empty;
-use crate::python::embeddings::EmbeddingsService;
 use crate::python::PythonService;
 use crate::types::CollectionId;
 use crate::types::{
