@@ -3,8 +3,7 @@ use std::sync::Arc;
 use oramacore_lib::nlp::NLPService;
 
 use crate::{
-    ai::llms::LLMService, collection_manager::sides::read::notify::Notifier,
-    python::{PythonService}
+    ai::llms::LLMService, collection_manager::sides::read::notify::Notifier, python::PythonService,
 };
 
 #[derive(Clone)]

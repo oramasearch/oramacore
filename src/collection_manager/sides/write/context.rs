@@ -6,7 +6,7 @@ use tokio::sync::mpsc::Sender;
 use crate::{
     ai::{automatic_embeddings_selector::AutomaticEmbeddingsSelector, llms::LLMService},
     collection_manager::sides::{
-        OperationSender, write::embedding::MultiEmbeddingCalculationRequest
+        write::embedding::MultiEmbeddingCalculationRequest, OperationSender,
     },
     python::PythonService,
 };

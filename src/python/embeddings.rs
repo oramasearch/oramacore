@@ -156,9 +156,7 @@ mod tests {
     use super::*;
 
     static PYTHON_SERVICE: LazyLock<Arc<PythonService>> = LazyLock::new(|| {
-        Arc::new(
-            PythonService::new().expect("Failed to initialize PythonService for tests")
-        )
+        Arc::new(PythonService::new().expect("Failed to initialize PythonService for tests"))
     });
 
     fn get_embeddings_service() -> Arc<EmbeddingsService> {

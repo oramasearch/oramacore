@@ -51,8 +51,8 @@ use crate::collection_manager::sides::read::search::Search;
 use crate::lock::{OramaAsyncLock, OramaAsyncMutex};
 use crate::metrics::operations::OPERATION_COUNT;
 use crate::metrics::Empty;
-use crate::python::PythonService;
 use crate::python::embeddings::EmbeddingsService;
+use crate::python::PythonService;
 use crate::types::CollectionId;
 use crate::types::{
     ApiKey, CollectionStatsRequest, InteractionLLMConfig, SearchMode, SearchModeResult,
@@ -142,7 +142,7 @@ pub struct ReadSide {
     stop_sender: tokio::sync::broadcast::Sender<()>,
     stop_done_receiver: OramaAsyncLock<tokio::sync::mpsc::Receiver<()>>,
 
-    python_service: Arc<PythonService>
+    python_service: Arc<PythonService>,
 }
 
 impl ReadSide {
@@ -242,7 +242,7 @@ impl ReadSide {
 
             stop_sender,
             stop_done_receiver: OramaAsyncLock::new("stop_done_receiver", stop_done_receiver),
-            python_service
+            python_service,
         };
 
         let operation_receiver = operation_receiver_creator.create(last_offset).await?;

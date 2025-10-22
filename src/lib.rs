@@ -216,7 +216,7 @@ pub async fn build_orama(
             llm_service,
             config.reader_side,
             local_gpu_manager,
-            python_service
+            python_service,
         )
         .await
         .context("Cannot create read side")?;

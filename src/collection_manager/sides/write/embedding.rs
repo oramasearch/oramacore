@@ -7,7 +7,10 @@ use crate::{
     collection_manager::sides::{
         CollectionWriteOperation, IndexWriteOperation, OperationSender, WriteOperation,
     },
-    python::{PythonService, embeddings::{Intent, Model}},
+    python::{
+        embeddings::{Intent, Model},
+        PythonService,
+    },
     types::{CollectionId, DocumentId, FieldId, IndexId},
 };
 
@@ -27,11 +30,8 @@ pub struct MultiEmbeddingCalculationRequest {
     pub text: Vec<String>,
 }
 
-async fn process<I>(
-    op_sender: &OperationSender,
-    python_service: Arc<PythonService>,
-    cache: I,
-) where
+async fn process<I>(op_sender: &OperationSender, python_service: Arc<PythonService>, cache: I)
+where
     I: Iterator<
         Item = (
             Model,

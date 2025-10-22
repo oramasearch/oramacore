@@ -4,9 +4,14 @@ use anyhow::Context;
 use clap::{Parser, Subcommand};
 use config::Config;
 use oramacore::{
-    OramacoreConfig, ai::{AIService, gpu::LocalGPUManager, llms::LLMService}, collection_manager::sides::read::{
-        Index, ReadSideContext, document_storage::{DocumentStorage, DocumentStorageConfig}
-    }, python::{PythonService, embeddings::EmbeddingsService}, types::{DocumentId, IndexId}
+    ai::{gpu::LocalGPUManager, llms::LLMService, AIService},
+    collection_manager::sides::read::{
+        document_storage::{DocumentStorage, DocumentStorageConfig},
+        Index, ReadSideContext,
+    },
+    python::{embeddings::EmbeddingsService, PythonService},
+    types::{DocumentId, IndexId},
+    OramacoreConfig,
 };
 
 use oramacore_lib::nlp::NLPService;
