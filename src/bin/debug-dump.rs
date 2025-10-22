@@ -4,14 +4,9 @@ use anyhow::Context;
 use clap::{Parser, Subcommand};
 use config::Config;
 use oramacore::{
-    ai::{gpu::LocalGPUManager, llms::LLMService, AIService},
-    collection_manager::sides::read::{
-        document_storage::{DocumentStorage, DocumentStorageConfig},
-        Index, ReadSideContext,
-    },
-    python::embeddings::EmbeddingsService,
-    types::{DocumentId, IndexId},
-    OramacoreConfig,
+    OramacoreConfig, ai::{AIService, gpu::LocalGPUManager, llms::LLMService}, collection_manager::sides::read::{
+        Index, ReadSideContext, document_storage::{DocumentStorage, DocumentStorageConfig}
+    }, python::{PythonService, embeddings::EmbeddingsService}, types::{DocumentId, IndexId}
 };
 
 use oramacore_lib::nlp::NLPService;
@@ -93,11 +88,10 @@ async fn main() -> anyhow::Result<()> {
             };
 
             let nlp_service = Arc::new(NLPService::new());
-
-            let embeddings_model = Arc::new(EmbeddingsService::new()?);
+            let python_service = Arc::new(PythonService::new()?);
 
             let context = ReadSideContext {
-                embeddings_service: embeddings_model.clone(),
+                python_service: python_service.clone(),
                 nlp_service: nlp_service.clone(),
                 llm_service: llm_service.clone(),
                 notifier: None,

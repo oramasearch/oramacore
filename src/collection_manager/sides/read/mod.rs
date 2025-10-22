@@ -51,6 +51,7 @@ use crate::collection_manager::sides::read::search::Search;
 use crate::lock::{OramaAsyncLock, OramaAsyncMutex};
 use crate::metrics::operations::OPERATION_COUNT;
 use crate::metrics::Empty;
+use crate::python::PythonService;
 use crate::python::embeddings::EmbeddingsService;
 use crate::types::CollectionId;
 use crate::types::{
@@ -141,7 +142,7 @@ pub struct ReadSide {
     stop_sender: tokio::sync::broadcast::Sender<()>,
     stop_done_receiver: OramaAsyncLock<tokio::sync::mpsc::Receiver<()>>,
 
-    embeddings_service: Arc<EmbeddingsService>,
+    python_service: Arc<PythonService>
 }
 
 impl ReadSide {
@@ -151,7 +152,7 @@ impl ReadSide {
         llm_service: Arc<LLMService>,
         config: ReadSideConfig,
         local_gpu_manager: Arc<LocalGPUManager>,
-        embeddings_service: Arc<EmbeddingsService>,
+        python_service: Arc<PythonService>,
     ) -> Result<Arc<Self>> {
         let mut document_storage = DocumentStorage::try_new(DocumentStorageConfig {
             data_dir: config.config.data_dir.join("docs"),
@@ -170,7 +171,7 @@ impl ReadSide {
         }
 
         let context = ReadSideContext {
-            embeddings_service: embeddings_service.clone(),
+            python_service: python_service.clone(),
             nlp_service: nlp_service.clone(),
             llm_service: llm_service.clone(),
             notifier,
@@ -241,7 +242,7 @@ impl ReadSide {
 
             stop_sender,
             stop_done_receiver: OramaAsyncLock::new("stop_done_receiver", stop_done_receiver),
-            embeddings_service,
+            python_service
         };
 
         let operation_receiver = operation_receiver_creator.create(last_offset).await?;

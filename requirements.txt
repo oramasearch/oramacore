@@ -26,3 +26,5 @@ onnxruntime-gpu==1.23.0
 accelerate==1.2.1
 einops==0.8.0
 bitsandbytes==0.48.1
+
+fastmcp==2.12.5

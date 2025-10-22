@@ -6,14 +6,14 @@ use tokio::sync::mpsc::Sender;
 use crate::{
     ai::{automatic_embeddings_selector::AutomaticEmbeddingsSelector, llms::LLMService},
     collection_manager::sides::{
-        write::embedding::MultiEmbeddingCalculationRequest, OperationSender,
+        OperationSender, write::embedding::MultiEmbeddingCalculationRequest
     },
-    python::embeddings::EmbeddingsService,
+    python::PythonService,
 };
 
 #[derive(Clone)]
 pub struct WriteSideContext {
-    pub embeddings_service: Arc<EmbeddingsService>,
+    pub python_service: Arc<PythonService>,
     pub embedding_sender: Sender<MultiEmbeddingCalculationRequest>,
     pub op_sender: OperationSender,
     pub nlp_service: Arc<NLPService>,

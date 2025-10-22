@@ -44,6 +44,7 @@ pub use context::WriteSideContext;
 
 use crate::collection_manager::sides::write::document_storage::ZeboDocument;
 use crate::lock::OramaAsyncLock;
+use crate::python::PythonService;
 use crate::python::embeddings::{EmbeddingsService, Model};
 use crate::{
     ai::{
@@ -164,7 +165,7 @@ pub struct WriteSide {
 
     jwt_manager: JwtManager,
 
-    embeddings_service: Arc<EmbeddingsService>,
+    python_service: Arc<PythonService>,
 }
 
 impl WriteSide {
@@ -174,7 +175,7 @@ impl WriteSide {
         nlp_service: Arc<NLPService>,
         llm_service: Arc<LLMService>,
         automatic_embeddings_selector: Arc<AutomaticEmbeddingsSelector>,
-        embeddings_service: Arc<EmbeddingsService>,
+        python_service: Arc<PythonService>,
     ) -> Result<Arc<Self>> {
         let master_api_key = config.master_api_key;
         let collections_writer_config = config.config;
@@ -211,7 +212,7 @@ impl WriteSide {
         };
 
         let context = WriteSideContext {
-            embeddings_service: embeddings_service.clone(),
+            python_service: python_service.clone(),
             embedding_sender: sx,
             op_sender: op_sender.clone(),
             nlp_service,
@@ -275,7 +276,7 @@ impl WriteSide {
             stop_done_receiver: OramaAsyncLock::new("stop_done_receiver", stop_done_receiver),
             write_operation_counter: AtomicU32::new(0),
             jwt_manager,
-            embeddings_service,
+            python_service
         };
 
         let write_side = Arc::new(write_side);
@@ -294,7 +295,7 @@ impl WriteSide {
             stop_done_sender.clone(),
         );
         start_calculate_embedding_loop(
-            context.embeddings_service.clone(),
+            context.python_service.clone(),
             rx,
             op_sender,
             embedding_queue_limit,
