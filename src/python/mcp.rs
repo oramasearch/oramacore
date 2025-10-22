@@ -223,4 +223,15 @@ impl McpService {
             Ok(result_json)
         })
     }
+
+    pub fn handle_jsonrpc(&self, request_str: String) -> Result<String> {
+        Python::attach(|py| {
+            let instance = self.instance.bind(py);
+            let result = instance.call_method1("handle_jsonrpc_request", (request_str,))?;
+            let response_str: String = result
+                .extract()
+                .map_err(|e| anyhow!("Failed to extract JSON-RPC response string: {}", e))?;
+            Ok(response_str)
+        })
+    }
 }

@@ -9,8 +9,7 @@ use axum::{
     Json, Router,
 };
 
-use serde::{Deserialize, Serialize};
-use tracing::{debug, error};
+use serde::Deserialize;
 
 use crate::{
     collection_manager::sides::{
@@ -44,31 +43,6 @@ struct McpQueryParams {
     api_key: ApiKey,
 }
 
-#[derive(Deserialize)]
-struct JsonRpcRequest {
-    #[serde(rename = "jsonrpc")]
-    jsonrpc: String,
-    id: Option<serde_json::Value>,
-    method: String,
-    params: Option<serde_json::Value>,
-}
-
-#[derive(Serialize)]
-struct JsonRpcResponse {
-    jsonrpc: String,
-    id: Option<serde_json::Value>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    result: Option<serde_json::Value>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    error: Option<JsonRpcError>,
-}
-
-#[derive(Serialize)]
-struct JsonRpcError {
-    code: i32,
-    message: String,
-}
-
 async fn mcp_endpoint(
     Path(collection_id): Path<CollectionId>,
     Query(query): Query<McpQueryParams>,
@@ -78,66 +52,47 @@ async fn mcp_endpoint(
 ) -> impl IntoResponse {
     let api_key = query.api_key;
 
-    match read_side.check_read_api_key(collection_id, api_key).await {
-        Ok(_) => {}
-        Err(_err) => {
-            let error_response = JsonRpcResponse {
-                jsonrpc: "2.0".to_string(),
-                id: None,
-                result: None,
-                error: Some(JsonRpcError {
-                    code: 401,
-                    message: "unauthorized".to_string(),
-                }),
-            };
-            return (StatusCode::UNAUTHORIZED, Json(error_response));
-        }
+    if let Err(_err) = read_side.check_read_api_key(collection_id, api_key).await {
+        let error_response = serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": null,
+            "error": {
+                "code": 401,
+                "message": "unauthorized"
+            }
+        });
+        return (StatusCode::UNAUTHORIZED, Json(error_response));
     }
 
     let body_bytes = match axum::body::to_bytes(body, usize::MAX).await {
         Ok(bytes) => bytes,
         Err(_) => {
-            let error_response = JsonRpcResponse {
-                jsonrpc: "2.0".to_string(),
-                id: None,
-                result: None,
-                error: Some(JsonRpcError {
-                    code: -32700,
-                    message: "Parse error".to_string(),
-                }),
-            };
+            let error_response = serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": null,
+                "error": {
+                    "code": -32700,
+                    "message": "Failed to read request body"
+                }
+            });
             return (StatusCode::BAD_REQUEST, Json(error_response));
         }
     };
 
-    let request: JsonRpcRequest = match serde_json::from_slice(&body_bytes) {
-        Ok(req) => req,
+    let request_str = match String::from_utf8(body_bytes.to_vec()) {
+        Ok(s) => s,
         Err(_) => {
-            let error_response = JsonRpcResponse {
-                jsonrpc: "2.0".to_string(),
-                id: None,
-                result: None,
-                error: Some(JsonRpcError {
-                    code: -32700,
-                    message: "Parse error".to_string(),
-                }),
-            };
+            let error_response = serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": null,
+                "error": {
+                    "code": -32700,
+                    "message": "Invalid UTF-8 in request body"
+                }
+            });
             return (StatusCode::BAD_REQUEST, Json(error_response));
         }
     };
-
-    if request.jsonrpc != "2.0" {
-        let error_response = JsonRpcResponse {
-            jsonrpc: "2.0".to_string(),
-            id: request.id,
-            result: None,
-            error: Some(JsonRpcError {
-                code: -32600,
-                message: "Invalid Request. JSON-RPC version must be 2.0".to_string(),
-            }),
-        };
-        return (StatusCode::BAD_REQUEST, Json(error_response));
-    }
 
     let collection_info = read_side
         .collection_stats(
@@ -163,153 +118,47 @@ async fn mcp_endpoint(
     ) {
         Ok(service) => service,
         Err(e) => {
-            error!("Failed to create MCP service: {}", e);
-            let error_response = JsonRpcResponse {
-                jsonrpc: "2.0".to_string(),
-                id: request.id,
-                result: None,
-                error: Some(JsonRpcError {
-                    code: -32603,
-                    message: format!("Internal error: Failed to initialize MCP service: {}", e),
-                }),
-            };
+            let error_response = serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": null,
+                "error": {
+                    "code": -32603,
+                    "message": format!("Failed to initialize MCP service: {}", e)
+                }
+            });
             return (StatusCode::INTERNAL_SERVER_ERROR, Json(error_response));
         }
     };
 
-    let result = match request.method.as_str() {
-        "initialize" => {
-            serde_json::json!({
-                "protocolVersion": "2024-11-05",
-                "capabilities": {
-                    "tools": {}
-                },
-                "serverInfo": {
-                    "name": "orama-mcp",
-                    "version": "1.0.0"
+    let response_str = match mcp_service.handle_jsonrpc(request_str) {
+        Ok(response) => response,
+        Err(e) => {
+            let error_response = serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": null,
+                "error": {
+                    "code": -32603,
+                    "message": format!("Internal error: {}", e)
                 }
-            })
-        }
-        "tools/list" => {
-            // Delegate to Python MCP to get the list of tools
-            match mcp_service.list_tools() {
-                Ok(tools_list) => {
-                    debug!("Successfully retrieved tools list from Python MCP");
-                    serde_json::json!({
-                        "tools": tools_list
-                    })
-                }
-                Err(e) => {
-                    error!("Failed to list tools from Python MCP: {}", e);
-                    let error_response = JsonRpcResponse {
-                        jsonrpc: "2.0".to_string(),
-                        id: request.id,
-                        result: None,
-                        error: Some(JsonRpcError {
-                            code: -32603,
-                            message: format!("Failed to list tools: {}", e),
-                        }),
-                    };
-                    return (StatusCode::INTERNAL_SERVER_ERROR, Json(error_response));
-                }
-            }
-        }
-        "tools/call" => {
-            if let Some(params) = request.params.as_ref() {
-                if let Some(tool_name) = params.get("name").and_then(|v| v.as_str()) {
-                    let arguments = params
-                        .get("arguments")
-                        .cloned()
-                        .unwrap_or(serde_json::json!({}));
-
-                    debug!(
-                        "Calling Python MCP tool '{}' with arguments: {:?}",
-                        tool_name, arguments
-                    );
-
-                    match mcp_service.call_tool(tool_name, arguments) {
-                        Ok(result) => {
-                            debug!("Successfully executed tool '{}' via Python MCP", tool_name);
-                            serde_json::json!({
-                                "content": [
-                                    {
-                                        "type": "text",
-                                        "text": serde_json::to_string_pretty(&result).unwrap_or_else(|_| result.to_string())
-                                    }
-                                ]
-                            })
-                        }
-                        Err(e) => {
-                            error!("Failed to execute tool '{}': {}", tool_name, e);
-                            serde_json::json!({
-                                "content": [
-                                    {
-                                        "type": "text",
-                                        "text": format!("Tool execution error: {}", e)
-                                    }
-                                ]
-                            })
-                        }
-                    }
-                } else {
-                    let error_response = JsonRpcResponse {
-                        jsonrpc: "2.0".to_string(),
-                        id: request.id,
-                        result: None,
-                        error: Some(JsonRpcError {
-                            code: -32602,
-                            message: "Missing tool name in parameters".to_string(),
-                        }),
-                    };
-                    return (StatusCode::BAD_REQUEST, Json(error_response));
-                }
-            } else {
-                let error_response = JsonRpcResponse {
-                    jsonrpc: "2.0".to_string(),
-                    id: request.id,
-                    result: None,
-                    error: Some(JsonRpcError {
-                        code: -32602,
-                        message: "Missing parameters for tool call".to_string(),
-                    }),
-                };
-                return (StatusCode::BAD_REQUEST, Json(error_response));
-            }
-        }
-        _ => {
-            let error_response = JsonRpcResponse {
-                jsonrpc: "2.0".to_string(),
-                id: request.id,
-                result: None,
-                error: Some(JsonRpcError {
-                    code: -32601,
-                    message: "Method not found".to_string(),
-                }),
-            };
-            return (StatusCode::OK, Json(error_response));
+            });
+            return (StatusCode::INTERNAL_SERVER_ERROR, Json(error_response));
         }
     };
 
-    if request.id.is_none() {
-        return (
-            StatusCode::NO_CONTENT,
-            Json(JsonRpcResponse {
-                jsonrpc: "2.0".to_string(),
-                id: None,
-                result: None,
-                error: None,
-            }),
-        );
+    match serde_json::from_str::<serde_json::Value>(&response_str) {
+        Ok(response_json) => (StatusCode::OK, Json(response_json)),
+        Err(e) => {
+            let error_response = serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": null,
+                "error": {
+                    "code": -32603,
+                    "message": format!("Failed to parse Python response: {}", e)
+                }
+            });
+            (StatusCode::INTERNAL_SERVER_ERROR, Json(error_response))
+        }
     }
-
-    let response = JsonRpcResponse {
-        jsonrpc: "2.0".to_string(),
-        id: request.id,
-        result: Some(result),
-        error: None,
-    };
-
-    (StatusCode::OK, Json(response))
 }
 
 async fn update_mcp_endpoint(
