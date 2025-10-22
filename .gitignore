@@ -27,3 +27,5 @@ src/tests/dump-test
 config-dev.yaml
 *.html
 *.tar.gz
+
+.venv
