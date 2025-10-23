@@ -340,6 +340,27 @@ impl CollectionReader {
         Ok(())
     }
 
+    pub async fn clean_up(&self) -> Result<()> {
+        let indexes_lock = self.indexes.read("clean_up").await;
+
+        let indexes_dir = self.data_dir.join("indexes");
+        for index in indexes_lock.iter() {
+            let dir = indexes_dir.join(index.id().as_str());
+            index.clean_up(dir).await?;
+        }
+        drop(indexes_lock);
+
+        let temp_indexes_lock = self.temp_indexes.read("clean_up").await;
+        let temp_indexes_dir = self.data_dir.join("temp_indexes");
+        for index in temp_indexes_lock.iter() {
+            let dir = temp_indexes_dir.join(index.id().as_str());
+            index.clean_up(dir).await?;
+        }
+        drop(temp_indexes_lock);
+
+        Ok(())
+    }
+
     #[inline]
     pub fn id(&self) -> CollectionId {
         self.id

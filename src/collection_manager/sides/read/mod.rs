@@ -304,6 +304,8 @@ impl ReadSide {
             .write_json_data(&ReadInfo::V1(ReadInfoV1 { offset }))
             .context("Cannot write read.info file")?;
 
+        self.collections.clean_up().await?;
+
         **commit_insert_mutex_lock = offset;
 
         drop(commit_insert_mutex_lock);

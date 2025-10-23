@@ -440,4 +440,6 @@ async fn test_unchanged_field_path_after_reload() {
         .unwrap();
 
     assert_eq!(result.count, 2);
+
+    drop(test_context);
 }

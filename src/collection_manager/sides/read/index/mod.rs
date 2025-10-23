@@ -371,6 +371,7 @@ impl Index {
         offset: Offset,
         collection_id: CollectionId,
     ) -> Result<()> {
+        println!("COMMIT {}", offset.0);
         debug!("Starting to commit index {:?}", self.id);
 
         let data_dir_with_offset = data_dir.join(format!("offset-{}", offset.0));
@@ -420,6 +421,8 @@ impl Index {
         if !something_to_commit && !is_promoted && !is_new {
             // Nothing to commit
             debug!("Nothing to commit {:?}", self.id);
+
+            println!("NOPE");
 
             self.try_unload_fields().await;
 
@@ -697,6 +700,18 @@ impl Index {
         for (field_id, merged) in merged_bools {
             match merged {
                 MergeResult::Changed(merged) => {
+                    #[cfg(debug_assertions)]
+                    {
+                        let data_dir = merged.get_field_info().data_dir;
+                        let offset_str = data_dir.components().rev().skip(1).next()
+                            .unwrap();
+                        assert_eq!(
+                            offset_str.as_os_str().to_str().unwrap(),
+                            &format!("offset-{}", offset.0),
+                            "Vector field data dir offset mismatch after commit"
+                        );
+                        assert!(std::fs::exists(data_dir).unwrap());
+                    }
                     committed_fields.bool_fields.insert(field_id, merged);
                 }
                 MergeResult::Unchanged => {}
@@ -708,6 +723,18 @@ impl Index {
         for (field_id, merged) in merged_numbers {
             match merged {
                 MergeResult::Changed(merged) => {
+                    #[cfg(debug_assertions)]
+                    {
+                        let data_dir = merged.get_field_info().data_dir;
+                        let offset_str = data_dir.components().rev().skip(1).next()
+                            .unwrap();
+                        assert_eq!(
+                            offset_str.as_os_str().to_str().unwrap(),
+                            &format!("offset-{}", offset.0),
+                            "Vector field data dir offset mismatch after commit"
+                        );
+                        assert!(std::fs::exists(data_dir).unwrap());
+                    }
                     committed_fields.number_fields.insert(field_id, merged);
                 }
                 MergeResult::Unchanged => {}
@@ -719,6 +746,18 @@ impl Index {
         for (field_id, merged) in merged_dates {
             match merged {
                 MergeResult::Changed(merged) => {
+                    #[cfg(debug_assertions)]
+                    {
+                        let data_dir = merged.get_field_info().data_dir;
+                        let offset_str = data_dir.components().rev().skip(1).next()
+                            .unwrap();
+                        assert_eq!(
+                            offset_str.as_os_str().to_str().unwrap(),
+                            &format!("offset-{}", offset.0),
+                            "Vector field data dir offset mismatch after commit"
+                        );
+                        assert!(std::fs::exists(data_dir).unwrap());
+                    }
                     committed_fields.date_fields.insert(field_id, merged);
                 }
                 MergeResult::Unchanged => {}
@@ -730,6 +769,18 @@ impl Index {
         for (field_id, merged) in merged_geopoints {
             match merged {
                 MergeResult::Changed(merged) => {
+                    #[cfg(debug_assertions)]
+                    {
+                        let data_dir = merged.get_field_info().data_dir;
+                        let offset_str = data_dir.components().rev().skip(1).next()
+                            .unwrap();
+                        assert_eq!(
+                            offset_str.as_os_str().to_str().unwrap(),
+                            &format!("offset-{}", offset.0),
+                            "Vector field data dir offset mismatch after commit"
+                        );
+                        assert!(std::fs::exists(data_dir).unwrap());
+                    }
                     committed_fields.geopoint_fields.insert(field_id, merged);
                 }
                 MergeResult::Unchanged => {}
@@ -741,6 +792,18 @@ impl Index {
         for (field_id, merged) in merged_string_filters {
             match merged {
                 MergeResult::Changed(merged) => {
+                    #[cfg(debug_assertions)]
+                    {
+                        let data_dir = merged.get_field_info().data_dir;
+                        let offset_str = data_dir.components().rev().skip(1).next()
+                            .unwrap();
+                        assert_eq!(
+                            offset_str.as_os_str().to_str().unwrap(),
+                            &format!("offset-{}", offset.0),
+                            "Vector field data dir offset mismatch after commit"
+                        );
+                        assert!(std::fs::exists(data_dir).unwrap());
+                    }
                     committed_fields
                         .string_filter_fields
                         .insert(field_id, merged);
@@ -754,6 +817,18 @@ impl Index {
         for (field_id, merged) in merged_strings {
             match merged {
                 MergeResult::Changed(merged) => {
+                    #[cfg(debug_assertions)]
+                    {
+                        let data_dir = merged.get_field_info().data_dir;
+                        let offset_str = data_dir.components().rev().skip(1).next()
+                            .unwrap();
+                        assert_eq!(
+                            offset_str.as_os_str().to_str().unwrap(),
+                            &format!("offset-{}", offset.0),
+                            "Vector field data dir offset mismatch after commit"
+                        );
+                        assert!(std::fs::exists(data_dir).unwrap());
+                    }
                     committed_fields.string_fields.insert(field_id, merged);
                 }
                 MergeResult::Unchanged => {}
@@ -765,6 +840,18 @@ impl Index {
         for (field_id, merged) in merged_vectors {
             match merged {
                 MergeResult::Changed(merged) => {
+                    #[cfg(debug_assertions)]
+                    {
+                        let data_dir = merged.get_field_info().data_dir;
+                        let offset_str = data_dir.components().rev().skip(1).next()
+                            .unwrap();
+                        assert_eq!(
+                            offset_str.as_os_str().to_str().unwrap(),
+                            &format!("offset-{}", offset.0),
+                            "Vector field data dir offset mismatch after commit"
+                        );
+                        assert!(std::fs::exists(data_dir).unwrap());
+                    }
                     committed_fields.vector_fields.insert(field_id, merged);
                 }
                 MergeResult::Unchanged => {}
@@ -821,6 +908,96 @@ impl Index {
             enum_strategy: self.enum_strategy,
         });
 
+        for field in committed_fields.bool_fields.values() {
+            assert!(std::fs::exists(field.get_field_info().data_dir).unwrap());
+            if is_promoted {
+                assert!(field.get_field_info().data_dir.components().find(|c| c.as_os_str() == "temp_indexes").is_none());
+            }
+            assert!(field.get_field_info().data_dir.as_os_str().to_str().unwrap().contains(&format!("{}", offset.0)));
+        }
+        for field in committed_fields.number_fields.values() {
+            assert!(std::fs::exists(field.get_field_info().data_dir).unwrap());
+            if is_promoted {
+                assert!(field.get_field_info().data_dir.components().find(|c| c.as_os_str() == "temp_indexes").is_none());
+            }
+            assert!(field.get_field_info().data_dir.as_os_str().to_str().unwrap().contains(&format!("{}", offset.0)));
+        }
+        for field in committed_fields.date_fields.values() {
+            assert!(std::fs::exists(field.get_field_info().data_dir).unwrap());
+            if is_promoted {
+                assert!(field.get_field_info().data_dir.components().find(|c| c.as_os_str() == "temp_indexes").is_none());
+            }
+            assert!(field.get_field_info().data_dir.as_os_str().to_str().unwrap().contains(&format!("{}", offset.0)));
+        }
+        for field in committed_fields.geopoint_fields.values() {
+            assert!(std::fs::exists(field.get_field_info().data_dir).unwrap());
+            if is_promoted {
+                assert!(field.get_field_info().data_dir.components().find(|c| c.as_os_str() == "temp_indexes").is_none());
+            }
+            assert!(field.get_field_info().data_dir.as_os_str().to_str().unwrap().contains(&format!("{}", offset.0)));
+        }
+        for field in committed_fields.string_fields.values() {
+            assert!(std::fs::exists(field.get_field_info().data_dir).unwrap());
+            if is_promoted {
+                assert!(field.get_field_info().data_dir.components().find(|c| c.as_os_str() == "temp_indexes").is_none());
+            }
+            assert!(field.get_field_info().data_dir.as_os_str().to_str().unwrap().contains(&format!("{}", offset.0)));
+        }
+        for field in committed_fields.vector_fields.values() {
+            assert!(std::fs::exists(field.get_field_info().data_dir).unwrap());
+            if is_promoted {
+                assert!(field.get_field_info().data_dir.components().find(|c| c.as_os_str() == "temp_indexes").is_none());
+            }
+            assert!(field.get_field_info().data_dir.as_os_str().to_str().unwrap().contains(&format!("{}", offset.0)));
+        }
+
+
+        let qq = committed_fields.string_filter_fields.get(&FieldId(1))
+            .unwrap()
+            .get_field_info();
+        println!("STRING FILTER FIELD INFO AFTER COMMIT: {:#?}", qq);
+        let a: HashMap<FieldId, PathBuf> = committed_fields
+            .bool_fields
+            .iter()
+            .map(|(k, v)| (*k, v.get_field_info().data_dir))
+            .chain(
+                committed_fields
+                    .number_fields
+                    .iter()
+                    .map(|(k, v)| (*k, v.get_field_info().data_dir)),
+            )
+            .chain(
+                committed_fields
+                    .string_filter_fields
+                    .iter()
+                    .map(|(k, v)| (*k, v.get_field_info().data_dir)),
+            )
+            .chain(
+                committed_fields
+                    .date_fields
+                    .iter()
+                    .map(|(k, v)| (*k, v.get_field_info().data_dir)),
+            )
+            .chain(
+                committed_fields.geopoint_fields.iter()
+                    .map(|(k, v)| (*k, v.get_field_info().data_dir)),
+            )
+            .chain(
+                committed_fields
+                    .string_fields
+                    .iter()
+                    .map(|(k, v)| (*k, v.get_field_info().data_dir)),
+            )
+            .chain(
+                committed_fields
+                    .vector_fields
+                    .iter()
+                    .map(|(k, v)| (*k, v.get_field_info().data_dir)),
+            )
+            .collect();
+        println!("COMMITTED FIELDS PATHS: {:#?}", a);
+        println!("COMMITTED FIELDS COUNT: {:#?}", dump);
+
         drop(uncommitted_fields);
         drop(committed_fields);
 
@@ -845,6 +1022,150 @@ impl Index {
         drop(total_m);
 
         debug!("Index committed: {:?}", self.id);
+
+        Ok(())
+    }
+
+    pub async fn clean_up(&self, index_data_dir: PathBuf) -> Result<()> {
+        println!("CLEAN UP");
+        let committed_fields = self.committed_fields.read("clean_up").await;
+
+        let a = std::fs::read_to_string(index_data_dir.join("index.json")).unwrap();
+        println!("INDEX.JSON: {}", a);
+
+        let bb = committed_fields
+            .string_filter_fields.get(&FieldId(1))
+            .unwrap()
+            .get_field_info();
+        println!("STRING FILTER FIELD INFO: {:#?}", bb);
+
+        let a: HashMap<FieldId, PathBuf> = committed_fields
+            .bool_fields
+            .iter()
+            .map(|(k, v)| (*k, v.get_field_info().data_dir))
+            .chain(
+                committed_fields
+                    .number_fields
+                    .iter()
+                    .map(|(k, v)| (*k, v.get_field_info().data_dir)),
+            )
+            .chain(
+                committed_fields
+                    .string_filter_fields
+                    .iter()
+                    .map(|(k, v)| (*k, v.get_field_info().data_dir)),
+            )
+            .chain(
+                committed_fields
+                    .date_fields
+                    .iter()
+                    .map(|(k, v)| (*k, v.get_field_info().data_dir)),
+            )
+            .chain(
+                committed_fields.geopoint_fields.iter()
+                    .map(|(k, v)| (*k, v.get_field_info().data_dir)),
+            )
+            .chain(
+                committed_fields
+                    .string_fields
+                    .iter()
+                    .map(|(k, v)| (*k, v.get_field_info().data_dir)),
+            )
+            .chain(
+                committed_fields
+                    .vector_fields
+                    .iter()
+                    .map(|(k, v)| (*k, v.get_field_info().data_dir)),
+            )
+            .collect();
+
+        let www: HashSet<_> = committed_fields
+            .bool_fields
+            .values()
+            .map(|f| f.get_field_info().data_dir)
+            .chain(
+                committed_fields
+                    .number_fields
+                    .values()
+                    .map(|f| f.get_field_info().data_dir),
+            )
+            .chain(
+                committed_fields
+                    .string_filter_fields
+                    .values()
+                    .map(|f| f.get_field_info().data_dir),
+            )
+            .chain(
+                committed_fields
+                    .date_fields
+                    .values()
+                    .map(|f| f.get_field_info().data_dir),
+            )
+            .chain(
+                committed_fields.geopoint_fields.values()
+                    .map(|f| f.get_field_info().data_dir),
+            )
+            .chain(
+                committed_fields
+                    .string_fields
+                    .values()
+                    .map(|f| f.get_field_info().data_dir),
+            )
+            .chain(
+                committed_fields
+                    .vector_fields
+                    .values()
+                    .map(|f| f.get_field_info().data_dir),
+            )
+            .map(|f| f.parent().unwrap().to_path_buf())
+            .collect();
+
+        let subfolders = match std::fs::read_dir(index_data_dir) {
+            Ok(a) => a,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                // No data dir, nothing to clean
+                return Ok(());
+            }
+            Err(e) => {
+                return Err(anyhow::anyhow!(
+                    "Cannot read index data dir for cleanup: {:?}",
+                    e
+                ));
+            }
+        };
+        let subfolders: Result<Vec<_>, _> = subfolders.collect();
+
+        let subfolders = subfolders
+            .context("Cannot read entry in index folder")?;
+
+        println!("\n\n");
+        println!("Used data dirs by fields: {:#?}", www);
+        println!("Entries in index data dir: {:#?}", subfolders);
+        println!("Per fieldId: {:#?}", a);
+
+        for entry in subfolders {
+            let a = entry.file_type()
+                .context("Cannot get file type")?;
+            if !a.is_dir() {
+                continue;
+            }
+
+            if www.contains(&entry.path()) {
+                continue;
+            }
+
+            if !entry.file_name().to_str().unwrap().starts_with("offset-") {
+                continue;
+            }
+
+            println!(
+                "Removing unused index data folder: {:?}",
+                entry.path()
+            );
+            std::fs::remove_dir_all(entry.path())
+                .unwrap();
+        }
+        println!("\n\n");
 
         Ok(())
     }
@@ -886,6 +1207,7 @@ impl Index {
     }
 
     pub fn mark_as_deleted(&mut self, reason: DeletionReason) {
+        debug_assert!(self.deleted.is_none(), "Index is already deleted");
         self.deleted = Some(reason);
         self.updated_at = Utc::now();
     }

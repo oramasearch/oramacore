@@ -7,7 +7,7 @@ use tokio::time::sleep;
 use crate::tests::utils::{init_log, wait_for, TestContext};
 
 #[tokio::test(flavor = "multi_thread")]
-async fn test_index_replacement() {
+async fn test_index_replacement_1() {
     init_log();
 
     let test_context = TestContext::new().await;

@@ -184,6 +184,16 @@ impl CollectionsReader {
         Ok(())
     }
 
+    pub async fn clean_up(&self) -> Result<()> {
+        let collections = self.collections.read("clean_up").await;
+
+        for collection in collections.values() {
+            collection.clean_up().await?;
+        }
+
+        Ok(())
+    }
+
     pub async fn create_collection(
         &self,
         id: CollectionId,
