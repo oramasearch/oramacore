@@ -161,3 +161,46 @@ async fn test_collection_continue_commit() {
 
     drop(test_context);
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_collection_commit_partial_fields() {
+    init_log();
+    let test_context = TestContext::new().await;
+
+    let collection_client = test_context.create_collection().await.unwrap();
+    let index_client = collection_client.create_index().await.unwrap();
+
+    let doc = json!({
+        "text": "text",
+        "number": 0,
+        "boolean": 0 == 0,
+        "geo": {
+            "lat": 10.0 + 0 as f64,
+            "lon": 20.0 + 0 as f64,
+        },
+        "date": "2024-01-01T00:00:00Z",
+    });
+    index_client
+        .insert_documents(vec![doc.clone()].try_into().unwrap())
+        .await
+        .unwrap();
+    test_context.commit_all().await.unwrap();
+
+    let keys = doc.as_object().unwrap().keys().cloned().collect::<Vec<_>>();
+    for (i, key) in keys.into_iter().enumerate() {
+        let mut d = json!({});
+
+        let v = doc.get(&key).unwrap().clone();
+        d.as_object_mut().unwrap().insert(key, v);
+
+        index_client
+            .insert_documents(vec![d].try_into().unwrap())
+            .await
+            .unwrap();
+        test_context.commit_all().await.unwrap();
+    }
+
+    let test_context = test_context.reload().await;
+
+    drop(test_context);
+}
