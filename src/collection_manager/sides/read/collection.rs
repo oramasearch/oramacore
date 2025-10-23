@@ -353,7 +353,9 @@ impl CollectionReader {
         for index in indexes_lock.iter() {
             if !index.is_deleted() {
                 let dir = indexes_dir.join(index.id().as_str());
-                index.clean_up(dir).await
+                index
+                    .clean_up(dir)
+                    .await
                     .with_context(|| format!("index id {:?}", index.id()))?;
             }
         }
@@ -364,7 +366,9 @@ impl CollectionReader {
         for index in temp_indexes_lock.iter() {
             if !index.is_deleted() {
                 let dir = temp_indexes_dir.join(index.id().as_str());
-                index.clean_up(dir).await
+                index
+                    .clean_up(dir)
+                    .await
                     .with_context(|| format!("temp index id {:?}", index.id()))?;
             }
         }

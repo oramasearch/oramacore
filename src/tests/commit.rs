@@ -125,12 +125,12 @@ async fn test_collection_continue_commit() {
     for i in 0..4 {
         index_client
             .insert_documents(
-                vec![
-                    json!({
-                        "id": format!("{}", i),
-                        "text": "text",
-                    })
-                ].try_into().unwrap()
+                vec![json!({
+                    "id": format!("{}", i),
+                    "text": "text",
+                })]
+                .try_into()
+                .unwrap(),
             )
             .await
             .unwrap();
@@ -147,9 +147,13 @@ async fn test_collection_continue_commit() {
         .unwrap();
 
     let search_result = collection_client
-        .search(json!({
-            "term": "text",
-        }).try_into().unwrap())
+        .search(
+            json!({
+                "term": "text",
+            })
+            .try_into()
+            .unwrap(),
+        )
         .await
         .expect("Collection must exists");
 

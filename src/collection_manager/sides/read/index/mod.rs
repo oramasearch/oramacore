@@ -371,7 +371,6 @@ impl Index {
         offset: Offset,
         collection_id: CollectionId,
     ) -> Result<()> {
-        println!("COMMIT {}", offset.0);
         debug!("Starting to commit index {:?}", self.id);
 
         let data_dir_with_offset = data_dir.join(format!("offset-{}", offset.0));
@@ -421,8 +420,6 @@ impl Index {
         if !something_to_commit && !is_promoted && !is_new {
             // Nothing to commit
             debug!("Nothing to commit {:?}", self.id);
-
-            println!("NOPE");
 
             self.try_unload_fields().await;
 
@@ -703,8 +700,7 @@ impl Index {
                     #[cfg(debug_assertions)]
                     {
                         let data_dir = merged.get_field_info().data_dir;
-                        let offset_str = data_dir.components().rev().skip(1).next()
-                            .unwrap();
+                        let offset_str = data_dir.components().rev().nth(1).unwrap();
                         assert_eq!(
                             offset_str.as_os_str().to_str().unwrap(),
                             &format!("offset-{}", offset.0),
@@ -726,8 +722,7 @@ impl Index {
                     #[cfg(debug_assertions)]
                     {
                         let data_dir = merged.get_field_info().data_dir;
-                        let offset_str = data_dir.components().rev().skip(1).next()
-                            .unwrap();
+                        let offset_str = data_dir.components().rev().nth(1).unwrap();
                         assert_eq!(
                             offset_str.as_os_str().to_str().unwrap(),
                             &format!("offset-{}", offset.0),
@@ -749,8 +744,7 @@ impl Index {
                     #[cfg(debug_assertions)]
                     {
                         let data_dir = merged.get_field_info().data_dir;
-                        let offset_str = data_dir.components().rev().skip(1).next()
-                            .unwrap();
+                        let offset_str = data_dir.components().rev().nth(1).unwrap();
                         assert_eq!(
                             offset_str.as_os_str().to_str().unwrap(),
                             &format!("offset-{}", offset.0),
@@ -772,8 +766,7 @@ impl Index {
                     #[cfg(debug_assertions)]
                     {
                         let data_dir = merged.get_field_info().data_dir;
-                        let offset_str = data_dir.components().rev().skip(1).next()
-                            .unwrap();
+                        let offset_str = data_dir.components().rev().nth(1).unwrap();
                         assert_eq!(
                             offset_str.as_os_str().to_str().unwrap(),
                             &format!("offset-{}", offset.0),
@@ -795,8 +788,7 @@ impl Index {
                     #[cfg(debug_assertions)]
                     {
                         let data_dir = merged.get_field_info().data_dir;
-                        let offset_str = data_dir.components().rev().skip(1).next()
-                            .unwrap();
+                        let offset_str = data_dir.components().rev().nth(1).unwrap();
                         assert_eq!(
                             offset_str.as_os_str().to_str().unwrap(),
                             &format!("offset-{}", offset.0),
@@ -820,8 +812,7 @@ impl Index {
                     #[cfg(debug_assertions)]
                     {
                         let data_dir = merged.get_field_info().data_dir;
-                        let offset_str = data_dir.components().rev().skip(1).next()
-                            .unwrap();
+                        let offset_str = data_dir.components().rev().nth(1).unwrap();
                         assert_eq!(
                             offset_str.as_os_str().to_str().unwrap(),
                             &format!("offset-{}", offset.0),
@@ -843,8 +834,7 @@ impl Index {
                     #[cfg(debug_assertions)]
                     {
                         let data_dir = merged.get_field_info().data_dir;
-                        let offset_str = data_dir.components().rev().skip(1).next()
-                            .unwrap();
+                        let offset_str = data_dir.components().rev().nth(1).unwrap();
                         assert_eq!(
                             offset_str.as_os_str().to_str().unwrap(),
                             &format!("offset-{}", offset.0),
@@ -937,6 +927,7 @@ impl Index {
     }
 
     pub async fn clean_up(&self, index_data_dir: PathBuf) -> Result<()> {
+        info!("Clean up");
         let committed_fields = self.committed_fields.read("clean_up").await;
 
         let field_data_dirs: HashSet<_> = committed_fields
@@ -962,7 +953,9 @@ impl Index {
                     .map(|f| f.get_field_info().data_dir),
             )
             .chain(
-                committed_fields.geopoint_fields.values()
+                committed_fields
+                    .geopoint_fields
+                    .values()
                     .map(|f| f.get_field_info().data_dir),
             )
             .chain(
@@ -995,12 +988,10 @@ impl Index {
         };
         let subfolders: Result<Vec<_>, _> = subfolders.collect();
 
-        let subfolders = subfolders
-            .context("Cannot read entry in index folder")?;
+        let subfolders = subfolders.context("Cannot read entry in index folder")?;
 
         for entry in subfolders {
-            let a = entry.file_type()
-                .context("Cannot get file type")?;
+            let a = entry.file_type().context("Cannot get file type")?;
             if !a.is_dir() {
                 continue;
             }
@@ -1013,12 +1004,8 @@ impl Index {
                 continue;
             }
 
-            info!(
-                "Removing unused index data folder: {:?}",
-                entry.path()
-            );
-            std::fs::remove_dir_all(entry.path())
-                .unwrap();
+            info!("Removing unused index data folder: {:?}", entry.path());
+            std::fs::remove_dir_all(entry.path()).unwrap();
         }
 
         Ok(())

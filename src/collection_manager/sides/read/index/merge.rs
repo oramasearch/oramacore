@@ -341,13 +341,9 @@ pub fn merge_string_filter_field(
                         // Instead we should... ???? WHAT?
                         // TODO: check if this is the right way to do it
                         .overwrite(true);
-                    copy_items(&[old_dir.clone()], data_dir.parent().unwrap(), &options)?;
+                    copy_items(&[old_dir], data_dir.parent().unwrap(), &options)?;
                     // And move the field to the new directory
-                    info.data_dir = data_dir.clone();
-
-                    println!("old_dir: {:?}", old_dir);
-                    println!("new_dir: {:?}", data_dir);
-
+                    info.data_dir = data_dir;
 
                     return Ok(Some(
                         CommittedStringFilterField::try_load(info)
@@ -451,13 +447,10 @@ pub fn merge_bool_field(
                         // Instead we should... ???? WHAT?
                         // TODO: check if this is the right way to do it
                         .overwrite(true);
-                    copy_items(&[old_dir.clone()], data_dir.parent().unwrap(), &options)?;
+                    copy_items(&[old_dir], data_dir.parent().unwrap(), &options)?;
                     // And move the field to the new directory
-                    info.data_dir = data_dir.clone();
+                    info.data_dir = data_dir;
                     info!("  -> Updated info.data_dir to: {:?}", info.data_dir);
-
-                    println!("old_dir: {:?}", old_dir);
-                    println!("new_dir: {:?}", data_dir);
 
                     return Ok(Some(
                         CommittedBoolField::try_load(info)

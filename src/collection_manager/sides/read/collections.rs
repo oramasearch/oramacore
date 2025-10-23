@@ -188,7 +188,9 @@ impl CollectionsReader {
         let collections = self.collections.read("clean_up").await;
 
         for collection in collections.values() {
-            collection.clean_up().await
+            collection
+                .clean_up()
+                .await
                 .with_context(|| format!("collection {:?}", collection.id()))?;
         }
 
