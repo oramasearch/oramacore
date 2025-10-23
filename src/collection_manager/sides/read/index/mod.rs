@@ -927,7 +927,6 @@ impl Index {
     }
 
     pub async fn clean_up(&self, index_data_dir: PathBuf) -> Result<()> {
-        info!("Clean up");
         let committed_fields = self.committed_fields.read("clean_up").await;
 
         let field_data_dirs: HashSet<_> = committed_fields
@@ -1005,7 +1004,8 @@ impl Index {
             }
 
             info!("Removing unused index data folder: {:?}", entry.path());
-            std::fs::remove_dir_all(entry.path()).unwrap();
+            std::fs::remove_dir_all(entry.path())
+                .context("Cannot remove path")?;
         }
 
         Ok(())
