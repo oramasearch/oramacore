@@ -908,96 +908,6 @@ impl Index {
             enum_strategy: self.enum_strategy,
         });
 
-        for field in committed_fields.bool_fields.values() {
-            assert!(std::fs::exists(field.get_field_info().data_dir).unwrap());
-            if is_promoted {
-                assert!(field.get_field_info().data_dir.components().find(|c| c.as_os_str() == "temp_indexes").is_none());
-            }
-            assert!(field.get_field_info().data_dir.as_os_str().to_str().unwrap().contains(&format!("{}", offset.0)));
-        }
-        for field in committed_fields.number_fields.values() {
-            assert!(std::fs::exists(field.get_field_info().data_dir).unwrap());
-            if is_promoted {
-                assert!(field.get_field_info().data_dir.components().find(|c| c.as_os_str() == "temp_indexes").is_none());
-            }
-            assert!(field.get_field_info().data_dir.as_os_str().to_str().unwrap().contains(&format!("{}", offset.0)));
-        }
-        for field in committed_fields.date_fields.values() {
-            assert!(std::fs::exists(field.get_field_info().data_dir).unwrap());
-            if is_promoted {
-                assert!(field.get_field_info().data_dir.components().find(|c| c.as_os_str() == "temp_indexes").is_none());
-            }
-            assert!(field.get_field_info().data_dir.as_os_str().to_str().unwrap().contains(&format!("{}", offset.0)));
-        }
-        for field in committed_fields.geopoint_fields.values() {
-            assert!(std::fs::exists(field.get_field_info().data_dir).unwrap());
-            if is_promoted {
-                assert!(field.get_field_info().data_dir.components().find(|c| c.as_os_str() == "temp_indexes").is_none());
-            }
-            assert!(field.get_field_info().data_dir.as_os_str().to_str().unwrap().contains(&format!("{}", offset.0)));
-        }
-        for field in committed_fields.string_fields.values() {
-            assert!(std::fs::exists(field.get_field_info().data_dir).unwrap());
-            if is_promoted {
-                assert!(field.get_field_info().data_dir.components().find(|c| c.as_os_str() == "temp_indexes").is_none());
-            }
-            assert!(field.get_field_info().data_dir.as_os_str().to_str().unwrap().contains(&format!("{}", offset.0)));
-        }
-        for field in committed_fields.vector_fields.values() {
-            assert!(std::fs::exists(field.get_field_info().data_dir).unwrap());
-            if is_promoted {
-                assert!(field.get_field_info().data_dir.components().find(|c| c.as_os_str() == "temp_indexes").is_none());
-            }
-            assert!(field.get_field_info().data_dir.as_os_str().to_str().unwrap().contains(&format!("{}", offset.0)));
-        }
-
-
-        let qq = committed_fields.string_filter_fields.get(&FieldId(1))
-            .unwrap()
-            .get_field_info();
-        println!("STRING FILTER FIELD INFO AFTER COMMIT: {:#?}", qq);
-        let a: HashMap<FieldId, PathBuf> = committed_fields
-            .bool_fields
-            .iter()
-            .map(|(k, v)| (*k, v.get_field_info().data_dir))
-            .chain(
-                committed_fields
-                    .number_fields
-                    .iter()
-                    .map(|(k, v)| (*k, v.get_field_info().data_dir)),
-            )
-            .chain(
-                committed_fields
-                    .string_filter_fields
-                    .iter()
-                    .map(|(k, v)| (*k, v.get_field_info().data_dir)),
-            )
-            .chain(
-                committed_fields
-                    .date_fields
-                    .iter()
-                    .map(|(k, v)| (*k, v.get_field_info().data_dir)),
-            )
-            .chain(
-                committed_fields.geopoint_fields.iter()
-                    .map(|(k, v)| (*k, v.get_field_info().data_dir)),
-            )
-            .chain(
-                committed_fields
-                    .string_fields
-                    .iter()
-                    .map(|(k, v)| (*k, v.get_field_info().data_dir)),
-            )
-            .chain(
-                committed_fields
-                    .vector_fields
-                    .iter()
-                    .map(|(k, v)| (*k, v.get_field_info().data_dir)),
-            )
-            .collect();
-        println!("COMMITTED FIELDS PATHS: {:#?}", a);
-        println!("COMMITTED FIELDS COUNT: {:#?}", dump);
-
         drop(uncommitted_fields);
         drop(committed_fields);
 
@@ -1027,59 +937,9 @@ impl Index {
     }
 
     pub async fn clean_up(&self, index_data_dir: PathBuf) -> Result<()> {
-        println!("CLEAN UP");
         let committed_fields = self.committed_fields.read("clean_up").await;
 
-        let a = std::fs::read_to_string(index_data_dir.join("index.json")).unwrap();
-        println!("INDEX.JSON: {}", a);
-
-        let bb = committed_fields
-            .string_filter_fields.get(&FieldId(1))
-            .unwrap()
-            .get_field_info();
-        println!("STRING FILTER FIELD INFO: {:#?}", bb);
-
-        let a: HashMap<FieldId, PathBuf> = committed_fields
-            .bool_fields
-            .iter()
-            .map(|(k, v)| (*k, v.get_field_info().data_dir))
-            .chain(
-                committed_fields
-                    .number_fields
-                    .iter()
-                    .map(|(k, v)| (*k, v.get_field_info().data_dir)),
-            )
-            .chain(
-                committed_fields
-                    .string_filter_fields
-                    .iter()
-                    .map(|(k, v)| (*k, v.get_field_info().data_dir)),
-            )
-            .chain(
-                committed_fields
-                    .date_fields
-                    .iter()
-                    .map(|(k, v)| (*k, v.get_field_info().data_dir)),
-            )
-            .chain(
-                committed_fields.geopoint_fields.iter()
-                    .map(|(k, v)| (*k, v.get_field_info().data_dir)),
-            )
-            .chain(
-                committed_fields
-                    .string_fields
-                    .iter()
-                    .map(|(k, v)| (*k, v.get_field_info().data_dir)),
-            )
-            .chain(
-                committed_fields
-                    .vector_fields
-                    .iter()
-                    .map(|(k, v)| (*k, v.get_field_info().data_dir)),
-            )
-            .collect();
-
-        let www: HashSet<_> = committed_fields
+        let field_data_dirs: HashSet<_> = committed_fields
             .bool_fields
             .values()
             .map(|f| f.get_field_info().data_dir)
@@ -1138,11 +998,6 @@ impl Index {
         let subfolders = subfolders
             .context("Cannot read entry in index folder")?;
 
-        println!("\n\n");
-        println!("Used data dirs by fields: {:#?}", www);
-        println!("Entries in index data dir: {:#?}", subfolders);
-        println!("Per fieldId: {:#?}", a);
-
         for entry in subfolders {
             let a = entry.file_type()
                 .context("Cannot get file type")?;
@@ -1150,7 +1005,7 @@ impl Index {
                 continue;
             }
 
-            if www.contains(&entry.path()) {
+            if field_data_dirs.contains(&entry.path()) {
                 continue;
             }
 
@@ -1158,14 +1013,13 @@ impl Index {
                 continue;
             }
 
-            println!(
+            info!(
                 "Removing unused index data folder: {:?}",
                 entry.path()
             );
             std::fs::remove_dir_all(entry.path())
                 .unwrap();
         }
-        println!("\n\n");
 
         Ok(())
     }

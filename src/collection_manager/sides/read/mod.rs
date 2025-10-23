@@ -304,7 +304,9 @@ impl ReadSide {
             .write_json_data(&ReadInfo::V1(ReadInfoV1 { offset }))
             .context("Cannot write read.info file")?;
 
-        self.collections.clean_up().await?;
+        if let Err(e) = self.collections.clean_up().await {
+            error!(error = ?e, "Cannot clean up collections during commit. Do it manually later.");
+        }
 
         **commit_insert_mutex_lock = offset;
 
