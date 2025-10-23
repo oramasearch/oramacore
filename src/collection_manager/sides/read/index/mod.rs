@@ -1004,8 +1004,7 @@ impl Index {
             }
 
             info!("Removing unused index data folder: {:?}", entry.path());
-            std::fs::remove_dir_all(entry.path())
-                .context("Cannot remove path")?;
+            std::fs::remove_dir_all(entry.path()).context("Cannot remove path")?;
         }
 
         Ok(())
