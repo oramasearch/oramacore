@@ -340,6 +340,43 @@ impl CollectionReader {
         Ok(())
     }
 
+    pub async fn clean_up(&self) -> Result<()> {
+        // Skip deleted index is important because when we replace an index,
+        // with a temp one, the old index is marked as deleted.
+        // In this situation, the old index and the new index share the same data dir.
+        // Anyway the old index has an old offset, so during the clean up,
+        // it will remove data that are still used by the new index.
+
+        let indexes_lock = self.indexes.read("clean_up").await;
+
+        let indexes_dir = self.data_dir.join("indexes");
+        for index in indexes_lock.iter() {
+            if !index.is_deleted() {
+                let dir = indexes_dir.join(index.id().as_str());
+                index
+                    .clean_up(dir)
+                    .await
+                    .with_context(|| format!("index id {:?}", index.id()))?;
+            }
+        }
+        drop(indexes_lock);
+
+        let temp_indexes_lock = self.temp_indexes.read("clean_up").await;
+        let temp_indexes_dir = self.data_dir.join("temp_indexes");
+        for index in temp_indexes_lock.iter() {
+            if !index.is_deleted() {
+                let dir = temp_indexes_dir.join(index.id().as_str());
+                index
+                    .clean_up(dir)
+                    .await
+                    .with_context(|| format!("temp index id {:?}", index.id()))?;
+            }
+        }
+        drop(temp_indexes_lock);
+
+        Ok(())
+    }
+
     #[inline]
     pub fn id(&self) -> CollectionId {
         self.id

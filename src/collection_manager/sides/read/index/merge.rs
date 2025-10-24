@@ -449,7 +449,7 @@ pub fn merge_bool_field(
                         .overwrite(true);
                     copy_items(&[old_dir], data_dir.parent().unwrap(), &options)?;
                     // And move the field to the new directory
-                    info.data_dir = data_dir.clone();
+                    info.data_dir = data_dir;
                     info!("  -> Updated info.data_dir to: {:?}", info.data_dir);
 
                     return Ok(Some(
