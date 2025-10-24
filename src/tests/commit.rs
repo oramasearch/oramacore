@@ -187,7 +187,7 @@ async fn test_collection_commit_partial_fields() {
     test_context.commit_all().await.unwrap();
 
     let keys = doc.as_object().unwrap().keys().cloned().collect::<Vec<_>>();
-    for (i, key) in keys.into_iter().enumerate() {
+    for key in keys {
         let mut d = json!({});
 
         let v = doc.get(&key).unwrap().clone();
