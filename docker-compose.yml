@@ -10,18 +10,6 @@ services:
       - ./config-docker.yaml:/app/config.yaml
     ports:
       - "8080:8080"
-    depends_on:
-      - python-ai-server
-      - vllm
-    restart: unless-stopped
-
-  python-ai-server:
-    build:
-      context: ./src/ai_server
-    volumes:
-      - ./config-docker.yaml:/config.yaml
-    ports:
-      - "50051:50051"
     deploy:
       resources:
         reservations:
@@ -29,6 +17,9 @@ services:
             - driver: nvidia
               count: 1
               capabilities: [ gpu ]
+    depends_on:
+      - python-ai-server
+      - vllm
     restart: unless-stopped
 
   vllm:

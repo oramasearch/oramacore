@@ -66,7 +66,7 @@ async fn test_answer() {
         system_prompt_id: None,
         ragat_notation: None,
         related: None,
-        search_mode: None,
+        search_mode: Some("fulltext".to_string()),
         visitor_id: "the-visitor-id".to_string(),
     };
 

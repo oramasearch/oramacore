@@ -3,7 +3,6 @@ mod collections;
 pub mod document_storage;
 mod embedding;
 pub mod index;
-pub use index::OramaModelSerializable;
 use oramacore_lib::hook_storage::{HookWriter, HookWriterError};
 use oramacore_lib::nlp::NLPService;
 use thiserror::Error;
@@ -45,13 +44,13 @@ pub use context::WriteSideContext;
 
 use crate::collection_manager::sides::write::document_storage::ZeboDocument;
 use crate::lock::OramaAsyncLock;
+use crate::python::embeddings::{EmbeddingsService, Model};
 use crate::{
     ai::{
         automatic_embeddings_selector::AutomaticEmbeddingsSelector,
         llms::LLMService,
         tools::{CollectionToolsRuntime, ToolsRuntime},
         training_sets::TrainingSetInterface,
-        AIService, OramaModel,
     },
     collection_manager::sides::{
         system_prompts::CollectionSystemPromptsInterface,
@@ -110,7 +109,7 @@ pub struct CollectionsWriterConfig {
     #[serde(default = "embedding_queue_limit_default")]
     pub embedding_queue_limit: u32,
     #[serde(default = "embedding_model_default")]
-    pub default_embedding_model: OramaModelSerializable,
+    pub default_embedding_model: Model,
     #[serde(default = "default_insert_batch_commit_size")]
     pub insert_batch_commit_size: u64,
     #[serde(default = "javascript_queue_limit_default")]
@@ -164,16 +163,18 @@ pub struct WriteSide {
     write_operation_counter: AtomicU32,
 
     jwt_manager: JwtManager,
+
+    embeddings_service: Arc<EmbeddingsService>,
 }
 
 impl WriteSide {
     pub async fn try_load(
         op_sender_creator: OperationSenderCreator,
         config: WriteSideConfig,
-        ai_service: Arc<AIService>,
         nlp_service: Arc<NLPService>,
         llm_service: Arc<LLMService>,
         automatic_embeddings_selector: Arc<AutomaticEmbeddingsSelector>,
+        embeddings_service: Arc<EmbeddingsService>,
     ) -> Result<Arc<Self>> {
         let master_api_key = config.master_api_key;
         let collections_writer_config = config.config;
@@ -210,7 +211,7 @@ impl WriteSide {
         };
 
         let context = WriteSideContext {
-            ai_service,
+            embeddings_service: embeddings_service.clone(),
             embedding_sender: sx,
             op_sender: op_sender.clone(),
             nlp_service,
@@ -274,6 +275,7 @@ impl WriteSide {
             stop_done_receiver: OramaAsyncLock::new("stop_done_receiver", stop_done_receiver),
             write_operation_counter: AtomicU32::new(0),
             jwt_manager,
+            embeddings_service,
         };
 
         let write_side = Arc::new(write_side);
@@ -292,7 +294,7 @@ impl WriteSide {
             stop_done_sender.clone(),
         );
         start_calculate_embedding_loop(
-            context.ai_service.clone(),
+            context.embeddings_service.clone(),
             rx,
             op_sender,
             embedding_queue_limit,
@@ -431,7 +433,7 @@ impl WriteSide {
         write_api_key: WriteApiKey,
         collection_id: CollectionId,
         language: LanguageDTO,
-        model: OramaModel,
+        model: Model,
         reference: Option<String>,
     ) -> Result<(), WriteError> {
         // Get initial collection state and create temporary index
@@ -1414,8 +1416,8 @@ fn javascript_queue_limit_default() -> usize {
     50
 }
 
-fn embedding_model_default() -> OramaModelSerializable {
-    OramaModelSerializable(crate::ai::OramaModel::BgeSmall)
+fn embedding_model_default() -> Model {
+    Model::BGESmall
 }
 
 fn default_insert_batch_commit_size() -> u64 {

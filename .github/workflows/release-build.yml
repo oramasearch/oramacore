@@ -10,16 +10,23 @@ permissions:
 jobs:
   build-and-patch-release:
     name: Build and Upload Release Assets
-    runs-on: [self-hosted, gpu, cuda]
+    runs-on: [self-hosted]
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Install Protocol Buffers Compiler
+      - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y protobuf-compiler
+          sudo apt-get install -y protobuf-compiler python3 python3-dev python3-venv python3-pip libssl-dev pkg-config g++ build-essential ca-certificates librocksdb-dev libgflags-dev libsnappy-dev zlib1g-dev libbz2-dev libzstd-dev libxml2-dev
+
+      - name: Install Python dependencies
+        run: |
+          python3 -m pip install --upgrade pip
+          python3 -m venv .venv
+          source .venv/bin/activate
+          pip install -r requirements.txt
 
       - name: Setup Rust
         uses: actions-rs/toolchain@v1
@@ -68,7 +75,7 @@ jobs:
   build-docker-OramaCore-x86_64:
     needs: [build-and-patch-release]
     name: Build and Upload Docker Images
-    runs-on: [self-hosted, gpu, cuda]
+    runs-on: [self-hosted]
 
     steps:
       - name: Checkout code
@@ -88,7 +95,17 @@ jobs:
         id: get_version
         run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
 
-      - name: Build and push OramaCore x86_64
+      - name: Determine if this is a release candidate
+        id: check_rc
+        run: |
+          if [[ "${{ steps.get_version.outputs.VERSION }}" == *"-rc."* ]]; then
+            echo "is_rc=true" >> $GITHUB_OUTPUT
+          else
+            echo "is_rc=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Build and push OramaCore x86_64 (stable)
+        if: steps.check_rc.outputs.is_rc == 'false'
         uses: docker/build-push-action@v5
         with:
           context: .
@@ -98,6 +115,17 @@ jobs:
           tags: |
             oramasearch/oramacore:${{ steps.get_version.outputs.VERSION }}
             oramasearch/oramacore:latest
+
+      - name: Build and push OramaCore x86_64 (RC)
+        if: steps.check_rc.outputs.is_rc == 'true'
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./docker/Dockerfile-oramacore-x86
+          platforms: linux/amd64
+          push: true
+          tags: |
+            oramasearch/oramacore:${{ steps.get_version.outputs.VERSION }}
 
   build-docker-OramaCore-arm64:
     needs: [build-and-patch-release]
@@ -122,7 +150,17 @@ jobs:
         id: get_version
         run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
 
-      - name: Build and push OramaCore ARM64
+      - name: Determine if this is a release candidate
+        id: check_rc
+        run: |
+          if [[ "${{ steps.get_version.outputs.VERSION }}" == *"-rc."* ]]; then
+            echo "is_rc=true" >> $GITHUB_OUTPUT
+          else
+            echo "is_rc=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Build and push OramaCore ARM64 (stable)
+        if: steps.check_rc.outputs.is_rc == 'false'
         uses: docker/build-push-action@v5
         with:
           context: .
@@ -133,70 +171,13 @@ jobs:
             oramasearch/oramacore-arm64:${{ steps.get_version.outputs.VERSION }}
             oramasearch/oramacore-arm64:latest
 
-  build-docker-OramaCore-AI-server-cpu:
-    needs: [build-and-patch-release]
-    name: Build and Upload Docker Images
-    runs-on: [self-hosted, gpu, cuda]
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      # Docker Setup and Build Steps
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Log in to Docker Hub
-        uses: docker/login-action@v3
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-
-      - name: Extract version from release tag
-        id: get_version
-        run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
-
-      - name: Build and push AI Server (CPU)
+      - name: Build and push OramaCore ARM64 (RC)
+        if: steps.check_rc.outputs.is_rc == 'true'
         uses: docker/build-push-action@v5
         with:
-          context: ./src/ai_server
-          file: ./docker/Dockerfile-ai-server
-          platforms: linux/amd64
+          context: .
+          file: ./docker/Dockerfile-oramacore-arm64
+          platforms: linux/arm64
           push: true
           tags: |
-            oramasearch/oramacore-ai-server:${{ steps.get_version.outputs.VERSION }}
-            oramasearch/oramacore-ai-server:latest
-
-  build-docker-OramaCore-AI-server-cuda:
-    needs: [build-and-patch-release]
-    name: Build and Upload Docker Images
-    runs-on: [self-hosted, gpu, cuda]
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      # Docker Setup and Build Steps
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Log in to Docker Hub
-        uses: docker/login-action@v3
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-
-      - name: Extract version from release tag
-        id: get_version
-        run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
-
-      - name: Build and push AI Server (CUDA)
-        uses: docker/build-push-action@v5
-        with:
-          context: ./src/ai_server
-          file: ./docker/Dockerfile-ai-server-cuda
-          platforms: linux/amd64
-          push: true
-          tags: |
-            oramasearch/oramacore-ai-server-cuda:${{ steps.get_version.outputs.VERSION }}
-            oramasearch/oramacore-ai-server-cuda:latest
+            oramasearch/oramacore-arm64:${{ steps.get_version.outputs.VERSION }}
