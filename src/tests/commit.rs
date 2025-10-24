@@ -113,3 +113,94 @@ async fn test_empty_collection_reload() {
 
     drop(test_context);
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_collection_continue_commit() {
+    init_log();
+    let test_context = TestContext::new().await;
+
+    let collection_client = test_context.create_collection().await.unwrap();
+    let index_client = collection_client.create_index().await.unwrap();
+
+    for i in 0..4 {
+        index_client
+            .insert_documents(
+                vec![json!({
+                    "id": format!("{}", i),
+                    "text": "text",
+                })]
+                .try_into()
+                .unwrap(),
+            )
+            .await
+            .unwrap();
+        test_context.commit_all().await.unwrap();
+    }
+
+    let test_context = test_context.reload().await;
+    let collection_client = test_context
+        .get_test_collection_client(
+            collection_client.collection_id,
+            collection_client.write_api_key,
+            collection_client.read_api_key,
+        )
+        .unwrap();
+
+    let search_result = collection_client
+        .search(
+            json!({
+                "term": "text",
+            })
+            .try_into()
+            .unwrap(),
+        )
+        .await
+        .expect("Collection must exists");
+
+    assert_eq!(search_result.count, 4);
+
+    drop(test_context);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_collection_commit_partial_fields() {
+    init_log();
+    let test_context = TestContext::new().await;
+
+    let collection_client = test_context.create_collection().await.unwrap();
+    let index_client = collection_client.create_index().await.unwrap();
+
+    let doc = json!({
+        "text": "text",
+        "number": 0,
+        "boolean": 0 == 0,
+        "geo": {
+            "lat": 10.0 + 0 as f64,
+            "lon": 20.0 + 0 as f64,
+        },
+        "date": "2024-01-01T00:00:00Z",
+    });
+    index_client
+        .insert_documents(vec![doc.clone()].try_into().unwrap())
+        .await
+        .unwrap();
+    test_context.commit_all().await.unwrap();
+
+    let keys = doc.as_object().unwrap().keys().cloned().collect::<Vec<_>>();
+    for key in keys {
+        let mut d = json!({});
+
+        let v = doc.get(&key).unwrap().clone();
+        d.as_object_mut().unwrap().insert(key, v);
+
+        index_client
+            .insert_documents(vec![d].try_into().unwrap())
+            .await
+            .unwrap();
+        test_context.commit_all().await.unwrap();
+    }
+
+    let test_context = test_context.reload().await;
+
+    drop(test_context);
+}
