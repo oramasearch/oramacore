@@ -8,15 +8,15 @@ use crate::types::{CollectionId, DeleteDocuments, DocumentList, IndexId, WriteAp
 use std::{path::PathBuf, sync::Arc, time};
 use tracing::error;
 
-enum Operation {
+pub enum Operation {
     Insert(DocumentList),
     Delete(DeleteDocuments),
 }
 
 pub struct SyncUpdate {
-    collection_id: CollectionId,
-    index_id: IndexId,
-    operation: Operation,
+    pub collection_id: CollectionId,
+    pub index_id: IndexId,
+    pub operation: Operation,
 }
 
 pub fn start_datasource_loop(

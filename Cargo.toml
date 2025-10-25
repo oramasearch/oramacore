@@ -108,6 +108,7 @@ cc = "1"
 tonic-build = "0.12.3"
 
 [dev-dependencies]
+testcontainers = "0.25.0"
 # hurl = "6.0.0"
 # hurl_core = "6.0.0"
 criterion = { version = "0.5.1", features = ["async_tokio"] }

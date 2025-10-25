@@ -18,6 +18,9 @@ use futures::{future::BoxFuture, FutureExt};
 use grpc_def::Embedding;
 use http::uri::Scheme;
 use oramacore_lib::hook_storage::HookType;
+use testcontainers::core::ContainerPort;
+use testcontainers::ImageExt;
+use testcontainers::{core::WaitFor, runners::AsyncRunner, GenericImage};
 use tokio::{
     sync::{mpsc, RwLock},
     time::sleep,
@@ -1017,4 +1020,54 @@ pub fn extrapolate_ids_from_result_hits(hits: &[SearchResultHit]) -> Vec<String>
             id.split(":").nth(1).map(|id| id.to_string()).unwrap()
         })
         .collect()
+}
+
+pub async fn setup_s3_container() -> (
+    aws_sdk_s3::Client,
+    String,
+    testcontainers::ContainerAsync<GenericImage>,
+    String,
+) {
+    let localstack_port = 4566;
+    let container = GenericImage::new("localstack/localstack", "s3-latest")
+        .with_wait_for(WaitFor::message_on_stdout("Ready."))
+        .with_exposed_port(ContainerPort::Tcp(localstack_port))
+        .with_env_var("SERVICES", "s3")
+        .start()
+        .await
+        .unwrap();
+
+    let host = container.get_host().await.unwrap();
+    let host_port = container
+        .get_host_port_ipv4(ContainerPort::Tcp(localstack_port))
+        .await
+        .unwrap();
+    let endpoint_url = format!("http://{}:{}", host, host_port);
+
+    let credentials = aws_credential_types::Credentials::new("test", "test", None, None, "test");
+    let config = aws_config::SdkConfig::builder()
+        .credentials_provider(
+            aws_credential_types::provider::SharedCredentialsProvider::new(credentials),
+        )
+        .endpoint_url(endpoint_url.clone())
+        .region(aws_config::Region::new("us-east-1"))
+        .behavior_version(aws_config::BehaviorVersion::latest())
+        .build();
+
+    let s3_config = aws_sdk_s3::config::Builder::from(&config)
+        .force_path_style(true)
+        .build();
+
+    let s3_client = aws_sdk_s3::Client::from_conf(s3_config);
+
+    let bucket_name: String = format!("oramacore-test-{}", Faker.fake::<u32>());
+
+    s3_client
+        .create_bucket()
+        .bucket(&bucket_name)
+        .send()
+        .await
+        .expect("Failed to create S3 bucket");
+
+    (s3_client, bucket_name, container, endpoint_url)
 }

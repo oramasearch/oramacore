@@ -37,9 +37,11 @@ pub async fn sync_s3_datasource(
 
     if let Some(endpoint_url) = &s3_datasource.endpoint_url {
         s3_config_builder = s3_config_builder.endpoint_url(endpoint_url);
+        s3_config_builder = s3_config_builder.force_path_style(true);
     }
 
-    let s3_client = Client::from_conf(s3_config_builder.build());
+    let s3_config = s3_config_builder.build();
+    let s3_client = Client::from_conf(s3_config);
     let mut s3_diff_client = S3::from_client(s3_client.clone(), s3_datasource.bucket.clone());
 
     const BATCH_SIZE: usize = 10;
@@ -146,4 +148,174 @@ async fn fetch_document(s3_client: &Client, bucket: &str, key: &str) -> Result<D
     inner.insert("id".to_string(), Value::String(key.to_string()));
 
     Ok(Document { inner })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::collection_manager::sides::write::datasource::storage;
+    use crate::tests::utils::setup_s3_container;
+    use aws_sdk_s3::primitives::ByteStream;
+    use fake::{Fake, Faker};
+    use serde_json::json;
+
+    #[tokio::test]
+    async fn test_sync_s3_datasource_batching() {
+        let (s3_client, bucket_name, _container, endpoint_url) = setup_s3_container().await;
+
+        let s3_datasource = storage::S3 {
+            bucket: bucket_name.clone(),
+            region: "us-east-1".to_string(),
+            access_key_id: "test".to_string(),
+            secret_access_key: "test".to_string(),
+            endpoint_url: Some(endpoint_url),
+        };
+
+        let tmp_dir = tempfile::tempdir().unwrap();
+        let datasource_dir = tmp_dir.path().to_path_buf();
+        let collection_id = CollectionId::try_new(Faker.fake::<String>()).unwrap();
+        let index_id = IndexId::try_new(Faker.fake::<String>()).unwrap();
+        let datasource_id = IndexId::try_new(Faker.fake::<String>()).unwrap();
+
+        let (sync_sender, mut sync_receiver) = tokio::sync::mpsc::channel(100);
+
+        // 1. Initial sync, no changes
+        sync_s3_datasource(
+            &datasource_dir,
+            collection_id,
+            index_id,
+            datasource_id,
+            &s3_datasource,
+            sync_sender.clone(),
+        )
+        .await
+        .unwrap();
+
+        assert!(sync_receiver.try_recv().is_err());
+
+        // 2. Add two files to test batching
+        let key1 = "test-file-1.json";
+        let content1 = json!({ "message": "Hello, Oramacore! (file 1)" });
+        let content_bytes1 = serde_json::to_vec(&content1).unwrap();
+
+        s3_client
+            .put_object()
+            .bucket(&bucket_name)
+            .key(key1)
+            .body(ByteStream::from(content_bytes1.clone()))
+            .send()
+            .await
+            .unwrap();
+
+        let key2 = "test-file-2.json";
+        let content2 = json!({ "message": "Hello, Oramacore! (file 2)" });
+        let content_bytes2 = serde_json::to_vec(&content2).unwrap();
+
+        s3_client
+            .put_object()
+            .bucket(&bucket_name)
+            .key(key2)
+            .body(ByteStream::from(content_bytes2.clone()))
+            .send()
+            .await
+            .unwrap();
+
+        sync_s3_datasource(
+            &datasource_dir,
+            collection_id,
+            index_id,
+            datasource_id,
+            &s3_datasource,
+            sync_sender.clone(),
+        )
+        .await
+        .unwrap();
+
+        let sync_update = sync_receiver.recv().await.unwrap();
+        assert_eq!(sync_update.collection_id, collection_id);
+        assert_eq!(sync_update.index_id, index_id);
+
+        match sync_update.operation {
+            Operation::Insert(docs) => {
+                assert_eq!(docs.0.len(), 2);
+                let doc1 = docs
+                    .0
+                    .iter()
+                    .find(|d| d.inner.get("id").unwrap().as_str().unwrap() == key1)
+                    .unwrap();
+                let doc2 = docs
+                    .0
+                    .iter()
+                    .find(|d| d.inner.get("id").unwrap().as_str().unwrap() == key2)
+                    .unwrap();
+
+                assert_eq!(
+                    doc1.inner.get("message").unwrap().as_str().unwrap(),
+                    "Hello, Oramacore! (file 1)"
+                );
+                assert_eq!(
+                    doc2.inner.get("message").unwrap().as_str().unwrap(),
+                    "Hello, Oramacore! (file 2)"
+                );
+            }
+            _ => panic!("Expected Insert operation"),
+        }
+
+        // No more messages
+        assert!(sync_receiver.try_recv().is_err());
+
+        // 3. Modify one, delete one
+        let updated_content1 = json!({ "message": "Hello, Oramacore! Updated." });
+        let updated_content_bytes1 = serde_json::to_vec(&updated_content1).unwrap();
+        s3_client
+            .put_object()
+            .bucket(&bucket_name)
+            .key(key1)
+            .body(ByteStream::from(updated_content_bytes1.clone()))
+            .send()
+            .await
+            .unwrap();
+
+        s3_client
+            .delete_object()
+            .bucket(&bucket_name)
+            .key(key2)
+            .send()
+            .await
+            .unwrap();
+
+        sync_s3_datasource(
+            &datasource_dir,
+            collection_id,
+            index_id,
+            datasource_id,
+            &s3_datasource,
+            sync_sender.clone(),
+        )
+        .await
+        .unwrap();
+
+        let sync_update_insert = sync_receiver.recv().await.unwrap();
+        match sync_update_insert.operation {
+            Operation::Insert(docs) => {
+                assert_eq!(docs.0.len(), 1);
+                let doc = &docs.0[0];
+                assert_eq!(doc.inner.get("id").unwrap().as_str().unwrap(), key1);
+                assert_eq!(
+                    doc.inner.get("message").unwrap().as_str().unwrap(),
+                    "Hello, Oramacore! Updated."
+                );
+            }
+            _ => panic!("Expected Insert operation on modification"),
+        }
+
+        let sync_update_delete = sync_receiver.recv().await.unwrap();
+        match sync_update_delete.operation {
+            Operation::Delete(keys) => {
+                assert_eq!(keys.len(), 1);
+                assert_eq!(keys[0], key2);
+            }
+            _ => panic!("Expected Delete operation"),
+        }
+    }
 }
