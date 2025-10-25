@@ -1,5 +1,6 @@
 pub mod collection;
 mod collections;
+mod datasource;
 pub mod document_storage;
 mod embedding;
 pub mod index;
@@ -60,9 +61,9 @@ use crate::{
     },
     metrics::{document_insertion::DOCUMENTS_INSERTION_TIME, Empty},
     types::{
-        ApiKey, CollectionCreated, CollectionId, CreateCollection, CreateIndexRequest,
-        DeleteDocuments, DescribeCollectionResponse, Document, DocumentId, DocumentList,
-        IndexEmbeddingsCalculation, IndexId, InsertDocumentsResult, LanguageDTO,
+        AddDatasourceRequest, ApiKey, CollectionCreated, CollectionId, CreateCollection,
+        CreateIndexRequest, DeleteDocuments, DescribeCollectionResponse, Document, DocumentId,
+        DocumentList, IndexEmbeddingsCalculation, IndexId, InsertDocumentsResult, LanguageDTO,
         ReplaceIndexRequest, UpdateDocumentRequest, UpdateDocumentsResult, WriteApiKey,
     },
 };
@@ -138,6 +139,7 @@ pub struct WriteSide {
     operation_counter: OramaAsyncLock<u64>,
     insert_batch_commit_size: u64,
 
+    datasource_storage: datasource::storage::DatasourceStorage,
     document_storage: DocumentStorage,
     system_prompts: SystemPromptInterface,
     training_sets: TrainingSetInterface,
@@ -178,6 +180,7 @@ impl WriteSide {
         let master_api_key = config.master_api_key;
         let collections_writer_config = config.config;
         let data_dir = collections_writer_config.data_dir.clone();
+        let datasource_dir = data_dir.clone().join("datasource");
 
         let insert_batch_commit_size = collections_writer_config.insert_batch_commit_size;
         let temp_index_cleanup_config = collections_writer_config.temp_index_cleanup.clone();
@@ -248,6 +251,7 @@ impl WriteSide {
         let (stop_sender, _) = tokio::sync::broadcast::channel(1);
         let commit_loop_receiver = stop_sender.subscribe();
         let temp_index_cleanup_receiver = stop_sender.subscribe();
+        let datasource_receiver = stop_sender.subscribe();
         let receive_operation_loop_receiver = stop_sender.subscribe();
 
         let jwt_manager = JwtManager::new(config.jwt)
@@ -259,6 +263,7 @@ impl WriteSide {
         let write_side = Self {
             document_count,
             collections: collections_writer,
+            datasource_storage: datasource::storage::DatasourceStorage::new(),
             document_storage,
             data_dir,
             insert_batch_commit_size,
@@ -277,6 +282,13 @@ impl WriteSide {
         };
 
         let write_side = Arc::new(write_side);
+
+        datasource::start_datasource_loop(
+            write_side.clone(),
+            datasource_dir,
+            datasource_receiver,
+            stop_done_sender.clone(),
+        );
 
         start_commit_loop(
             write_side.clone(),
@@ -422,6 +434,59 @@ impl WriteSide {
         collection
             .create_index(index_id, embedding, type_strategy.enum_strategy)
             .await?;
+
+        Ok(())
+    }
+
+    pub async fn add_datasource_to_index(
+        &self,
+        write_api_key: WriteApiKey,
+        collection_id: CollectionId,
+        index_id: IndexId,
+        req: AddDatasourceRequest,
+    ) -> Result<(), WriteError> {
+        let collection = self.get_collection(collection_id, write_api_key).await?;
+
+        collection
+            .get_index(index_id)
+            .await
+            .ok_or_else(|| WriteError::IndexNotFound(collection_id, index_id))?;
+
+        let datasource = datasource::storage::DatasourceEntry {
+            id: req.datasource_id,
+            datasource: datasource::storage::DatasourceKind::S3(datasource::storage::S3 {
+                bucket: req.bucket,
+                region: req.region,
+                access_key_id: req.access_key_id,
+                secret_access_key: req.secret_access_key,
+                endpoint_url: req.endpoint_url,
+            }),
+        };
+
+        self.datasource_storage
+            .insert(collection_id, index_id, datasource)
+            .await;
+
+        Ok(())
+    }
+
+    pub async fn remove_datasource_from_index(
+        &self,
+        write_api_key: WriteApiKey,
+        collection_id: CollectionId,
+        index_id: IndexId,
+        datasource_id: IndexId,
+    ) -> Result<(), WriteError> {
+        let collection = self.get_collection(collection_id, write_api_key).await?;
+
+        collection
+            .get_index(index_id)
+            .await
+            .ok_or_else(|| WriteError::IndexNotFound(collection_id, index_id))?;
+
+        self.datasource_storage
+            .remove_datasource(collection_id, index_id, datasource_id)
+            .await;
 
         Ok(())
     }
@@ -630,6 +695,9 @@ impl WriteSide {
         let document_to_remove = collection.delete_index(index_id).await?;
 
         self.document_storage.remove(document_to_remove).await;
+        self.datasource_storage
+            .remove_index(collection_id, index_id)
+            .await;
 
         Ok(())
     }
@@ -930,6 +998,10 @@ impl WriteSide {
 
             self.document_storage.remove(document_ids).await;
         }
+
+        self.datasource_storage
+            .remove_collection(collection_id)
+            .await;
 
         Ok(())
     }
