@@ -13,7 +13,7 @@ pub fn start_datasource_loop(
     mut stop_receiver: tokio::sync::broadcast::Receiver<()>,
     stop_done_sender: tokio::sync::mpsc::Sender<()>,
 ) {
-    std::thread::spawn(async move || {
+    tokio::task::spawn(async move {
         let period = time::Duration::new(5, 0);
         let start = tokio::time::Instant::now() + period;
         let mut interval = tokio::time::interval_at(start, period);
@@ -28,38 +28,41 @@ pub fn start_datasource_loop(
                 _ = interval.tick() => {}
             };
 
-            // TODO: looks like rusqlite doesn't support sync trait, so for now I've found this
-            // workaround
-            let rt = tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()
-                .unwrap();
+            let write_side_clone = write_side.clone();
+            let datasource_dir_clone = datasource_dir.clone();
 
-            rt.block_on(async {
-                let s3_datasources = write_side.datasource_storage.get().await;
+            tokio::task::spawn_blocking(move || {
+                let rt = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .unwrap();
 
-                for (collection_id, indexes) in s3_datasources.iter() {
-                    for (index_id, datasources) in indexes.iter() {
-                        for datasource in datasources {
-                            match &datasource.datasource {
-                                storage::DatasourceKind::S3(s3_datasource) => {
-                                    if let Err(e) = s3::sync_s3_datasource(
-                                        write_side.clone(),
-                                        &datasource_dir,
-                                        *collection_id,
-                                        *index_id,
-                                        datasource.id,
-                                        s3_datasource,
-                                    )
-                                    .await
-                                    {
-                                        error!(error = ?e, "Failed to sync S3 datasource");
+                rt.block_on(async {
+                    let s3_datasources = write_side_clone.datasource_storage.get().await;
+
+                    for (collection_id, indexes) in s3_datasources.iter() {
+                        for (index_id, datasources) in indexes.iter() {
+                            for datasource in datasources {
+                                match &datasource.datasource {
+                                    storage::DatasourceKind::S3(s3_datasource) => {
+                                        if let Err(e) = s3::sync_s3_datasource(
+                                            write_side_clone.clone(),
+                                            &datasource_dir_clone,
+                                            *collection_id,
+                                            *index_id,
+                                            datasource.id,
+                                            s3_datasource,
+                                        )
+                                        .await
+                                        {
+                                            error!(error = ?e, "Failed to sync S3 datasource");
+                                        }
                                     }
                                 }
                             }
                         }
                     }
-                }
+                });
             });
         }
 
