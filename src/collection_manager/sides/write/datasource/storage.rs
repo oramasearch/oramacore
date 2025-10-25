@@ -33,7 +33,7 @@ pub struct DatasourceStorage {
 impl DatasourceStorage {
     pub fn new() -> Self {
         Self {
-            map: Arc::new(OramaAsyncLock::new("datasource_storge", HashMap::new())),
+            map: Arc::new(OramaAsyncLock::new("datasource_storage", HashMap::new())),
         }
     }
 
