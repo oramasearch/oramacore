@@ -26,6 +26,7 @@ async fn test_temp_index_double_creation() {
                 index_id,
                 embedding: None,
                 type_strategy: Default::default(),
+                datasource: None,
             },
         )
         .await
@@ -41,6 +42,7 @@ async fn test_temp_index_double_creation() {
                 index_id,
                 embedding: None,
                 type_strategy: Default::default(),
+                datasource: None,
             },
         )
         .await;

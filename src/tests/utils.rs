@@ -571,6 +571,7 @@ impl TestCollectionClient {
                     index_id,
                     embedding: None,
                     type_strategy,
+                    datasource: None,
                 },
             )
             .await?;
@@ -614,6 +615,7 @@ impl TestCollectionClient {
                     index_id,
                     embedding: None,
                     type_strategy: Default::default(),
+                    datasource: None,
                 },
             )
             .await?;

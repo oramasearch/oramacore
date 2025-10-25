@@ -186,6 +186,7 @@ fn bench_fulltext_fast(c: &mut Criterion) {
                     index_id,
                     embedding: None,
                     type_strategy: Default::default(),
+                    datasource: None,
                 },
             )
             .await
