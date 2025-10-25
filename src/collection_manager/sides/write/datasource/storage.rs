@@ -91,7 +91,7 @@ impl DatasourceStorage {
     }
 
     pub async fn get(&self) -> CollectionDatasources {
-        let m = self.map.read("get_by_type").await;
+        let m = self.map.read("get").await;
         let mut result: CollectionDatasources = HashMap::new();
 
         for (collection_id, indexes) in m.iter() {
