@@ -185,6 +185,7 @@ impl WriteSide {
         let insert_batch_commit_size = collections_writer_config.insert_batch_commit_size;
         let temp_index_cleanup_config = collections_writer_config.temp_index_cleanup.clone();
 
+        let datasource_intreval = Duration::new(60, 0);
         let commit_interval = collections_writer_config.commit_interval;
         let embedding_queue_limit = collections_writer_config.embedding_queue_limit;
 
@@ -286,6 +287,7 @@ impl WriteSide {
         datasource::start_datasource_loop(
             write_side.clone(),
             datasource_dir,
+            datasource_intreval,
             datasource_receiver,
             stop_done_sender.clone(),
         );

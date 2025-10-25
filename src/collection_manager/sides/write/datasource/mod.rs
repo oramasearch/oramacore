@@ -22,14 +22,14 @@ pub struct SyncUpdate {
 pub fn start_datasource_loop(
     write_side: Arc<WriteSide>,
     datasource_dir: PathBuf,
+    interval: time::Duration,
     mut stop_receiver: tokio::sync::broadcast::Receiver<()>,
     stop_done_sender: tokio::sync::mpsc::Sender<()>,
 ) {
     tokio::task::spawn(async move {
-        let period = time::Duration::new(5, 0);
-        let start = tokio::time::Instant::now() + period;
-        let mut interval = tokio::time::interval_at(start, period);
-        interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
+        let start = tokio::time::Instant::now() + interval;
+        let mut interval = tokio::time::interval_at(start, interval);
+        interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
 
         'outer: loop {
             tokio::select! {

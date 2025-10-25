@@ -42,22 +42,17 @@ pub async fn sync_s3_datasource(
     let s3_client = Client::from_conf(s3_config_builder.build());
     let mut s3_diff_client = S3::from_client(s3_client.clone(), s3_datasource.bucket.clone());
 
-    // TODO: add batching, instead of one by one
+    const BATCH_SIZE: usize = 10;
+    let mut docs_to_insert = Vec::with_capacity(BATCH_SIZE);
+    let mut keys_to_remove = Vec::with_capacity(BATCH_SIZE);
+
     let db_path = datasource_dir.join(datasource_id.as_str());
     if let Err(e) = s3_diff_client
         .stream_diff_and_update(db_path.as_path(), async |change| {
             match change {
                 Change::Added(obj) => {
                     match fetch_document(&s3_client, &s3_datasource.bucket, &obj.key).await {
-                        Ok(doc) => {
-                            event_sender
-                                .send(SyncUpdate {
-                                    collection_id,
-                                    index_id,
-                                    operation: Operation::Insert(DocumentList(vec![doc])),
-                                })
-                                .await?;
-                        }
+                        Ok(doc) => docs_to_insert.push(doc),
                         Err(e) => {
                             error!(error = ?e, key = %obj.key, "Failed to fetch new document");
                         }
@@ -65,35 +60,64 @@ pub async fn sync_s3_datasource(
                 }
                 Change::Modified { old: _, new } => {
                     match fetch_document(&s3_client, &s3_datasource.bucket, &new.key).await {
-                        Ok(doc) => {
-                            event_sender
-                                .send(SyncUpdate {
-                                    collection_id,
-                                    index_id,
-                                    operation: Operation::Insert(DocumentList(vec![doc])),
-                                })
-                                .await?;
-                        }
+                        Ok(doc) => docs_to_insert.push(doc),
                         Err(e) => {
                             error!(error = ?e, key = %new.key, "Failed to fetch modified document");
                         }
                     }
                 }
                 Change::Deleted(obj) => {
-                    event_sender
-                        .send(SyncUpdate {
-                            collection_id,
-                            index_id,
-                            operation: Operation::Delete(vec![obj.key]),
-                        })
-                        .await?;
+                    keys_to_remove.push(obj.key);
                 }
             }
+
+            if docs_to_insert.len() >= BATCH_SIZE {
+                let docs = std::mem::take(&mut docs_to_insert);
+                event_sender
+                    .send(SyncUpdate {
+                        collection_id,
+                        index_id,
+                        operation: Operation::Insert(DocumentList(docs)),
+                    })
+                    .await?;
+            }
+
+            if keys_to_remove.len() >= BATCH_SIZE {
+                let keys = std::mem::take(&mut keys_to_remove);
+                event_sender
+                    .send(SyncUpdate {
+                        collection_id,
+                        index_id,
+                        operation: Operation::Delete(keys),
+                    })
+                    .await?;
+            }
+
             Ok(())
         })
         .await
     {
         error!(error = ?e, "S3 diff stream failed");
+    }
+
+    if !docs_to_insert.is_empty() {
+        event_sender
+            .send(SyncUpdate {
+                collection_id,
+                index_id,
+                operation: Operation::Insert(DocumentList(docs_to_insert)),
+            })
+            .await?;
+    }
+
+    if !keys_to_remove.is_empty() {
+        event_sender
+            .send(SyncUpdate {
+                collection_id,
+                index_id,
+                operation: Operation::Delete(keys_to_remove),
+            })
+            .await?;
     }
 
     Ok(())
