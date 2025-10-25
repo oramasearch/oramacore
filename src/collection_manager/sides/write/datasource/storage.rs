@@ -1,12 +1,13 @@
 use crate::lock::OramaAsyncLock;
 use crate::types::{CollectionId, IndexId};
+use serde::Deserialize;
 use std::collections::HashMap;
 use std::sync::Arc;
 
 type IndexDatasources = HashMap<IndexId, Vec<DatasourceEntry>>;
 type CollectionDatasources = HashMap<CollectionId, IndexDatasources>;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Deserialize)]
 pub struct S3 {
     pub bucket: String,
     pub region: String,
@@ -15,14 +16,16 @@ pub struct S3 {
     pub endpoint_url: Option<String>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub enum DatasourceKind {
     S3(S3),
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Deserialize)]
 pub struct DatasourceEntry {
     pub id: IndexId,
+    #[serde(flatten)]
     pub datasource: DatasourceKind,
 }
 

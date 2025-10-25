@@ -219,6 +219,7 @@ async fn main() -> Result<()> {
                     index_id,
                     embedding: Some(IndexEmbeddingsCalculation::AllProperties),
                     type_strategy: Default::default(),
+                    datasource: None,
                 },
             )
             .await

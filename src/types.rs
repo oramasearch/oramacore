@@ -3,6 +3,7 @@ use crate::ai::RemoteLLMProvider;
 
 use crate::ai::automatic_embeddings_selector::ChosenProperties;
 
+use crate::collection_manager::sides::write::datasource::storage::DatasourceEntry;
 use crate::collection_manager::sides::write::index::{EnumStrategy, FieldType, GeoPoint};
 use crate::collection_manager::sides::write::OramaModelSerializable;
 use crate::collection_manager::sides::{deserialize_api_key, serialize_api_key};
@@ -1767,17 +1768,7 @@ pub struct CreateIndexRequest {
     pub embedding: Option<IndexEmbeddingsCalculation>,
     #[serde(default)]
     pub type_strategy: TypeParsingStrategies,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct AddDatasourceRequest {
-    #[serde(rename = "id")]
-    pub datasource_id: IndexId,
-    pub bucket: String,
-    pub region: String,
-    pub access_key_id: String,
-    pub secret_access_key: String,
-    pub endpoint_url: Option<String>,
+    pub datasource: Option<DatasourceEntry>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
