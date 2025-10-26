@@ -166,6 +166,7 @@ pub struct WriteSide {
     write_operation_counter: AtomicU32,
 
     jwt_manager: JwtManager,
+    datasource_sync_sender: tokio::sync::mpsc::Sender<(CollectionId, IndexId)>,
 }
 
 impl WriteSide {
@@ -185,7 +186,7 @@ impl WriteSide {
         let insert_batch_commit_size = collections_writer_config.insert_batch_commit_size;
         let temp_index_cleanup_config = collections_writer_config.temp_index_cleanup.clone();
 
-        let datasource_intreval = Duration::new(60, 0); // TODO: make it configurable?
+        let datasource_intreval = Duration::new(5 * 60, 0); // TODO: make it configurable?
         let commit_interval = collections_writer_config.commit_interval;
         let embedding_queue_limit = collections_writer_config.embedding_queue_limit;
 
@@ -257,6 +258,7 @@ impl WriteSide {
         let temp_index_cleanup_receiver = stop_sender.subscribe();
         let datasource_receiver = stop_sender.subscribe();
         let receive_operation_loop_receiver = stop_sender.subscribe();
+        let (datasource_sync_sender, datasource_sync_receiver) = tokio::sync::mpsc::channel(100);
 
         let jwt_manager = JwtManager::new(config.jwt)
             .await
@@ -283,6 +285,7 @@ impl WriteSide {
             stop_done_receiver: OramaAsyncLock::new("stop_done_receiver", stop_done_receiver),
             write_operation_counter: AtomicU32::new(0),
             jwt_manager,
+            datasource_sync_sender,
         };
 
         let write_side = Arc::new(write_side);
@@ -292,6 +295,7 @@ impl WriteSide {
             datasource_intreval,
             datasource_receiver,
             stop_done_sender.clone(),
+            datasource_sync_receiver,
         );
 
         start_commit_loop(
@@ -444,6 +448,13 @@ impl WriteSide {
             self.datasource_storage
                 .insert(collection_id, index_id, datasource)
                 .await;
+
+            if let Err(e) = self
+                .datasource_sync_sender
+                .try_send((collection_id, index_id))
+            {
+                error!("Failed to send datasource sync request: {}", e);
+            }
         }
 
         Ok(())
