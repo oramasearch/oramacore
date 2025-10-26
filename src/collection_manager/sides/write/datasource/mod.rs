@@ -118,7 +118,7 @@ pub fn start_datasource_loop(
     tokio::task::spawn(async move {
         let start = tokio::time::Instant::now() + interval;
         let mut interval = tokio::time::interval_at(start, interval);
-        interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
+        interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
 
         'outer: loop {
             let (sync_sender, sync_receiver) = tokio::sync::mpsc::channel(100);
@@ -138,6 +138,8 @@ pub fn start_datasource_loop(
                     }
                 }
                 Some((collection_id, index_id)) = sync_request_receiver.recv() => {
+                    // FIX: in case a huge index is requested the interval loop will be delayed.
+                    // does it is a problem?
                     info!("Running on-demand datasource sync for collection {} index {}", collection_id, index_id);
                     let datasources = write_side.datasource_storage.get().await;
                     if let Some(indexes) = datasources.get(&collection_id) {
@@ -157,4 +159,3 @@ pub fn start_datasource_loop(
         }
     });
 }
-
