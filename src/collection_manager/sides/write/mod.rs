@@ -185,7 +185,7 @@ impl WriteSide {
         let insert_batch_commit_size = collections_writer_config.insert_batch_commit_size;
         let temp_index_cleanup_config = collections_writer_config.temp_index_cleanup.clone();
 
-        let datasource_intreval = Duration::new(60, 0);
+        let datasource_intreval = Duration::new(60, 0); // TODO: make it configurable?
         let commit_interval = collections_writer_config.commit_interval;
         let embedding_queue_limit = collections_writer_config.embedding_queue_limit;
 
@@ -248,6 +248,9 @@ impl WriteSide {
             .await
             .context("Cannot create document storage")?;
 
+        let datasource_storage = datasource::storage::DatasourceStorage::try_new(&datasource_dir)
+            .context("Cannot create datasource storage")?;
+
         let (stop_done_sender, stop_done_receiver) = tokio::sync::mpsc::channel(1);
         let (stop_sender, _) = tokio::sync::broadcast::channel(1);
         let commit_loop_receiver = stop_sender.subscribe();
@@ -264,7 +267,7 @@ impl WriteSide {
         let write_side = Self {
             document_count,
             collections: collections_writer,
-            datasource_storage: datasource::storage::DatasourceStorage::new(),
+            datasource_storage,
             document_storage,
             data_dir,
             insert_batch_commit_size,
@@ -286,7 +289,6 @@ impl WriteSide {
 
         datasource::start_datasource_loop(
             write_side.clone(),
-            datasource_dir,
             datasource_intreval,
             datasource_receiver,
             stop_done_sender.clone(),

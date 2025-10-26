@@ -1,7 +1,10 @@
 use crate::lock::OramaAsyncLock;
 use crate::types::{CollectionId, IndexId};
+use anyhow::{Context, Result};
+use oramacore_lib::fs::create_if_not_exists;
 use serde::Deserialize;
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::Arc;
 
 type IndexDatasources = HashMap<IndexId, Vec<DatasourceEntry>>;
@@ -29,15 +32,24 @@ pub struct DatasourceEntry {
     pub datasource: DatasourceKind,
 }
 
+#[derive(Clone)]
 pub struct DatasourceStorage {
+    base_dir: PathBuf,
     map: Arc<OramaAsyncLock<CollectionDatasources>>,
 }
 
 impl DatasourceStorage {
-    pub fn new() -> Self {
-        Self {
+    pub fn try_new(base_dir: &PathBuf) -> Result<Self> {
+        create_if_not_exists(base_dir).context("Cannot create data directory")?;
+
+        Ok(Self {
+            base_dir: base_dir.clone(),
             map: Arc::new(OramaAsyncLock::new("datasource_storage", HashMap::new())),
-        }
+        })
+    }
+
+    pub fn base_dir(&self) -> &PathBuf {
+        &self.base_dir
     }
 
     pub async fn insert(
@@ -91,22 +103,6 @@ impl DatasourceStorage {
     }
 
     pub async fn get(&self) -> CollectionDatasources {
-        let m = self.map.read("get").await;
-        let mut result: CollectionDatasources = HashMap::new();
-
-        for (collection_id, indexes) in m.iter() {
-            for (index_id, datasources) in indexes.iter() {
-                let filtered_datasources: Vec<DatasourceEntry> = datasources.to_vec();
-
-                if !filtered_datasources.is_empty() {
-                    result
-                        .entry(*collection_id)
-                        .or_default()
-                        .insert(*index_id, filtered_datasources);
-                }
-            }
-        }
-
-        result
+        self.map.read("get").await.clone()
     }
 }

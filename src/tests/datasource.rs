@@ -1,11 +1,12 @@
 use crate::collection_manager::sides::write::datasource::storage;
 use crate::tests::utils::{setup_s3_container, wait_for, TestContext};
-use crate::types::{CollectionStatsRequest, CreateIndexRequest, IndexId};
+use crate::types::{CreateIndexRequest, IndexId};
 use anyhow::bail;
 use aws_sdk_s3::primitives::ByteStream;
+use futures::FutureExt;
 use serde_json::json;
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn test_sync_with_datasource() {
     let (s3_client, bucket_name, _container, endpoint_url) = setup_s3_container().await;
 
@@ -16,7 +17,7 @@ async fn test_sync_with_datasource() {
     let datasource_id = IndexId::try_new("s3-ds".to_string()).unwrap();
 
     let key1 = "test-file-1.json";
-    let content1 = json!({ "message": "Hello, Oramacore! (file 1)", "bool": true });
+    let content1 = json!({ "text": "Hello, Oramacore! (file 1)"});
     let content_bytes1 = serde_json::to_vec(&content1).unwrap();
 
     s3_client
@@ -52,55 +53,28 @@ async fn test_sync_with_datasource() {
         .await
         .unwrap();
 
-    const EXPECTED_DOCUMENT_COUNT: usize = 1;
-    wait_for(&test_context, |s| {
-        async {
-            let mut stats = collection_client.reader_stats().await.unwrap();
-            assert_eq!(stats.indexes_stats.len(), 1)
-            //
-            // let reader = s.reader.clone();
-            // let read_api_key = s.read_api_key;
-            // let collection_id = s.collection_id;
-            // async move {
-            //     let stats = reader
-            //         .collection_stats(
-            //             read_api_key,
-            //             collection_id,
-            //             CollectionStatsRequest { with_keys: false },
-            //         )
-            //         .await?;
-            //     let index_stats = stats
-            //         .indexes_stats
-            //         .iter()
-            //         .find(|index| index.id == self.index_id)
-            //         .ok_or_else(|| anyhow::anyhow!("Index not found"))?;
-            //     if index_stats.document_count < EXPECTED_DOCUMENT_COUNT {
-            //         bail!(
-            //             "Document count mismatch: expected {}, got {}",
-            //             EXPECTED_DOCUMENT_COUNT,
-            //             index_stats.document_count
-            //         );
-            //     }
-            //
-            //     Ok(())
+    wait_for(&test_context, |test_context| {
+        let collection_client = test_context
+            .get_test_collection_client(
+                collection_client.collection_id,
+                collection_client.write_api_key,
+                collection_client.read_api_key,
+            )
+            .unwrap();
+
+        async move {
+            let output = collection_client
+                .search(json!({ "term": "hello", }).try_into().unwrap())
+                .await
+                .unwrap();
+            if output.count == 1 {
+                return Ok(());
+            }
+
+            bail!("Document not yet inserted")
         }
         .boxed()
     })
     .await
     .unwrap();
-
-    let res = collection_client
-        .search(
-            json!({
-                "term": "hello",
-                "where": {
-                    "bool": true,
-                }
-            })
-            .try_into()
-            .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(res.count, 1);
 }
