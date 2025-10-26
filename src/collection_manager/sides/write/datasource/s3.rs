@@ -48,6 +48,7 @@ pub async fn sync_s3_datasource(
     let mut docs_to_insert = Vec::with_capacity(BATCH_SIZE);
     let mut keys_to_remove = Vec::with_capacity(BATCH_SIZE);
 
+    // TODO: implement a signal to interrupt import if the index is deleted in the mid-time.
     let db_path = datasource_dir.join(datasource_id.as_str());
     if let Err(e) = s3_diff_client
         .stream_diff_and_update(db_path.as_path(), async |change| {
