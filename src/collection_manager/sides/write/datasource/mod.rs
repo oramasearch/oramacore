@@ -1,5 +1,6 @@
 pub mod s3;
 pub mod storage;
+use thiserror::Error;
 use tokio::time::MissedTickBehavior;
 use tracing::info;
 
@@ -7,6 +8,21 @@ use super::WriteSide;
 use crate::types::{CollectionId, DeleteDocuments, DocumentList, IndexId, WriteApiKey};
 use std::{sync::Arc, time};
 use tracing::error;
+
+#[derive(Error, Debug)]
+pub enum DatasourceError {
+    #[error("Sync cancelled: index or datasource was deleted.")]
+    SyncCancelled,
+
+    #[error("Sync failed: {0}")]
+    SyncFailed(#[from] anyhow::Error),
+}
+
+impl From<tokio::sync::mpsc::error::SendError<SyncUpdate>> for DatasourceError {
+    fn from(e: tokio::sync::mpsc::error::SendError<SyncUpdate>) -> Self {
+        DatasourceError::SyncFailed(anyhow::anyhow!(e))
+    }
+}
 
 pub enum Operation {
     Insert(DocumentList),
@@ -76,6 +92,7 @@ fn spawn_sync_tasks(
     for datasource in datasources {
         let task_sender_clone = sync_sender.clone();
         let datasource_dir_clone = datasource_dir.clone();
+        let datasource_storage_clone = write_side.datasource_storage.clone();
 
         match &datasource.datasource {
             storage::DatasourceKind::S3(s3_datasource) => {
@@ -89,7 +106,8 @@ fn spawn_sync_tasks(
                         .unwrap();
 
                     rt.block_on(async {
-                        if let Err(e) = s3::sync_s3_datasource(
+                        match s3::sync_s3_datasource(
+                            &datasource_storage_clone,
                             &datasource_dir_clone,
                             collection_id,
                             index_id,
@@ -99,7 +117,13 @@ fn spawn_sync_tasks(
                         )
                         .await
                         {
-                            error!(error = ?e, "Failed to sync S3 datasource");
+                            Ok(_) => {},
+                            Err(DatasourceError::SyncCancelled) => {
+                                info!(%collection_id, %index_id, "Datasource sync cancelled gracefully as the index was deleted.");
+                            }
+                            Err(DatasourceError::SyncFailed(e)) => {
+                                error!(error = ?e, "Failed to sync S3 datasource");
+                            }
                         }
                     })
                 });

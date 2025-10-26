@@ -117,6 +117,18 @@ impl DatasourceStorage {
         self.map.read("get").await.clone()
     }
 
+    pub async fn exists(
+        &self,
+        collection_id: CollectionId,
+        index_id: IndexId,
+        datasource_id: IndexId,
+    ) -> bool {
+        let m = self.map.read("exists").await;
+        m.get(&collection_id)
+            .and_then(|indexes| indexes.get(&index_id))
+            .map_or(false, |entries| entries.iter().any(|e| e.id == datasource_id))
+    }
+
     pub async fn commit(&self) -> Result<()> {
         let file_path = self.base_dir.join("datasources.json");
         let file_path_tmp = self.base_dir.join("datasources.tmp.json");

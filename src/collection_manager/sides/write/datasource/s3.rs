@@ -14,14 +14,19 @@ use crate::collection_manager::sides::write::datasource::storage;
 use crate::collection_manager::sides::write::datasource::{Operation, SyncUpdate};
 use crate::types::{CollectionId, Document, DocumentList, IndexId};
 
+use super::DatasourceError;
+
+const BATCH_SIZE: usize = 10;
+
 pub async fn sync_s3_datasource(
+    datasource_storage: &storage::DatasourceStorage,
     datasource_dir: &PathBuf,
     collection_id: CollectionId,
     index_id: IndexId,
     datasource_id: IndexId,
     s3_datasource: &storage::S3,
     event_sender: tokio::sync::mpsc::Sender<SyncUpdate>,
-) -> anyhow::Result<()> {
+) -> Result<(), DatasourceError> {
     let credentials = Credentials::new(
         s3_datasource.access_key_id.clone(),
         s3_datasource.secret_access_key.clone(),
@@ -44,11 +49,9 @@ pub async fn sync_s3_datasource(
     let s3_client = Client::from_conf(s3_config);
     let mut s3_diff_client = S3::from_client(s3_client.clone(), s3_datasource.bucket.clone());
 
-    const BATCH_SIZE: usize = 10;
     let mut docs_to_insert = Vec::with_capacity(BATCH_SIZE);
     let mut keys_to_remove = Vec::with_capacity(BATCH_SIZE);
 
-    // TODO: implement a signal to interrupt import if the index is deleted in the mid-time.
     let db_path = datasource_dir.join(datasource_id.as_str());
     if let Err(e) = s3_diff_client
         .stream_diff_and_update(db_path.as_path(), async |change| {
@@ -73,8 +76,17 @@ pub async fn sync_s3_datasource(
                     keys_to_remove.push(obj.key);
                 }
             }
-
             if docs_to_insert.len() >= BATCH_SIZE {
+                if !datasource_storage
+                    .exists(collection_id, index_id, datasource_id)
+                    .await
+                {
+                    return Err(Box::new(std::io::Error::new(
+                        std::io::ErrorKind::Interrupted,
+                        "Sync cancelled",
+                    ))
+                        as Box<dyn std::error::Error + Send + Sync>);
+                }
                 let docs = std::mem::take(&mut docs_to_insert);
                 event_sender
                     .send(SyncUpdate {
@@ -82,10 +94,20 @@ pub async fn sync_s3_datasource(
                         index_id,
                         operation: Operation::Insert(DocumentList(docs)),
                     })
-                    .await?;
+                    .await
+                    .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?;
             }
-
             if keys_to_remove.len() >= BATCH_SIZE {
+                if !datasource_storage
+                    .exists(collection_id, index_id, datasource_id)
+                    .await
+                {
+                    return Err(Box::new(std::io::Error::new(
+                        std::io::ErrorKind::Interrupted,
+                        "Sync cancelled",
+                    ))
+                        as Box<dyn std::error::Error + Send + Sync>);
+                }
                 let keys = std::mem::take(&mut keys_to_remove);
                 event_sender
                     .send(SyncUpdate {
@@ -93,17 +115,26 @@ pub async fn sync_s3_datasource(
                         index_id,
                         operation: Operation::Delete(keys),
                     })
-                    .await?;
+                    .await
+                    .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?;
             }
-
             Ok(())
         })
         .await
     {
-        error!(error = ?e, "S3 diff stream failed");
+        if e.to_string().contains("Sync cancelled") {
+            return Err(DatasourceError::SyncCancelled);
+        }
+        return Err(DatasourceError::SyncFailed(anyhow::anyhow!("{}", e)));
     }
 
     if !docs_to_insert.is_empty() {
+        if !datasource_storage
+            .exists(collection_id, index_id, datasource_id)
+            .await
+        {
+            return Err(DatasourceError::SyncCancelled);
+        }
         event_sender
             .send(SyncUpdate {
                 collection_id,
@@ -114,6 +145,12 @@ pub async fn sync_s3_datasource(
     }
 
     if !keys_to_remove.is_empty() {
+        if !datasource_storage
+            .exists(collection_id, index_id, datasource_id)
+            .await
+        {
+            return Err(DatasourceError::SyncCancelled);
+        }
         event_sender
             .send(SyncUpdate {
                 collection_id,
@@ -178,10 +215,21 @@ mod tests {
         let index_id = IndexId::try_new(Faker.fake::<String>()).unwrap();
         let datasource_id = IndexId::try_new(Faker.fake::<String>()).unwrap();
 
+        let datasource_storage =
+            storage::DatasourceStorage::try_new(&tmp_dir.path().to_path_buf()).unwrap();
+        let datasource_entry = storage::DatasourceEntry {
+            id: datasource_id,
+            datasource: storage::DatasourceKind::S3(s3_datasource.clone()),
+        };
+        datasource_storage
+            .insert(collection_id, index_id, datasource_entry)
+            .await;
+
         let (sync_sender, mut sync_receiver) = tokio::sync::mpsc::channel(100);
 
         // 1. Initial sync, no changes
         sync_s3_datasource(
+            &datasource_storage,
             &datasource_dir,
             collection_id,
             index_id,
@@ -222,6 +270,7 @@ mod tests {
             .unwrap();
 
         sync_s3_datasource(
+            &datasource_storage,
             &datasource_dir,
             collection_id,
             index_id,
@@ -286,6 +335,7 @@ mod tests {
             .unwrap();
 
         sync_s3_datasource(
+            &datasource_storage,
             &datasource_dir,
             collection_id,
             index_id,
@@ -318,5 +368,64 @@ mod tests {
             }
             _ => panic!("Expected Delete operation"),
         }
+    }
+
+    #[tokio::test]
+    async fn test_sync_s3_datasource_cancelled_on_batch() {
+        let (s3_client, bucket_name, _container, endpoint_url) = setup_s3_container().await;
+
+        let s3_datasource = storage::S3 {
+            bucket: bucket_name.clone(),
+            region: "us-east-1".to_string(),
+            access_key_id: "test".to_string(),
+            secret_access_key: "test".to_string(),
+            endpoint_url: Some(endpoint_url),
+        };
+
+        let tmp_dir = tempfile::tempdir().unwrap();
+        let datasource_dir = tmp_dir.path().to_path_buf();
+        let collection_id = CollectionId::try_new(Faker.fake::<String>()).unwrap();
+        let index_id = IndexId::try_new(Faker.fake::<String>()).unwrap();
+        let datasource_id = IndexId::try_new(Faker.fake::<String>()).unwrap();
+
+        // Create storage but DO NOT register the datasource
+        let datasource_storage =
+            storage::DatasourceStorage::try_new(&tmp_dir.path().to_path_buf()).unwrap();
+
+        let (sync_sender, _sync_receiver) = tokio::sync::mpsc::channel(100);
+
+        // Add 2 * BATCH_SIZE files to S3 to ensure the sync logic runs inside the batch.
+        for i in 0..(BATCH_SIZE * 2) {
+            let key = format!("test-file-{}.json", i);
+            let content = json!({ "message": format!("Hello, Oramacore! (file {})", i) });
+            let content_bytes = serde_json::to_vec(&content).unwrap();
+            s3_client
+                .put_object()
+                .bucket(&bucket_name)
+                .key(&key)
+                .body(ByteStream::from(content_bytes.clone()))
+                .send()
+                .await
+                .unwrap();
+        }
+
+        // This call should fail because the datasource is not in the storage,
+        // and the check is performed before sending the batch.
+        let result = sync_s3_datasource(
+            &datasource_storage,
+            &datasource_dir,
+            collection_id,
+            index_id,
+            datasource_id,
+            &s3_datasource,
+            sync_sender.clone(),
+        )
+        .await;
+
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err
+            .to_string()
+            .contains("Sync cancelled: index or datasource was deleted."));
     }
 }
