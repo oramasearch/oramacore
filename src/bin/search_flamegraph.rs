@@ -125,6 +125,7 @@ fn create_test_config(build: bool) -> OramacoreConfig {
                 insert_batch_commit_size: 100,
                 javascript_queue_limit: 1000,
                 commit_interval: Duration::from_secs(60),
+                datasource_interval: Duration::from_secs(60),
                 temp_index_cleanup: TempIndexCleanupConfig {
                     cleanup_interval: Duration::from_secs(60),
                     max_age: Duration::from_secs(3600),

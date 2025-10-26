@@ -118,6 +118,8 @@ pub struct CollectionsWriterConfig {
     pub javascript_queue_limit: usize,
     #[serde(deserialize_with = "deserialize_duration")]
     pub commit_interval: Duration,
+    #[serde(deserialize_with = "deserialize_duration")]
+    pub datasource_interval: Duration,
     #[serde(default = "default_temp_index_cleanup_config")]
     pub temp_index_cleanup: TempIndexCleanupConfig,
 }
@@ -186,7 +188,7 @@ impl WriteSide {
         let insert_batch_commit_size = collections_writer_config.insert_batch_commit_size;
         let temp_index_cleanup_config = collections_writer_config.temp_index_cleanup.clone();
 
-        let datasource_intreval = Duration::new(5 * 60, 0); // TODO: make it configurable?
+        let datasource_intreval = collections_writer_config.datasource_interval;
         let commit_interval = collections_writer_config.commit_interval;
         let embedding_queue_limit = collections_writer_config.embedding_queue_limit;
 

@@ -48,6 +48,8 @@ writer_side:
         javascript_queue_limit: 500000
         # Set interval for commiting the changes to the disk
         commit_interval: 1m
+        # Set interval to synchronze with datasources
+        datasource_interval: 1h
 
 reader_side:
     input:

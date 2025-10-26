@@ -119,14 +119,18 @@ impl DatasourceStorage {
 
     pub async fn commit(&self) -> Result<()> {
         let file_path = self.base_dir.join("datasources.json");
+        let file_path_tmp = self.base_dir.join("datasources.tmp.json");
         let map_guard = self.map.read("commit").await;
         let map: &CollectionDatasources = &*map_guard;
 
-        let file = std::fs::File::create(&file_path)
-            .with_context(|| format!("Cannot create datasources.json at {:?}", file_path))?;
+        let file = std::fs::File::create(&file_path_tmp)
+            .with_context(|| format!("Cannot create datasources.json at {:?}", file_path_tmp))?;
 
         serde_json::to_writer_pretty(file, map)
-            .with_context(|| format!("Cannot serialize datasources to {:?}", file_path))?;
+            .with_context(|| format!("Cannot serialize datasources to {:?}", file_path_tmp))?;
+
+        std::fs::rename(&file_path_tmp, &file_path)
+            .with_context(|| format!("Cannot rename {:?} to {:?}", file_path_tmp, file_path))?;
 
         Ok(())
     }

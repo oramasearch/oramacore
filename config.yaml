@@ -50,6 +50,8 @@ writer_side:
         javascript_queue_limit: 500000
         # Set interval for commiting the changes to the disk
         commit_interval: 1m
+        # Set interval to synchronze with datasources
+        datasource_interval: 1h
         # Temporary index cleanup configuration
         temp_index_cleanup:
             # How often to run cleanup (default: 1 hour)

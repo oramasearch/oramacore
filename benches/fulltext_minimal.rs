@@ -76,6 +76,7 @@ pub fn create_minimal_config() -> OramacoreConfig {
                 insert_batch_commit_size: 1_000, // Smaller for faster benchmarks
                 javascript_queue_limit: 1_000,
                 commit_interval: Duration::from_secs(300), // Shorter interval
+                datasource_interval: Duration::from_secs(60),
                 temp_index_cleanup: TempIndexCleanupConfig {
                     cleanup_interval: Duration::from_secs(3600),
                     max_age: Duration::from_secs(43200),
