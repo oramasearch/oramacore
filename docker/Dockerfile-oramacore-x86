@@ -1,5 +1,18 @@
+# Stage 1: Build Python environment with dependencies
+FROM python:3.11-slim-bookworm AS python-builder
+
+WORKDIR /app
+
+# Install Python dependencies into a virtual environment
+COPY requirements.txt .
+RUN python3.11 -m venv .venv && \
+    .venv/bin/pip install --upgrade pip && \
+    .venv/bin/pip install -r requirements.txt
+
+# Stage 2: Build Rust application with PyO3
 FROM rust:1.85-slim-bookworm AS rust-builder
 
+# Install build dependencies including Python 3.11 dev headers for PyO3
 RUN apt-get update && apt-get install -y \
   libssl3 \
   pkg-config \
@@ -14,21 +27,35 @@ RUN apt-get update && apt-get install -y \
   libzstd-dev \
   libxml2-dev \
   protobuf-compiler \
-  python3 \
+  python3.11 \
+  python3.11-dev \
   curl \
-  git
+  git \
+  && rm -rf /var/lib/apt/lists/*
 
 ENV RUSTY_V8_MIRROR=https://github.com/denoland/rusty_v8/releases/download
 ENV V8_FROM_SOURCE=0
 
 WORKDIR /usr/src/app
 
-COPY ../ .
+# Copy Python venv from python-builder stage for PyO3 linking
+COPY --from=python-builder /app/.venv /app/.venv
 
+# Set Python environment for PyO3 to use the venv
+ENV PYO3_PYTHON=/app/.venv/bin/python3
+ENV VIRTUAL_ENV=/app/.venv
+ENV PATH="$VIRTUAL_ENV/bin:$PATH"
+
+# Copy source code
+COPY . .
+
+# Build Rust application with PyO3
 RUN cargo build --release
 
-FROM debian:bookworm-slim
+# Stage 3: Runtime image with Python 3.11 and compiled binary
+FROM python:3.11-slim-bookworm
 
+# Install minimal runtime dependencies
 RUN apt-get update && apt-get install -y \
   libssl3 \
   ca-certificates \
@@ -36,9 +63,19 @@ RUN apt-get update && apt-get install -y \
 
 WORKDIR /app
 
+# Copy Python virtual environment with all dependencies
+COPY --from=python-builder /app/.venv /app/.venv
+
+# Copy compiled Rust binary
 COPY --from=rust-builder /usr/src/app/target/release/oramacore /app/
+
+# Copy configuration
 COPY --from=rust-builder /usr/src/app/config.yaml /app/
 
+# Set Python environment variables for runtime
+ENV VIRTUAL_ENV=/app/.venv
+ENV PATH="$VIRTUAL_ENV/bin:$PATH"
+ENV PYO3_PYTHON=/app/.venv/bin/python3
 ENV RUST_LOG=oramacore=trace
 
 EXPOSE 8080

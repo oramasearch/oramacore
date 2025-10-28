@@ -4,8 +4,8 @@ use crate::ai::RemoteLLMProvider;
 use crate::ai::automatic_embeddings_selector::ChosenProperties;
 
 use crate::collection_manager::sides::write::index::{EnumStrategy, FieldType, GeoPoint};
-use crate::collection_manager::sides::write::OramaModelSerializable;
 use crate::collection_manager::sides::{deserialize_api_key, serialize_api_key};
+use crate::python::embeddings::Model;
 use anyhow::{bail, Context, Result};
 use arrayvec::ArrayString;
 
@@ -523,7 +523,7 @@ pub enum DocumentFields {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EmbeddingTypedField {
-    pub model: OramaModelSerializable,
+    pub model: Model,
     pub document_fields: DocumentFields,
 }
 
@@ -540,7 +540,7 @@ pub enum TypedField {
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct CreateCollectionEmbeddings {
-    pub model: Option<OramaModelSerializable>,
+    pub model: Option<Model>,
     pub document_fields: Vec<String>,
 }
 
@@ -633,7 +633,7 @@ pub struct CreateCollection {
     pub write_api_key: ApiKey,
 
     pub language: Option<LanguageDTO>,
-    pub embeddings_model: Option<OramaModelSerializable>,
+    pub embeddings_model: Option<Model>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -644,7 +644,7 @@ pub struct CollectionCreated {
 #[derive(Debug, Deserialize, Clone)]
 pub struct ReindexConfig {
     pub language: LanguageDTO,
-    pub embedding_model: OramaModelSerializable,
+    pub embedding_model: Model,
     pub reference: Option<String>,
 }
 
@@ -827,7 +827,7 @@ pub struct Similarity(pub f32);
 
 impl Default for Similarity {
     fn default() -> Self {
-        Similarity(0.8)
+        Similarity(0.7)
     }
 }
 
@@ -1058,11 +1058,11 @@ impl SearchMode {
                 tolerance: None,
             }),
             "vector" => SearchMode::Vector(VectorMode {
-                similarity: Similarity(0.8),
+                similarity: Similarity(0.7),
                 term,
             }),
             "hybrid" => SearchMode::Hybrid(HybridMode {
-                similarity: Similarity(0.8),
+                similarity: Similarity(0.7),
                 term,
                 threshold: None,
                 exact: false,

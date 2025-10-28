@@ -21,9 +21,30 @@ jobs:
       - uses: actions/checkout@v4
       - name: apt-get update
         run: sudo apt-get update
+      - name: Fix Python apt dependencies and add deadsnakes PPA
+        run: |
+          sudo apt-get install -y software-properties-common python3-apt
+          echo "deb http://ppa.launchpad.net/deadsnakes/ppa/ubuntu noble main" | sudo tee /etc/apt/sources.list.d/deadsnakes-ppa.list
+          echo "deb-src http://ppa.launchpad.net/deadsnakes/ppa/ubuntu noble main" | sudo tee -a /etc/apt/sources.list.d/deadsnakes-ppa.list
+          sudo apt-key adv --keyserver keyserver.ubuntu.com --recv-keys F23C5A6CF475977595C89F51BA6932366A755776
+          sudo apt-get update
       - name: apt-get install
         run: |
-          sudo apt-get install -y libssl3 pkg-config libssl-dev g++ build-essential ca-certificates librocksdb-dev libgflags-dev libsnappy-dev zlib1g-dev libbz2-dev libzstd-dev libxml2-dev protobuf-compiler
+          sudo apt-get install -y libssl3 pkg-config libssl-dev g++ build-essential ca-certificates librocksdb-dev libgflags-dev libsnappy-dev zlib1g-dev libbz2-dev libzstd-dev libxml2-dev protobuf-compiler python3.11 python3.11-dev python3.11-venv python3-pip
+      - name: Set Python 3.11 as default
+        run: |
+          sudo update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.11 1
+          sudo update-alternatives --install /usr/bin/python python /usr/bin/python3.11 1
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m venv .venv
+          source .venv/bin/activate
+          pip install -r requirements.txt
+      - name: Set Python environment variables for linking
+        run: |
+          echo "LD_LIBRARY_PATH=$(python -c 'import sysconfig; print(sysconfig.get_config_var("LIBDIR"))')${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" >> $GITHUB_ENV
+          echo "LIBRARY_PATH=$(python -c 'import sysconfig; print(sysconfig.get_config_var("LIBDIR"))')${LIBRARY_PATH:+:$LIBRARY_PATH}" >> $GITHUB_ENV
       - name: Install Rust
         uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
@@ -36,6 +57,8 @@ jobs:
         run: |
           gcc --version
           g++ --version
+          python --version
+          pip --version
           rustc --version
           cargo --version
       - name: Check & Fmt & Clippy
@@ -45,6 +68,7 @@ jobs:
           cargo clippy --target x86_64-unknown-linux-gnu
       - name: Test
         run: |
+          source .venv/bin/activate
           bash download-test-model.sh
           cargo test --all --target x86_64-unknown-linux-gnu
       - name: Build

@@ -24,13 +24,13 @@ use serde_json::{Map, Value};
 use tracing::{info, instrument, trace, warn};
 
 use crate::{
-    ai::OramaModel,
     collection_manager::sides::{
         field_names_to_paths, write::context::WriteSideContext, CollectionWriteOperation,
         DocumentStorageWriteOperation, IndexWriteOperation, IndexWriteOperationFieldType,
         WriteOperation,
     },
     lock::{OramaAsyncLock, OramaAsyncLockReadGuard, OramaAsyncLockWriteGuard},
+    python::embeddings::Model,
     types::{
         CollectionId, DescribeCollectionIndexResponse, Document, DocumentId, DocumentList, FieldId,
         IndexEmbeddingsCalculation, IndexFieldType, IndexId, OramaDate,
@@ -39,7 +39,7 @@ use crate::{
 use oramacore_lib::fs::BufferedFile;
 use oramacore_lib::nlp::{locales::Locale, TextParser};
 
-pub use fields::{EnumStrategy, FieldType, GeoPoint, IndexedValue, OramaModelSerializable};
+pub use fields::{EnumStrategy, FieldType, GeoPoint, IndexedValue};
 use oramacore_lib::pin_rules::{PinRuleOperation, PinRulesWriter};
 
 #[derive(Clone)]
@@ -248,7 +248,7 @@ impl Index {
     pub async fn add_embedding_field(
         &self,
         field_path: Box<[String]>,
-        model: OramaModel,
+        model: Model,
         embedding_calculation: IndexEmbeddingsCalculation,
     ) -> Result<()> {
         let field_id = self
@@ -289,9 +289,7 @@ impl Index {
                         field_id,
                         field_path,
                         is_array: false,
-                        field_type: IndexWriteOperationFieldType::Embedding(
-                            OramaModelSerializable(model),
-                        ),
+                        field_type: IndexWriteOperationFieldType::Embedding(model),
                     },
                 ),
             ))
@@ -770,9 +768,7 @@ impl Index {
                             field_type: match &score {
                                 IndexScoreField::String(_) => IndexWriteOperationFieldType::String,
                                 IndexScoreField::Embedding(f) => {
-                                    IndexWriteOperationFieldType::Embedding(OramaModelSerializable(
-                                        f.get_model(),
-                                    ))
+                                    IndexWriteOperationFieldType::Embedding(f.get_model())
                                 }
                             },
                         },
