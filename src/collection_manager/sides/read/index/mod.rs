@@ -698,6 +698,17 @@ impl Index {
         for (field_id, merged) in merged_bools {
             match merged {
                 MergeResult::Changed(merged) => {
+                    #[cfg(debug_assertions)]
+                    {
+                        let data_dir = merged.get_field_info().data_dir;
+                        let offset_str = data_dir.components().rev().nth(1).unwrap();
+                        assert_eq!(
+                            offset_str.as_os_str().to_str().unwrap(),
+                            &format!("offset-{}", offset.0),
+                            "Vector field data dir offset mismatch after commit"
+                        );
+                        assert!(std::fs::exists(data_dir).unwrap());
+                    }
                     committed_fields.bool_fields.insert(field_id, merged);
                 }
                 MergeResult::Unchanged => {}
@@ -709,6 +720,17 @@ impl Index {
         for (field_id, merged) in merged_numbers {
             match merged {
                 MergeResult::Changed(merged) => {
+                    #[cfg(debug_assertions)]
+                    {
+                        let data_dir = merged.get_field_info().data_dir;
+                        let offset_str = data_dir.components().rev().nth(1).unwrap();
+                        assert_eq!(
+                            offset_str.as_os_str().to_str().unwrap(),
+                            &format!("offset-{}", offset.0),
+                            "Vector field data dir offset mismatch after commit"
+                        );
+                        assert!(std::fs::exists(data_dir).unwrap());
+                    }
                     committed_fields.number_fields.insert(field_id, merged);
                 }
                 MergeResult::Unchanged => {}
@@ -720,6 +742,17 @@ impl Index {
         for (field_id, merged) in merged_dates {
             match merged {
                 MergeResult::Changed(merged) => {
+                    #[cfg(debug_assertions)]
+                    {
+                        let data_dir = merged.get_field_info().data_dir;
+                        let offset_str = data_dir.components().rev().nth(1).unwrap();
+                        assert_eq!(
+                            offset_str.as_os_str().to_str().unwrap(),
+                            &format!("offset-{}", offset.0),
+                            "Vector field data dir offset mismatch after commit"
+                        );
+                        assert!(std::fs::exists(data_dir).unwrap());
+                    }
                     committed_fields.date_fields.insert(field_id, merged);
                 }
                 MergeResult::Unchanged => {}
@@ -731,6 +764,17 @@ impl Index {
         for (field_id, merged) in merged_geopoints {
             match merged {
                 MergeResult::Changed(merged) => {
+                    #[cfg(debug_assertions)]
+                    {
+                        let data_dir = merged.get_field_info().data_dir;
+                        let offset_str = data_dir.components().rev().nth(1).unwrap();
+                        assert_eq!(
+                            offset_str.as_os_str().to_str().unwrap(),
+                            &format!("offset-{}", offset.0),
+                            "Vector field data dir offset mismatch after commit"
+                        );
+                        assert!(std::fs::exists(data_dir).unwrap());
+                    }
                     committed_fields.geopoint_fields.insert(field_id, merged);
                 }
                 MergeResult::Unchanged => {}
@@ -742,6 +786,17 @@ impl Index {
         for (field_id, merged) in merged_string_filters {
             match merged {
                 MergeResult::Changed(merged) => {
+                    #[cfg(debug_assertions)]
+                    {
+                        let data_dir = merged.get_field_info().data_dir;
+                        let offset_str = data_dir.components().rev().nth(1).unwrap();
+                        assert_eq!(
+                            offset_str.as_os_str().to_str().unwrap(),
+                            &format!("offset-{}", offset.0),
+                            "Vector field data dir offset mismatch after commit"
+                        );
+                        assert!(std::fs::exists(data_dir).unwrap());
+                    }
                     committed_fields
                         .string_filter_fields
                         .insert(field_id, merged);
@@ -755,6 +810,17 @@ impl Index {
         for (field_id, merged) in merged_strings {
             match merged {
                 MergeResult::Changed(merged) => {
+                    #[cfg(debug_assertions)]
+                    {
+                        let data_dir = merged.get_field_info().data_dir;
+                        let offset_str = data_dir.components().rev().nth(1).unwrap();
+                        assert_eq!(
+                            offset_str.as_os_str().to_str().unwrap(),
+                            &format!("offset-{}", offset.0),
+                            "Vector field data dir offset mismatch after commit"
+                        );
+                        assert!(std::fs::exists(data_dir).unwrap());
+                    }
                     committed_fields.string_fields.insert(field_id, merged);
                 }
                 MergeResult::Unchanged => {}
@@ -766,6 +832,17 @@ impl Index {
         for (field_id, merged) in merged_vectors {
             match merged {
                 MergeResult::Changed(merged) => {
+                    #[cfg(debug_assertions)]
+                    {
+                        let data_dir = merged.get_field_info().data_dir;
+                        let offset_str = data_dir.components().rev().nth(1).unwrap();
+                        assert_eq!(
+                            offset_str.as_os_str().to_str().unwrap(),
+                            &format!("offset-{}", offset.0),
+                            "Vector field data dir offset mismatch after commit"
+                        );
+                        assert!(std::fs::exists(data_dir).unwrap());
+                    }
                     committed_fields.vector_fields.insert(field_id, merged);
                 }
                 MergeResult::Unchanged => {}
@@ -850,6 +927,90 @@ impl Index {
         Ok(())
     }
 
+    pub async fn clean_up(&self, index_data_dir: PathBuf) -> Result<()> {
+        let committed_fields = self.committed_fields.read("clean_up").await;
+
+        let field_data_dirs: HashSet<_> = committed_fields
+            .bool_fields
+            .values()
+            .map(|f| f.get_field_info().data_dir)
+            .chain(
+                committed_fields
+                    .number_fields
+                    .values()
+                    .map(|f| f.get_field_info().data_dir),
+            )
+            .chain(
+                committed_fields
+                    .string_filter_fields
+                    .values()
+                    .map(|f| f.get_field_info().data_dir),
+            )
+            .chain(
+                committed_fields
+                    .date_fields
+                    .values()
+                    .map(|f| f.get_field_info().data_dir),
+            )
+            .chain(
+                committed_fields
+                    .geopoint_fields
+                    .values()
+                    .map(|f| f.get_field_info().data_dir),
+            )
+            .chain(
+                committed_fields
+                    .string_fields
+                    .values()
+                    .map(|f| f.get_field_info().data_dir),
+            )
+            .chain(
+                committed_fields
+                    .vector_fields
+                    .values()
+                    .map(|f| f.get_field_info().data_dir),
+            )
+            .map(|f| f.parent().unwrap().to_path_buf())
+            .collect();
+
+        let subfolders = match std::fs::read_dir(index_data_dir) {
+            Ok(a) => a,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                // No data dir, nothing to clean
+                return Ok(());
+            }
+            Err(e) => {
+                return Err(anyhow::anyhow!(
+                    "Cannot read index data dir for cleanup: {:?}",
+                    e
+                ));
+            }
+        };
+        let subfolders: Result<Vec<_>, _> = subfolders.collect();
+
+        let subfolders = subfolders.context("Cannot read entry in index folder")?;
+
+        for entry in subfolders {
+            let a = entry.file_type().context("Cannot get file type")?;
+            if !a.is_dir() {
+                continue;
+            }
+
+            if field_data_dirs.contains(&entry.path()) {
+                continue;
+            }
+
+            if !entry.file_name().to_str().unwrap().starts_with("offset-") {
+                continue;
+            }
+
+            info!("Removing unused index data folder: {:?}", entry.path());
+            std::fs::remove_dir_all(entry.path()).context("Cannot remove path")?;
+        }
+
+        Ok(())
+    }
+
     async fn try_unload_fields(&self) {
         let lock = self.committed_fields.read("try_unload_fields").await;
         for string_field in lock.string_fields.values() {
@@ -887,6 +1048,7 @@ impl Index {
     }
 
     pub fn mark_as_deleted(&mut self, reason: DeletionReason) {
+        debug_assert!(self.deleted.is_none(), "Index is already deleted");
         self.deleted = Some(reason);
         self.updated_at = Utc::now();
     }
@@ -1735,10 +1897,10 @@ impl Index {
             };
 
             let variants: Vec<_> = uncommitted_groupable.get_values().collect();
-            if variants.len() > 50 {
-                // Should we group by a field with more than 50 variant???
+            if variants.len() > 500 {
+                // Should we group by a field with more than 500 variant???
                 // TODO: think about it. For now, no.
-                bail!("Cannot calculate groups on a field with more than 50 variant");
+                bail!("Cannot calculate groups on a field with more than 500 variant");
             }
 
             for variant in &variants {
@@ -1772,10 +1934,10 @@ impl Index {
 
             if let Some(committed_groupable) = committed_groupable {
                 let variants: Vec<_> = committed_groupable.get_values().collect();
-                if variants.len() > 50 {
-                    // Should we group by a field with more than 50 variant???
+                if variants.len() > 500 {
+                    // Should we group by a field with more than 500 variant???
                     // TODO: think about it. For now, no.
-                    bail!("Cannot calculate groups on a field with more than 50 variant");
+                    bail!("Cannot calculate groups on a field with more than 500 variant");
                 }
 
                 for variant in &variants {
