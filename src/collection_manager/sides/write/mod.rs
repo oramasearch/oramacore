@@ -470,27 +470,6 @@ impl WriteSide {
         Ok(())
     }
 
-    pub async fn remove_datasource_from_index(
-        &self,
-        write_api_key: WriteApiKey,
-        collection_id: CollectionId,
-        index_id: IndexId,
-        datasource_id: IndexId,
-    ) -> Result<(), WriteError> {
-        let collection = self.get_collection(collection_id, write_api_key).await?;
-
-        collection
-            .get_index(index_id)
-            .await
-            .ok_or_else(|| WriteError::IndexNotFound(collection_id, index_id))?;
-
-        self.datasource_storage
-            .remove_datasource(collection_id, index_id, datasource_id)
-            .await;
-
-        Ok(())
-    }
-
     pub async fn reindex(
         &self,
         write_api_key: WriteApiKey,

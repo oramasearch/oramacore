@@ -43,10 +43,6 @@ pub fn apis(write_side: Arc<WriteSide>) -> Router {
             post(delete_index),
         )
         .route(
-            "/v1/collections/{collection_id}/indexes/{index_id}/datasource/{datasource_id}/delete",
-            post(remove_datasource_from_index),
-        )
-        .route(
             "/v1/collections/{collection_id}/indexes/{index_id}/insert",
             post(add_documents),
         )
@@ -143,17 +139,6 @@ async fn delete_index(
 ) -> impl IntoResponse {
     write_side
         .delete_index(write_api_key, collection_id, json.id)
-        .await
-        .map(|_| Json(json!({})))
-}
-
-async fn remove_datasource_from_index(
-    Path((collection_id, index_id, datasource_id)): Path<(CollectionId, IndexId, IndexId)>,
-    write_side: State<Arc<WriteSide>>,
-    write_api_key: WriteApiKey,
-) -> impl IntoResponse {
-    write_side
-        .remove_datasource_from_index(write_api_key, collection_id, index_id, datasource_id)
         .await
         .map(|_| Json(json!({})))
 }
