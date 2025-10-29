@@ -118,7 +118,10 @@ pub struct CollectionsWriterConfig {
     pub javascript_queue_limit: usize,
     #[serde(deserialize_with = "deserialize_duration")]
     pub commit_interval: Duration,
-    #[serde(deserialize_with = "deserialize_duration")]
+    #[serde(
+        default = "default_datasource_interval",
+        deserialize_with = "deserialize_duration"
+    )]
     pub datasource_interval: Duration,
     #[serde(default = "default_temp_index_cleanup_config")]
     pub temp_index_cleanup: TempIndexCleanupConfig,
@@ -1489,6 +1492,10 @@ fn embedding_model_default() -> OramaModelSerializable {
 
 fn default_insert_batch_commit_size() -> u64 {
     1_000
+}
+
+fn default_datasource_interval() -> Duration {
+    Duration::from_secs(3600)
 }
 
 fn default_temp_index_cleanup_config() -> TempIndexCleanupConfig {
