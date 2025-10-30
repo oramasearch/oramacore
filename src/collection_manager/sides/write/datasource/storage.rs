@@ -78,10 +78,12 @@ impl DatasourceStorage {
             }
         }
 
+        self.save_to_disk().await?;
+
         Ok(())
     }
 
-    pub async fn remove_collection(&self, collection_id: CollectionId) {
+    pub async fn remove_collection(&self, collection_id: CollectionId) -> Result<()> {
         let mut m = self.map.write("remove_collection").await;
         let keys_to_remove: Vec<_> = m
             .iter()
@@ -94,14 +96,24 @@ impl DatasourceStorage {
             })
             .collect();
 
-        for key in keys_to_remove {
+        for key in &keys_to_remove {
             m.remove(&key);
         }
+
+        if !keys_to_remove.is_empty() {
+            self.save_to_disk().await?;
+        }
+
+        Ok(())
     }
 
-    pub async fn remove_index(&self, collection_id: CollectionId, index_id: IndexId) {
+    pub async fn remove_index(&self, collection_id: CollectionId, index_id: IndexId) -> Result<()> {
         let mut m = self.map.write("remove_index").await;
-        m.remove(&(collection_id, index_id));
+        if m.remove(&(collection_id, index_id)).is_some() {
+            self.save_to_disk().await?;
+        }
+
+        Ok(())
     }
 
     pub async fn get(&self) -> CollectionDatasources {
@@ -139,7 +151,7 @@ impl DatasourceStorage {
         }
     }
 
-    pub async fn commit(&self) -> Result<()> {
+    pub async fn save_to_disk(&self) -> Result<()> {
         let file_path_tmp = self.file_path.with_extension("tmp.json");
         let map_guard = self.map.read("commit").await;
 

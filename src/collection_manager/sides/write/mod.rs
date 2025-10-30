@@ -376,11 +376,6 @@ impl WriteSide {
             .write_json_data(&info)
             .context("Cannot write info file")?;
 
-        self.datasource_storage
-            .commit()
-            .await
-            .context("Cannot commit datasource storage")?;
-
         Ok(())
     }
 
