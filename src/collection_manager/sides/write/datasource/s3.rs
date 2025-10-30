@@ -6,6 +6,7 @@ use aws_sdk_s3::{
     Client,
 };
 use resy::remotes::aws::{Change, S3};
+use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use std::path::PathBuf;
 use tracing::error;
@@ -15,6 +16,44 @@ use crate::collection_manager::sides::write::datasource::{Operation, SyncUpdate}
 use crate::types::{CollectionId, Document, DocumentList, IndexId};
 
 use super::DatasourceError;
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+pub struct S3Fetcher {
+    pub bucket: String,
+    pub region: String,
+    pub access_key_id: String,
+    pub secret_access_key: String,
+    pub endpoint_url: Option<String>,
+}
+
+pub async fn validate_credentials(s3_fetcher: &S3Fetcher) -> Result<()> {
+    let credentials = Credentials::new(
+        s3_fetcher.access_key_id.clone(),
+        s3_fetcher.secret_access_key.clone(),
+        None,
+        None,
+        "resy",
+    );
+
+    let mut s3_config_builder = aws_sdk_s3::config::Builder::new()
+        .credentials_provider(SharedCredentialsProvider::new(credentials))
+        .region(Region::new(s3_fetcher.region.clone()))
+        .behavior_version(BehaviorVersion::latest());
+
+    if let Some(endpoint_url) = &s3_fetcher.endpoint_url {
+        s3_config_builder = s3_config_builder.endpoint_url(endpoint_url);
+        s3_config_builder = s3_config_builder.force_path_style(true);
+    }
+
+    let s3_config = s3_config_builder.build();
+    let s3_client = Client::from_conf(s3_config);
+
+    s3_client.list_buckets().send().await.context(
+        "Failed to validate S3 credentials. Please check your credentials and permissions.",
+    )?;
+
+    Ok(())
+}
 
 const BATCH_SIZE: usize = 10;
 

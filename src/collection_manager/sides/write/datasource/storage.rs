@@ -8,24 +8,25 @@ use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 
+use super::s3::{self, S3Fetcher};
+
 struct DatasourceWrapper {
     in_use: AtomicBool,
     fetcher: Fetcher,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
-pub struct S3Fetcher {
-    pub bucket: String,
-    pub region: String,
-    pub access_key_id: String,
-    pub secret_access_key: String,
-    pub endpoint_url: Option<String>,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub enum Fetcher {
     S3(S3Fetcher),
+}
+
+impl Fetcher {
+    pub async fn validate(&self) -> Result<()> {
+        match self {
+            Fetcher::S3(s3_fetcher) => s3::validate_credentials(s3_fetcher).await,
+        }
+    }
 }
 
 pub type CollectionDatasources = HashMap<(CollectionId, IndexId), Arc<DatasourceWrapper>>;
@@ -56,7 +57,14 @@ impl DatasourceStorage {
         &self.base_dir
     }
 
-    pub async fn insert(&self, collection_id: CollectionId, index_id: IndexId, fetcher: Fetcher) {
+    pub async fn insert(
+        &self,
+        collection_id: CollectionId,
+        index_id: IndexId,
+        fetcher: Fetcher,
+    ) -> Result<()> {
+        fetcher.validate().await?;
+
         let mut m = self.map.write("insert").await;
         match m.entry((collection_id, index_id)) {
             std::collections::hash_map::Entry::Vacant(entry) => {
@@ -69,6 +77,8 @@ impl DatasourceStorage {
                 unreachable!("nop")
             }
         }
+
+        Ok(())
     }
 
     pub async fn remove_collection(&self, collection_id: CollectionId) {
@@ -155,10 +165,11 @@ impl DatasourceStorage {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tests::utils::setup_s3_container;
     use tempfile::tempdir;
 
     #[tokio::test]
-    async fn test_datasource_persistence() {
+    async fn test_insert_fail_invalid_credentials() {
         let temp_dir = tempdir().unwrap();
         let storage = DatasourceStorage::try_new(&temp_dir.path().to_path_buf()).unwrap();
 
@@ -168,14 +179,41 @@ mod tests {
         let fetcher = Fetcher::S3(S3Fetcher {
             bucket: "bucket1".to_string(),
             region: "us-east-1".to_string(),
-            access_key_id: "key_id".to_string(),
-            secret_access_key: "secret".to_string(),
+            access_key_id: "invaid".to_string(),
+            secret_access_key: "invalid".to_string(),
             endpoint_url: None,
+        });
+
+        let result = storage
+            .insert(coll_id.clone(), index_id.clone(), fetcher.clone())
+            .await;
+        assert!(result.is_err());
+
+        let all_ds = storage.get().await;
+        assert!(all_ds.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_datasource_persistence() {
+        let (_s3_client, bucket_name, _container, endpoint_url) = setup_s3_container().await;
+        let temp_dir = tempdir().unwrap();
+        let storage = DatasourceStorage::try_new(&temp_dir.path().to_path_buf()).unwrap();
+
+        let coll_id = CollectionId::try_new("coll1".to_string()).unwrap();
+        let index_id = IndexId::try_new("idx1".to_string()).unwrap();
+
+        let fetcher = Fetcher::S3(S3Fetcher {
+            bucket: bucket_name,
+            region: "us-east-1".to_string(),
+            access_key_id: "test".to_string(),
+            secret_access_key: "test".to_string(),
+            endpoint_url: Some(endpoint_url),
         });
 
         storage
             .insert(coll_id.clone(), index_id.clone(), fetcher.clone())
-            .await;
+            .await
+            .unwrap();
         storage.commit().await.unwrap();
 
         let new_storage = DatasourceStorage::try_new(&temp_dir.path().to_path_buf()).unwrap();
