@@ -23,6 +23,8 @@ use std::{
     time::Duration,
 };
 
+use self::datasource::SyncUpdate;
+
 use super::{
     system_prompts::SystemPromptInterface, Offset, OperationSender, OperationSenderCreator,
     OutputSideChannelType,
@@ -144,7 +146,7 @@ pub struct WriteSide {
     operation_counter: OramaAsyncLock<u64>,
     insert_batch_commit_size: u64,
 
-    datasource_storage: datasource::storage::DatasourceStorage,
+    datasource_storage: datasource::DatasourceStorage,
     document_storage: DocumentStorage,
     system_prompts: SystemPromptInterface,
     training_sets: TrainingSetInterface,
@@ -171,7 +173,6 @@ pub struct WriteSide {
     write_operation_counter: AtomicU32,
 
     jwt_manager: JwtManager,
-    datasource_sync_sender: tokio::sync::mpsc::Sender<(CollectionId, IndexId)>,
 }
 
 impl WriteSide {
@@ -254,16 +255,26 @@ impl WriteSide {
             .await
             .context("Cannot create document storage")?;
 
-        let datasource_storage = datasource::storage::DatasourceStorage::try_new(&datasource_dir)
-            .context("Cannot create datasource storage")?;
-
         let (stop_done_sender, stop_done_receiver) = tokio::sync::mpsc::channel(1);
         let (stop_sender, _) = tokio::sync::broadcast::channel(1);
         let commit_loop_receiver = stop_sender.subscribe();
         let temp_index_cleanup_receiver = stop_sender.subscribe();
-        let datasource_receiver = stop_sender.subscribe();
+        let datasource_loop_receiver = stop_sender.subscribe();
         let receive_operation_loop_receiver = stop_sender.subscribe();
-        let (datasource_sync_sender, datasource_sync_receiver) = tokio::sync::mpsc::channel(100);
+        let (datasource_sender, datasource_receiver) = tokio::sync::mpsc::channel(100);
+
+        let datasource_storage = datasource::DatasourceStorage::try_new(&datasource_dir)
+            .context("Cannot create datasource storage")?;
+
+        datasource_storage
+            .start_datasource_loop(
+                datasource_interval,
+                datasource_sender,
+                datasource_loop_receiver,
+                stop_done_sender.clone(),
+            )
+            .await
+            .context("Cannot start the datasource loop")?;
 
         let jwt_manager = JwtManager::new(config.jwt)
             .await
@@ -290,18 +301,11 @@ impl WriteSide {
             stop_done_receiver: OramaAsyncLock::new("stop_done_receiver", stop_done_receiver),
             write_operation_counter: AtomicU32::new(0),
             jwt_manager,
-            datasource_sync_sender,
         };
 
         let write_side = Arc::new(write_side);
 
-        datasource::start_datasource_loop(
-            write_side.clone(),
-            datasource_interval,
-            datasource_receiver,
-            stop_done_sender.clone(),
-            datasource_sync_receiver,
-        );
+        start_datasource_loop(write_side.clone(), datasource_receiver);
 
         start_commit_loop(
             write_side.clone(),
@@ -452,14 +456,7 @@ impl WriteSide {
         if let Some(datasource) = datasource {
             self.datasource_storage
                 .insert(collection_id, index_id, datasource)
-                .await;
-
-            if let Err(e) = self
-                .datasource_sync_sender
-                .try_send((collection_id, index_id))
-            {
-                error!("Failed to send datasource sync request: {}", e);
-            }
+                .await?;
         }
 
         Ok(())
@@ -671,7 +668,7 @@ impl WriteSide {
         self.document_storage.remove(document_to_remove).await;
         self.datasource_storage
             .remove_index(collection_id, index_id)
-            .await;
+            .await?;
 
         Ok(())
     }
@@ -975,7 +972,7 @@ impl WriteSide {
 
         self.datasource_storage
             .remove_collection(collection_id)
-            .await;
+            .await?;
 
         Ok(())
     }
@@ -1350,6 +1347,55 @@ impl WriteSide {
 
         Ok(())
     }
+}
+
+fn start_datasource_loop(
+    write_side: Arc<WriteSide>,
+    mut update_receiver: tokio::sync::mpsc::Receiver<SyncUpdate>,
+) {
+    tokio::spawn(async move {
+        info!("Starting datasource loop");
+        while let Some(sync_msg) = update_receiver.recv().await {
+            match sync_msg.operation {
+                datasource::Operation::Insert(docs) => {
+                    if let Err(e) = write_side
+                        .insert_documents(
+                            WriteApiKey::ApiKey(write_side.master_api_key.clone()),
+                            sync_msg.collection_id,
+                            sync_msg.index_id,
+                            docs,
+                        )
+                        .await
+                    {
+                        error!(
+                            error = ?e,
+                            "Failed to insert documents from datasource collection: {} index: {}",
+                            sync_msg.collection_id,
+                            sync_msg.index_id,
+                        );
+                    }
+                }
+                datasource::Operation::Delete(keys_to_remove) => {
+                    if let Err(e) = write_side
+                        .delete_documents(
+                            WriteApiKey::ApiKey(write_side.master_api_key.clone()),
+                            sync_msg.collection_id,
+                            sync_msg.index_id,
+                            keys_to_remove,
+                        )
+                        .await
+                    {
+                        error!(
+                            error = ?e,
+                            "Failed to delete documents from datasource collection: {} index: {}",
+                            sync_msg.collection_id,
+                            sync_msg.index_id,
+                        );
+                    }
+                }
+            }
+        }
+    });
 }
 
 fn start_commit_loop(

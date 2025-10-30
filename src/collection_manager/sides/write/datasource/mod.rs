@@ -1,13 +1,17 @@
-pub mod s3;
-pub mod storage;
-use thiserror::Error;
-use tokio::time::MissedTickBehavior;
-use tracing::info;
-
-use super::WriteSide;
-use crate::types::{CollectionId, DeleteDocuments, DocumentList, IndexId, WriteApiKey};
+mod s3;
+use crate::lock::OramaAsyncLock;
+use crate::types::{CollectionId, DeleteDocuments, DocumentList, IndexId};
+use anyhow::{Context, Result};
+use oramacore_lib::fs::create_if_not_exists;
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::{sync::Arc, time};
-use tracing::error;
+use thiserror::Error;
+use tokio::sync::Mutex;
+use tokio::time::MissedTickBehavior;
+use tracing::{error, info};
 
 #[derive(Error, Debug)]
 pub enum DatasourceError {
@@ -35,36 +39,322 @@ pub struct SyncUpdate {
     pub operation: Operation,
 }
 
-fn spawn_sync_tasks(
-    write_side: &Arc<WriteSide>,
-    sync_sender: tokio::sync::mpsc::Sender<SyncUpdate>,
+struct DatasourceWrapper {
+    in_use: AtomicBool,
+    fetcher: Fetcher,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub enum Fetcher {
+    S3(s3::S3Fetcher),
+}
+
+impl Fetcher {
+    pub async fn validate(&self) -> Result<()> {
+        match self {
+            Fetcher::S3(s3_fetcher) => s3::validate_credentials(s3_fetcher).await,
+        }
+    }
+
+    pub async fn delete(&self) -> Result<()> {
+        match self {
+            Fetcher::S3(_s3_fetcher) => {
+                // should remove the resy file
+                Ok(())
+            }
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+struct SerializableDatasourceEntry {
     collection_id: CollectionId,
     index_id: IndexId,
-    datasource: storage::Fetcher,
-) {
-    let datasource_dir = write_side.datasource_storage.base_dir();
-    let task_sender_clone = sync_sender.clone();
-    let datasource_dir_clone = datasource_dir.clone();
-    let datasource_storage_clone = write_side.datasource_storage.clone();
+    fetcher: Fetcher,
+}
 
-    match &datasource {
-        storage::Fetcher::S3(s3_datasource) => {
-            let s3_datasource = s3_datasource.clone();
-            let datasource_id = datasource.id;
-            // TODO: update resy to implement async correctly
-            tokio::task::spawn_blocking(move || {
-                let rt = tokio::runtime::Builder::new_current_thread()
-                    .enable_all()
-                    .build()
-                    .unwrap();
+type CollectionDatasources = HashMap<(CollectionId, IndexId), Arc<DatasourceWrapper>>;
 
-                rt.block_on(async {
+pub struct DatasourceStorage {
+    base_dir: PathBuf,
+    file_path: PathBuf,
+    fetcher_trigg_sender: tokio::sync::mpsc::Sender<(CollectionId, IndexId)>,
+    fetcher_trigg_receiver: Mutex<Option<tokio::sync::mpsc::Receiver<(CollectionId, IndexId)>>>,
+    map: Arc<OramaAsyncLock<CollectionDatasources>>,
+}
+
+impl DatasourceStorage {
+    pub fn try_new(base_dir: &PathBuf) -> Result<Self> {
+        create_if_not_exists(base_dir).context("Cannot create datasource directory")?;
+
+        let file_path = base_dir.join("datasources.json");
+        let map = Self::load_from_disk(&file_path)?;
+
+        let (fetcher_trigg_sender, fetcher_trigg_receiver) = tokio::sync::mpsc::channel(100);
+
+        Ok(Self {
+            base_dir: base_dir.clone(),
+            file_path,
+            map: Arc::new(OramaAsyncLock::new("datasource_storage", map)),
+            fetcher_trigg_sender,
+            fetcher_trigg_receiver: Mutex::new(Some(fetcher_trigg_receiver)),
+        })
+    }
+
+    pub async fn insert(
+        &self,
+        collection_id: CollectionId,
+        index_id: IndexId,
+        fetcher: Fetcher,
+    ) -> Result<()> {
+        fetcher.validate().await?;
+
+        let mut m = self.map.write("insert").await;
+        match m.entry((collection_id, index_id)) {
+            std::collections::hash_map::Entry::Vacant(entry) => {
+                entry.insert(Arc::new(DatasourceWrapper {
+                    in_use: AtomicBool::new(false),
+                    fetcher,
+                }));
+            }
+            std::collections::hash_map::Entry::Occupied(_) => {
+                unreachable!("nop")
+            }
+        }
+
+        drop(m);
+
+        if let Err(e) = self
+            .fetcher_trigg_sender
+            .try_send((collection_id, index_id))
+        {
+            error!("Failed to send datasource sync request: {}", e);
+        }
+
+        self.save_to_disk().await?;
+
+        Ok(())
+    }
+
+    pub async fn remove_collection(&self, collection_id: CollectionId) -> Result<()> {
+        let mut m = self.map.write("remove_collection").await;
+        let keys_to_remove: Vec<_> = m
+            .iter()
+            .filter_map(|(k, _)| {
+                if k.0 == collection_id {
+                    Some(k.clone())
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        for key in &keys_to_remove {
+            if let Some(f) = m.remove(key) {
+                if let Err(e) = f.fetcher.delete().await {
+                    error!("Failed to delete datasource for {:?}: {}", key, e);
+                }
+            }
+        }
+
+        if !keys_to_remove.is_empty() {
+            self.save_to_disk().await?;
+        }
+
+        Ok(())
+    }
+
+    pub async fn remove_index(&self, collection_id: CollectionId, index_id: IndexId) -> Result<()> {
+        let mut m = self.map.write("remove_index").await;
+        if let Some(f) = m.remove(&(collection_id, index_id)) {
+            if let Err(e) = f.fetcher.delete().await {
+                error!(
+                    "Failed to delete datasource for ({}, {}): {}",
+                    collection_id, index_id, e
+                );
+            }
+            self.save_to_disk().await?;
+        }
+
+        Ok(())
+    }
+
+    pub async fn exists(&self, collection_id: CollectionId, index_id: IndexId) -> bool {
+        let m = self.map.read("exists").await;
+        m.contains_key(&(collection_id, index_id))
+    }
+
+    fn load_from_disk(file_path: &PathBuf) -> Result<CollectionDatasources> {
+        if file_path.exists() {
+            let file = std::fs::File::open(file_path)
+                .with_context(|| format!("Cannot open datasources.json at {:?}", file_path))?;
+            let serializable_vec: Vec<SerializableDatasourceEntry> = serde_json::from_reader(file)
+                .with_context(|| {
+                    format!("Cannot deserialize datasources.json at {:?}", file_path)
+                })?;
+
+            Ok(serializable_vec
+                .into_iter()
+                .map(|entry| {
+                    (
+                        (entry.collection_id, entry.index_id),
+                        Arc::new(DatasourceWrapper {
+                            in_use: AtomicBool::new(false),
+                            fetcher: entry.fetcher,
+                        }),
+                    )
+                })
+                .collect())
+        } else {
+            Ok(HashMap::new())
+        }
+    }
+
+    async fn save_to_disk(&self) -> Result<()> {
+        create_if_not_exists(&self.base_dir).context("Cannot create datasource directory")?;
+        let file_path_tmp = self.file_path.with_extension("tmp.json");
+        let map_guard = self.map.read("save_to_disk").await;
+
+        let serializable_vec: Vec<SerializableDatasourceEntry> = map_guard
+            .iter()
+            .map(|((collection_id, index_id), value)| SerializableDatasourceEntry {
+                collection_id: *collection_id,
+                index_id: *index_id,
+                fetcher: value.fetcher.clone(),
+            })
+            .collect();
+
+        drop(map_guard);
+
+        let file = std::fs::File::create(&file_path_tmp)
+            .with_context(|| format!("Cannot create datasources.json at {:?}", file_path_tmp))?;
+
+        serde_json::to_writer_pretty(file, &serializable_vec)
+            .with_context(|| format!("Cannot serialize datasources to {:?}", file_path_tmp))?;
+
+        std::fs::rename(&file_path_tmp, &self.file_path).with_context(|| {
+            format!("Cannot rename {:?} to {:?}", file_path_tmp, self.file_path)
+        })?;
+
+        Ok(())
+    }
+
+    pub async fn start_datasource_loop(
+        &self,
+        interval: time::Duration,
+        datasource_update_sender: tokio::sync::mpsc::Sender<SyncUpdate>,
+        mut stop_receiver: tokio::sync::broadcast::Receiver<()>,
+        stop_done_sender: tokio::sync::mpsc::Sender<()>,
+    ) -> Result<()> {
+        let map = self.map.clone();
+        let base_dir = self.base_dir.clone();
+        let mut fetcher_trigg_receiver = self
+            .fetcher_trigg_receiver
+            .lock()
+            .await
+            .take()
+            .context("start_datasource_loop can only be called once")?;
+
+        tokio::task::spawn(async move {
+            let start = tokio::time::Instant::now() + interval;
+            let mut interval = tokio::time::interval_at(start, interval);
+            interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
+
+            'outer: loop {
+                tokio::select! {
+                    _ = stop_receiver.recv() => {
+                        info!("Stopping datasource loop");
+                        break 'outer;
+                    }
+                    _ = interval.tick() => {
+                        info!("Running periodic datasource sync");
+                        let mut v = Vec::new();
+                        let lock = map.read("run_interval").await;
+                        for ((collection_id, index_id), kind) in lock.iter() {
+                            if kind.in_use.compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed).is_ok() {
+                                v.push((DatasourceStorage::run_fetcher_task(
+                                    *collection_id,
+                                    *index_id,
+                                    base_dir.clone(),
+                                    kind.fetcher.clone(),
+                                    datasource_update_sender.clone(),
+                                ), kind.clone()));
+                            }
+                        }
+                        drop(lock);
+                        tokio::spawn(async move {
+                            for (handle, kind) in v {
+                                if let Err(e) = handle.await {
+                                    error!("Datasource sync task failed: {:?}", e);
+                                }
+                                kind.in_use.store(false, Ordering::Release);
+                            }
+                        });
+                    }
+                Some((collection_id, index_id)) = fetcher_trigg_receiver.recv() => {
+                        let mut v = Vec::new();
+                        let lock = map.read("run_explicit").await;
+                        if let Some(kind) = lock.get(&(collection_id, index_id)) {
+                            if kind.in_use.compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed).is_ok() {
+                                v.push((DatasourceStorage::run_fetcher_task(
+                                    collection_id,
+                                    index_id,
+                                    base_dir.clone(),
+                                    kind.fetcher.clone(),
+                                    datasource_update_sender.clone(),
+                                    ), kind.clone()));
+                            }
+
+                        }
+                        drop(lock);
+
+                        tokio::spawn(async move {
+                            for (handle , kind )in v {
+                                if let Err(e) = handle.await {
+                                    error!("Datasource sync task failed: {:?}", e);
+                                }
+                                kind.in_use.store(false, Ordering::Release);
+                            }
+                        });
+                    }
+                };
+            }
+
+            drop(datasource_update_sender);
+
+            if let Err(e) = stop_done_sender.send(()).await {
+                error!(error = ?e, "Cannot send stop signal to writer side");
+            }
+        });
+
+        Ok(())
+    }
+
+    fn run_fetcher_task(
+        collection_id: CollectionId,
+        index_id: IndexId,
+        datasource_dir_clone: PathBuf,
+        datasource: Fetcher,
+        sync_sender: tokio::sync::mpsc::Sender<SyncUpdate>,
+    ) -> tokio::task::JoinHandle<()> {
+        let task_sender_clone = sync_sender.clone();
+
+        match &datasource {
+            Fetcher::S3(s3_datasource) => {
+                let s3_datasource = s3_datasource.clone();
+                // TODO: update resy to implement async correctly
+                tokio::task::spawn_blocking(move || {
+                    let rt = tokio::runtime::Builder::new_current_thread()
+                        .enable_all()
+                        .build()
+                        .unwrap();
+
+                    rt.block_on(async {
                         match s3::sync_s3_datasource(
-                            &datasource_storage_clone,
-                            &datasource_dir_clone,
+                            datasource_dir_clone,
                             collection_id,
                             index_id,
-                            datasource_id,
                             &s3_datasource,
                             task_sender_clone,
                         )
@@ -79,102 +369,67 @@ fn spawn_sync_tasks(
                             }
                         }
                     })
-            });
+                })
+            }
         }
     }
 }
 
-pub fn start_datasource_loop(
-    write_side: Arc<WriteSide>,
-    interval: time::Duration,
-    mut stop_receiver: tokio::sync::broadcast::Receiver<()>,
-    stop_done_sender: tokio::sync::mpsc::Sender<()>,
-    mut explicit_run_receiver: tokio::sync::mpsc::Receiver<(CollectionId, IndexId)>,
-) {
-    let (update_sender, update_receiver) = tokio::sync::mpsc::channel(100);
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::tests::utils::setup_s3_container;
+    use tempfile::tempdir;
 
-    tokio::spawn(async move {
-        info!("Starting datasource loop");
-        while let Some(sync_msg) = update_receiver.recv().await {
-            match sync_msg.operation {
-                Operation::Insert(docs) => {
-                    if let Err(e) = write_side
-                        .insert_documents(
-                            WriteApiKey::ApiKey(write_side.master_api_key.clone()),
-                            sync_msg.collection_id,
-                            sync_msg.index_id,
-                            docs,
-                        )
-                        .await
-                    {
-                        error!(
-                            error = ?e,
-                            "Failed to insert documents from datasource collection: {} index: {}",
-                            sync_msg.collection_id,
-                            sync_msg.index_id,
-                        );
-                    }
-                }
-                Operation::Delete(keys_to_remove) => {
-                    if let Err(e) = write_side
-                        .delete_documents(
-                            WriteApiKey::ApiKey(write_side.master_api_key.clone()),
-                            sync_msg.collection_id,
-                            sync_msg.index_id,
-                            keys_to_remove,
-                        )
-                        .await
-                    {
-                        error!(
-                            error = ?e,
-                            "Failed to delete documents from datasource collection: {} index: {}",
-                            sync_msg.collection_id,
-                            sync_msg.index_id,
-                        );
-                    }
-                }
-            }
-        }
-    });
+    #[tokio::test]
+    async fn test_insert_fail_invalid_credentials() {
+        let temp_dir = tempdir().unwrap();
+        let storage = DatasourceStorage::try_new(&temp_dir.path().to_path_buf()).unwrap();
 
-    tokio::task::spawn(async move {
-        let start = tokio::time::Instant::now() + interval;
-        let mut interval = tokio::time::interval_at(start, interval);
-        interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
+        let coll_id = CollectionId::try_new("coll1".to_string()).unwrap();
+        let index_id = IndexId::try_new("idx1".to_string()).unwrap();
 
-        'outer: loop {
-            tokio::select! {
-                _ = stop_receiver.recv() => {
-                    info!("Stopping datasource loop");
-                    break 'outer;
-                }
-                _ = interval.tick() => {
-                    info!("Running periodic datasource sync");
-                    let datasources = write_side.datasource_storage.get().await;
-                    for (collection_id, indexes) in datasources.iter() {
-                        for (index_id, dss) in indexes.iter() {
-                            spawn_sync_tasks(&write_side, update_sender.clone(), *collection_id, *index_id, dss);
-                        }
-                    }
-                }
-                Some((collection_id, index_id)) = explicit_run_receiver.recv() => {
-                    // FIX: in case a huge index is requested the interval loop will be delayed.
-                    // does it is a problem?
-                    info!("Running on-demand datasource sync for collection {} index {}", collection_id, index_id);
-                    let datasources = write_side.datasource_storage.get().await;
-                    if let Some(indexes) = datasources.get(&collection_id) {
-                        if let Some(dss) = indexes.get(&index_id) {
-                            spawn_sync_tasks(&write_side, update_sender.clone(), collection_id, index_id, dss);
-                        }
-                    }
-                }
-            };
-        }
+        let fetcher = Fetcher::S3(s3::S3Fetcher {
+            bucket: "bucket1".to_string(),
+            region: "us-east-1".to_string(),
+            access_key_id: "invalid".to_string(),
+            secret_access_key: "invalid".to_string(),
+            endpoint_url: None,
+        });
 
-        drop(update_sender);
+        // invalid validation since s3 is not running
+        let result = storage.insert(coll_id, index_id, fetcher.clone()).await;
+        assert!(result.is_err());
 
-        if let Err(e) = stop_done_sender.send(()).await {
-            error!(error = ?e, "Cannot send stop signal to writer side");
-        }
-    });
+        assert!(!storage.exists(coll_id, index_id).await);
+    }
+
+    #[tokio::test]
+    async fn test_datasource_persistence() {
+        let (_s3_client, bucket_name, _container, endpoint_url) = setup_s3_container().await;
+        let temp_dir = tempdir().unwrap();
+        let temp_path = &temp_dir.path().to_path_buf();
+        let storage = DatasourceStorage::try_new(temp_path).unwrap();
+
+        let coll_id = CollectionId::try_new("coll1".to_string()).unwrap();
+        let index_id = IndexId::try_new("idx1".to_string()).unwrap();
+
+        let fetcher = Fetcher::S3(s3::S3Fetcher {
+            bucket: bucket_name,
+            region: "us-east-1".to_string(),
+            access_key_id: "test".to_string(),
+            secret_access_key: "test".to_string(),
+            endpoint_url: Some(endpoint_url),
+        });
+
+        // commit on insert
+        storage
+            .insert(coll_id, index_id, fetcher.clone())
+            .await
+            .unwrap();
+
+        // load from disk on create
+        let new_storage = DatasourceStorage::try_new(temp_path).unwrap();
+        assert!(new_storage.exists(coll_id, index_id).await);
+    }
 }
