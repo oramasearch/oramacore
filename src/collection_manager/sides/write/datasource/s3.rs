@@ -219,7 +219,7 @@ mod tests {
             storage::DatasourceStorage::try_new(&tmp_dir.path().to_path_buf()).unwrap();
         let datasource_entry = storage::DatasourceEntry {
             id: datasource_id,
-            datasource: storage::DatasourceKind::S3(s3_datasource.clone()),
+            datasource: storage::Fetcher::S3(s3_datasource.clone()),
         };
         datasource_storage
             .insert(collection_id, index_id, datasource_entry)

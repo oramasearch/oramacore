@@ -95,7 +95,7 @@ fn spawn_sync_tasks(
         let datasource_storage_clone = write_side.datasource_storage.clone();
 
         match &datasource.datasource {
-            storage::DatasourceKind::S3(s3_datasource) => {
+            storage::Fetcher::S3(s3_datasource) => {
                 let s3_datasource = s3_datasource.clone();
                 let datasource_id = datasource.id;
                 // TODO: update resy to implement async correctly
