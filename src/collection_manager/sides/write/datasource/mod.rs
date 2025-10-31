@@ -489,14 +489,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_remove_deletes_resy_file() {
+    async fn test_remove_index_and_collection_deletes_resy_files() {
         let (_s3_client, bucket_name, _container, endpoint_url) = setup_s3_container().await;
         let temp_dir = tempdir().unwrap();
         let temp_path = &temp_dir.path().to_path_buf();
         let storage = DatasourceStorage::try_new(temp_path).unwrap();
-
-        let coll_id = CollectionId::try_new("coll1".to_string()).unwrap();
-        let index_id = IndexId::try_new("idx1".to_string()).unwrap();
 
         let fetcher = Fetcher::S3(s3::S3Fetcher {
             bucket: bucket_name,
@@ -506,19 +503,64 @@ mod tests {
             endpoint_url: Some(endpoint_url),
         });
 
-        let db_name = format!("{}_{}.db", coll_id, index_id);
-        let db_path = temp_path.join(db_name);
-        std::fs::File::create(&db_path).unwrap();
-        assert!(db_path.exists());
+        // 1. Test remove_index
+        let coll1_id = CollectionId::try_new("coll1".to_string()).unwrap();
+        let idx1_id = IndexId::try_new("idx1".to_string()).unwrap();
+
+        let db_name1 = format!("{}_{}.db", coll1_id, idx1_id);
+        let db_path1 = temp_path.join(&db_name1);
+        // std::fs::File::create(&db_path1).unwrap();
+        assert!(db_path1.exists());
 
         storage
-            .insert(coll_id, index_id, fetcher.clone())
+            .insert(coll1_id, idx1_id, fetcher.clone())
+            .await
+            .unwrap();
+        storage.remove_index(coll1_id, idx1_id).await.unwrap();
+
+        assert!(!db_path1.exists());
+        assert!(!storage.exists(coll1_id, idx1_id).await);
+
+        // 2. Test remove_collection
+        let coll2_id = CollectionId::try_new("coll2".to_string()).unwrap();
+        let idx2_id = IndexId::try_new("idx2".to_string()).unwrap();
+        let idx3_id = IndexId::try_new("idx3".to_string()).unwrap();
+
+        // Create dummy files for the new indices
+        let db_name2 = format!("{}_{}.db", coll2_id, idx2_id);
+        let db_path2 = temp_path.join(&db_name2);
+        // std::fs::File::create(&db_path2).unwrap();
+
+        let db_name3 = format!("{}_{}.db", coll2_id, idx3_id);
+        let db_path3 = temp_path.join(&db_name3);
+        // std::fs::File::create(&db_path3).unwrap();
+
+        // Insert the new datasources
+        storage
+            .insert(coll2_id, idx2_id, fetcher.clone())
+            .await
+            .unwrap();
+        storage
+            .insert(coll2_id, idx3_id, fetcher.clone())
             .await
             .unwrap();
 
-        storage.remove_index(coll_id, index_id).await.unwrap();
+        // Ensure they are in the storage and files exist
+        assert!(storage.exists(coll2_id, idx2_id).await);
+        assert!(storage.exists(coll2_id, idx3_id).await);
+        assert!(db_path2.exists());
+        assert!(db_path3.exists());
 
-        assert!(!db_path.exists());
+        // Remove the entire collection
+        storage.remove_collection(coll2_id).await.unwrap();
+
+        // Assert that the db files for the removed collection are gone
+        assert!(!db_path2.exists());
+        assert!(!db_path3.exists());
+
+        // Assert they are no longer in the storage
+        assert!(!storage.exists(coll2_id, idx2_id).await);
+        assert!(!storage.exists(coll2_id, idx3_id).await);
     }
 
     #[tokio::test]
