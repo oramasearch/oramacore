@@ -68,9 +68,14 @@ impl S3Fetcher {
         let s3_config = s3_config_builder.build();
         let s3_client = Client::from_conf(s3_config);
 
-        s3_client.list_buckets().send().await.context(
-            "Failed to validate S3 credentials. Please check your credentials and permissions.",
-        )?;
+        s3_client
+            .head_bucket()
+            .bucket(&self.bucket)
+            .send()
+            .await
+            .context(
+                "Failed to validate S3 credentials. Please check your credentials and permissions.",
+            )?;
 
         Ok(())
     }
