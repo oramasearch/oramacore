@@ -80,6 +80,18 @@ struct SerializableDatasourceEntry {
 
 type CollectionDatasources = HashMap<(CollectionId, IndexId), Arc<DatasourceWrapper>>;
 
+// InUseGuard is a RAII guard to ensure the `in_use` flag of a DatasourceWrapper is reset to `false`
+// when the guard is dropped, even if the task panics.
+struct InUseGuard {
+    wrapper: Arc<DatasourceWrapper>,
+}
+
+impl Drop for InUseGuard {
+    fn drop(&mut self) {
+        self.wrapper.in_use.store(false, Ordering::Release);
+    }
+}
+
 pub struct DatasourceStorage {
     base_dir: PathBuf,
     file_path: PathBuf,
@@ -292,10 +304,10 @@ impl DatasourceStorage {
                                 );
                                 let kind = kind.clone();
                                 tasks.spawn(async move {
+                                    let _guard = InUseGuard { wrapper: kind };
                                     if let Err(e) = task.await {
                                         error!("Datasource sync task failed: {:?}", e);
                                     }
-                                    kind.in_use.store(false, Ordering::Release);
                                 });
                             }
                         }
@@ -314,10 +326,10 @@ impl DatasourceStorage {
                                 );
                                 let kind = kind.clone();
                                 tasks.spawn(async move {
+                                    let _guard = InUseGuard { wrapper: kind };
                                     if let Err(e) = task.await {
                                         error!("Datasource sync task failed: {:?}", e);
                                     }
-                                    kind.in_use.store(false, Ordering::Release);
                                 });
                             }
                         }
@@ -507,5 +519,62 @@ mod tests {
         storage.remove_index(coll_id, index_id).await.unwrap();
 
         assert!(!db_path.exists());
+    }
+
+    #[tokio::test]
+    async fn test_in_use_guard_resets_on_panic() {
+        use std::panic;
+
+        let fetcher = Fetcher::S3(s3::S3Fetcher {
+            bucket: "bucket".to_string(),
+            region: "region".to_string(),
+            access_key_id: "id".to_string(),
+            secret_access_key: "secret".to_string(),
+            endpoint_url: None,
+        });
+
+        let wrapper = Arc::new(DatasourceWrapper {
+            in_use: AtomicBool::new(false),
+            fetcher,
+        });
+
+        // Set flag to true, simulating the start of a task
+        wrapper.in_use.store(true, Ordering::Relaxed);
+        assert_eq!(wrapper.in_use.load(Ordering::Relaxed), true);
+
+        let wrapper_clone = wrapper.clone();
+        let result = panic::catch_unwind(move || {
+            let _guard = InUseGuard {
+                wrapper: wrapper_clone,
+            };
+            panic!("Simulating a task failure");
+        });
+
+        assert!(result.is_err());
+        assert_eq!(wrapper.in_use.load(Ordering::Relaxed), false);
+    }
+
+    #[tokio::test]
+    async fn test_corrupted_json_fails_to_load() {
+        let temp_dir = tempdir().unwrap();
+        let temp_path = temp_dir.path();
+        let json_path = temp_path.join("datasources.json");
+
+        // Write malformed JSON
+        std::fs::write(&json_path, b"{ not-valid-json }").unwrap();
+
+        let result = DatasourceStorage::try_new(&temp_path.to_path_buf());
+
+        match result {
+            Ok(_) => panic!("Expected DatasourceStorage::try_new to fail, but it succeeded."),
+            Err(e) => {
+                let err_msg = e.to_string();
+                assert!(
+                    err_msg.contains("Cannot deserialize datasources.json"),
+                    "Error message did not contain expected text. Got: {}",
+                    err_msg
+                );
+            }
+        }
     }
 }
