@@ -105,7 +105,7 @@ impl DatasourceStorage {
         create_if_not_exists(base_dir).context("Cannot create datasource directory")?;
 
         let file_path = base_dir.join("datasources.json");
-        let map = Self::load_from_disk(&file_path)?;
+        let map = Self::load_dump_from_disk(&file_path)?;
 
         let (fetcher_trigg_sender, fetcher_trigg_receiver) = tokio::sync::mpsc::channel(100);
 
@@ -139,7 +139,7 @@ impl DatasourceStorage {
             }
         }
 
-        self.save_to_disk_sync(&m)?;
+        self.save_dump_to_disk_sync(&m)?;
 
         drop(m);
 
@@ -167,7 +167,7 @@ impl DatasourceStorage {
             .filter_map(|key| m.remove(key).map(|f| (key.clone(), f)))
             .collect();
 
-        self.save_to_disk_sync(&m)?;
+        self.save_dump_to_disk_sync(&m)?;
 
         for (key, f) in fetchers_to_delete {
             if let Err(e) = f.fetcher.delete(&self.base_dir, key.0, key.1).await {
@@ -185,7 +185,7 @@ impl DatasourceStorage {
         let f = m.remove(&(collection_id, index_id));
 
         if let Some(fetcher) = f {
-            self.save_to_disk_sync(&m)?;
+            self.save_dump_to_disk_sync(&m)?;
 
             if let Err(e) = fetcher
                 .fetcher
@@ -209,7 +209,7 @@ impl DatasourceStorage {
         m.contains_key(&(collection_id, index_id))
     }
 
-    fn load_from_disk(file_path: &PathBuf) -> Result<CollectionDatasources> {
+    fn load_dump_from_disk(file_path: &PathBuf) -> Result<CollectionDatasources> {
         if file_path.exists() {
             let file = std::fs::File::open(file_path)
                 .with_context(|| format!("Cannot open datasources.json at {:?}", file_path))?;
@@ -235,7 +235,7 @@ impl DatasourceStorage {
         }
     }
 
-    fn save_to_disk_sync(&self, map: &CollectionDatasources) -> Result<()> {
+    fn save_dump_to_disk_sync(&self, map: &CollectionDatasources) -> Result<()> {
         let file_path_tmp = self.file_path.with_extension("tmp.json");
 
         let serializable_vec: Vec<SerializableDatasourceEntry> = map
