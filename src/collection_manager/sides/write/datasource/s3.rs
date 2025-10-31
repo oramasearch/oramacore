@@ -32,6 +32,20 @@ impl S3Fetcher {
         format!("{}_{}.db", collection_id, index_id)
     }
 
+    pub async fn remove_resy_db(
+        &self,
+        base_dir: &PathBuf,
+        collection_id: CollectionId,
+        index_id: IndexId,
+    ) -> Result<()> {
+        let db_name = Self::resy_db_filename(collection_id, index_id);
+        let db_path = base_dir.join(db_name);
+        if db_path.exists() {
+            tokio::fs::remove_file(db_path).await?;
+        }
+        Ok(())
+    }
+
     pub async fn validate_credentials(&self) -> Result<()> {
         let credentials = Credentials::new(
             self.access_key_id.clone(),

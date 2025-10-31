@@ -61,13 +61,10 @@ impl Fetcher {
         index_id: IndexId,
     ) -> Result<()> {
         match self {
-            Fetcher::S3(_s3_fetcher) => {
-                let db_name = s3::S3Fetcher::resy_db_filename(collection_id, index_id);
-                let db_path = base_dir.join(db_name);
-                if db_path.exists() {
-                    tokio::fs::remove_file(db_path).await?;
-                }
-                Ok(())
+            Fetcher::S3(s3_fetcher) => {
+                s3_fetcher
+                    .remove_resy_db(base_dir, collection_id, index_id)
+                    .await
             }
         }
     }
