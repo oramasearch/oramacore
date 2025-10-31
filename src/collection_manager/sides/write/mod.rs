@@ -255,7 +255,7 @@ impl WriteSide {
             .await
             .context("Cannot create document storage")?;
 
-        let (stop_done_sender, stop_done_receiver) = tokio::sync::mpsc::channel(1);
+        let (stop_done_sender, stop_done_receiver) = tokio::sync::mpsc::channel(4);
         let (stop_sender, _) = tokio::sync::broadcast::channel(1);
         let commit_loop_receiver = stop_sender.subscribe();
         let temp_index_cleanup_receiver = stop_sender.subscribe();
@@ -338,23 +338,20 @@ impl WriteSide {
 
     pub async fn stop(&self) -> Result<()> {
         info!("Stopping writer side");
-        // Broadcast
-        self.stop_sender
-            .send(())
-            .context("Cannot send stop signal")?;
-        let mut stop_done_receiver = self.stop_done_receiver.write("stop").await;
-        // Commit loop
-        stop_done_receiver
-            .recv()
-            .await
-            .context("Cannot send stop signal")?;
-        // embedding calulcation loop
-        stop_done_receiver
-            .recv()
-            .await
-            .context("Cannot send stop signal")?;
-        info!("Writer side stopped");
+        self.stop_sender.send(()).ok();
 
+        let mut stop_done_receiver = self.stop_done_receiver.write("stop").await;
+        // Wait for all 4 loops (datasource, commit, temp_index, embedding) to signal completion.
+        for i in 0..4 {
+            if stop_done_receiver.recv().await.is_none() {
+                warn!(
+                    "A background loop sender was dropped before signaling shutdown. Loop count: {}",
+                    i + 1
+                );
+            }
+        }
+
+        info!("Writer side stopped");
         Ok(())
     }
 
