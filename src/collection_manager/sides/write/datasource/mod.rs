@@ -1,4 +1,4 @@
-mod s3;
+pub mod s3;
 use crate::lock::OramaAsyncLock;
 use crate::types::{CollectionId, DeleteDocuments, DocumentList, IndexId};
 use anyhow::{Context, Result};
@@ -15,9 +15,6 @@ use tracing::{error, info};
 
 #[derive(Error, Debug)]
 pub enum DatasourceError {
-    #[error("Sync cancelled: index or datasource was deleted.")]
-    SyncCancelled,
-
     #[error("Sync failed: {0}")]
     SyncFailed(#[from] anyhow::Error),
 }
@@ -53,14 +50,23 @@ pub enum Fetcher {
 impl Fetcher {
     pub async fn validate(&self) -> Result<()> {
         match self {
-            Fetcher::S3(s3_fetcher) => s3::validate_credentials(s3_fetcher).await,
+            Fetcher::S3(s3_fetcher) => s3_fetcher.validate_credentials().await,
         }
     }
 
-    pub async fn delete(&self) -> Result<()> {
+    pub async fn delete(
+        &self,
+        base_dir: &PathBuf,
+        collection_id: CollectionId,
+        index_id: IndexId,
+    ) -> Result<()> {
         match self {
             Fetcher::S3(_s3_fetcher) => {
-                // should remove the resy file
+                let db_name = s3::S3Fetcher::resy_db_filename(collection_id, index_id);
+                let db_path = base_dir.join(db_name);
+                if db_path.exists() {
+                    tokio::fs::remove_file(db_path).await?;
+                }
                 Ok(())
             }
         }
@@ -123,6 +129,8 @@ impl DatasourceStorage {
             }
         }
 
+        self.save_to_disk_sync(&m)?;
+
         drop(m);
 
         if let Err(e) = self
@@ -132,50 +140,56 @@ impl DatasourceStorage {
             error!("Failed to send datasource sync request: {}", e);
         }
 
-        self.save_to_disk().await?;
-
         Ok(())
     }
 
     pub async fn remove_collection(&self, collection_id: CollectionId) -> Result<()> {
         let mut m = self.map.write("remove_collection").await;
-        let keys_to_remove: Vec<_> = m
+        let keys_to_remove: Vec<_> = m.keys().filter(|k| k.0 == collection_id).cloned().collect();
+
+        if keys_to_remove.is_empty() {
+            drop(m);
+            return Ok(());
+        }
+
+        let fetchers_to_delete: Vec<_> = keys_to_remove
             .iter()
-            .filter_map(|(k, _)| {
-                if k.0 == collection_id {
-                    Some(k.clone())
-                } else {
-                    None
-                }
-            })
+            .filter_map(|key| m.remove(key).map(|f| (key.clone(), f)))
             .collect();
 
-        for key in &keys_to_remove {
-            if let Some(f) = m.remove(key) {
-                if let Err(e) = f.fetcher.delete().await {
-                    error!("Failed to delete datasource for {:?}: {}", key, e);
-                }
+        self.save_to_disk_sync(&m)?;
+
+        for (key, f) in fetchers_to_delete {
+            if let Err(e) = f.fetcher.delete(&self.base_dir, key.0, key.1).await {
+                error!("Failed to delete datasource for {:?}: {}", key, e);
             }
         }
 
-        if !keys_to_remove.is_empty() {
-            self.save_to_disk().await?;
-        }
+        drop(m);
 
         Ok(())
     }
 
     pub async fn remove_index(&self, collection_id: CollectionId, index_id: IndexId) -> Result<()> {
         let mut m = self.map.write("remove_index").await;
-        if let Some(f) = m.remove(&(collection_id, index_id)) {
-            if let Err(e) = f.fetcher.delete().await {
+        let f = m.remove(&(collection_id, index_id));
+
+        if let Some(fetcher) = f {
+            self.save_to_disk_sync(&m)?;
+
+            if let Err(e) = fetcher
+                .fetcher
+                .delete(&self.base_dir, collection_id, index_id)
+                .await
+            {
                 error!(
                     "Failed to delete datasource for ({}, {}): {}",
                     collection_id, index_id, e
                 );
             }
-            self.save_to_disk().await?;
         }
+
+        drop(m);
 
         Ok(())
     }
@@ -211,21 +225,19 @@ impl DatasourceStorage {
         }
     }
 
-    async fn save_to_disk(&self) -> Result<()> {
-        create_if_not_exists(&self.base_dir).context("Cannot create datasource directory")?;
+    fn save_to_disk_sync(&self, map: &CollectionDatasources) -> Result<()> {
         let file_path_tmp = self.file_path.with_extension("tmp.json");
-        let map_guard = self.map.read("save_to_disk").await;
 
-        let serializable_vec: Vec<SerializableDatasourceEntry> = map_guard
+        let serializable_vec: Vec<SerializableDatasourceEntry> = map
             .iter()
-            .map(|((collection_id, index_id), value)| SerializableDatasourceEntry {
-                collection_id: *collection_id,
-                index_id: *index_id,
-                fetcher: value.fetcher.clone(),
-            })
+            .map(
+                |((collection_id, index_id), value)| SerializableDatasourceEntry {
+                    collection_id: *collection_id,
+                    index_id: *index_id,
+                    fetcher: value.fetcher.clone(),
+                },
+            )
             .collect();
-
-        drop(map_guard);
 
         let file = std::fs::File::create(&file_path_tmp)
             .with_context(|| format!("Cannot create datasources.json at {:?}", file_path_tmp))?;
@@ -351,19 +363,16 @@ impl DatasourceStorage {
                         .unwrap();
 
                     rt.block_on(async {
-                        match s3::sync_s3_datasource(
-                            datasource_dir_clone,
-                            collection_id,
-                            index_id,
-                            &s3_datasource,
-                            task_sender_clone,
-                        )
-                        .await
+                        match s3_datasource
+                            .sync(
+                                datasource_dir_clone,
+                                collection_id,
+                                index_id,
+                                task_sender_clone,
+                            )
+                            .await
                         {
-                            Ok(_) => {},
-                            Err(DatasourceError::SyncCancelled) => {
-                                info!(%collection_id, %index_id, "Datasource sync cancelled gracefully as the index was deleted.");
-                            }
+                            Ok(_) => {}
                             Err(DatasourceError::SyncFailed(e)) => {
                                 error!(error = ?e, "Failed to sync S3 datasource");
                             }
@@ -431,5 +440,66 @@ mod tests {
         // load from disk on create
         let new_storage = DatasourceStorage::try_new(temp_path).unwrap();
         assert!(new_storage.exists(coll_id, index_id).await);
+    }
+
+    #[tokio::test]
+    async fn test_insert_sends_trigger() {
+        let (_s3_client, bucket_name, _container, endpoint_url) = setup_s3_container().await;
+        let temp_dir = tempdir().unwrap();
+        let storage = DatasourceStorage::try_new(&temp_dir.path().to_path_buf()).unwrap();
+
+        let coll_id = CollectionId::try_new("coll1".to_string()).unwrap();
+        let index_id = IndexId::try_new("idx1".to_string()).unwrap();
+
+        let fetcher = Fetcher::S3(s3::S3Fetcher {
+            bucket: bucket_name,
+            region: "us-east-1".to_string(),
+            access_key_id: "test".to_string(),
+            secret_access_key: "test".to_string(),
+            endpoint_url: Some(endpoint_url),
+        });
+
+        storage
+            .insert(coll_id, index_id, fetcher.clone())
+            .await
+            .unwrap();
+
+        let mut receiver = storage.fetcher_trigg_receiver.lock().await.take().unwrap();
+        let (received_coll_id, received_index_id) = receiver.recv().await.take().unwrap();
+        assert_eq!(received_coll_id, coll_id);
+        assert_eq!(received_index_id, index_id);
+    }
+
+    #[tokio::test]
+    async fn test_remove_deletes_resy_file() {
+        let (_s3_client, bucket_name, _container, endpoint_url) = setup_s3_container().await;
+        let temp_dir = tempdir().unwrap();
+        let temp_path = &temp_dir.path().to_path_buf();
+        let storage = DatasourceStorage::try_new(temp_path).unwrap();
+
+        let coll_id = CollectionId::try_new("coll1".to_string()).unwrap();
+        let index_id = IndexId::try_new("idx1".to_string()).unwrap();
+
+        let fetcher = Fetcher::S3(s3::S3Fetcher {
+            bucket: bucket_name,
+            region: "us-east-1".to_string(),
+            access_key_id: "test".to_string(),
+            secret_access_key: "test".to_string(),
+            endpoint_url: Some(endpoint_url),
+        });
+
+        let db_name = format!("{}_{}.db", coll_id, index_id);
+        let db_path = temp_path.join(db_name);
+        std::fs::File::create(&db_path).unwrap();
+        assert!(db_path.exists());
+
+        storage
+            .insert(coll_id, index_id, fetcher.clone())
+            .await
+            .unwrap();
+
+        storage.remove_index(coll_id, index_id).await.unwrap();
+
+        assert!(!db_path.exists());
     }
 }

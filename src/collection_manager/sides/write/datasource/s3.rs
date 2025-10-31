@@ -25,76 +25,81 @@ pub struct S3Fetcher {
     pub endpoint_url: Option<String>,
 }
 
-pub async fn validate_credentials(s3_fetcher: &S3Fetcher) -> Result<()> {
-    let credentials = Credentials::new(
-        s3_fetcher.access_key_id.clone(),
-        s3_fetcher.secret_access_key.clone(),
-        None,
-        None,
-        "resy",
-    );
-
-    let mut s3_config_builder = aws_sdk_s3::config::Builder::new()
-        .credentials_provider(SharedCredentialsProvider::new(credentials))
-        .region(Region::new(s3_fetcher.region.clone()))
-        .behavior_version(BehaviorVersion::latest());
-
-    if let Some(endpoint_url) = &s3_fetcher.endpoint_url {
-        s3_config_builder = s3_config_builder.endpoint_url(endpoint_url);
-        s3_config_builder = s3_config_builder.force_path_style(true);
-    }
-
-    let s3_config = s3_config_builder.build();
-    let s3_client = Client::from_conf(s3_config);
-
-    s3_client.list_buckets().send().await.context(
-        "Failed to validate S3 credentials. Please check your credentials and permissions.",
-    )?;
-
-    Ok(())
-}
-
 const BATCH_SIZE: usize = 10;
 
-pub async fn sync_s3_datasource(
-    datasource_dir: PathBuf,
-    collection_id: CollectionId,
-    index_id: IndexId,
-    s3_datasource: &S3Fetcher,
-    event_sender: tokio::sync::mpsc::Sender<SyncUpdate>,
-) -> Result<(), DatasourceError> {
-    let credentials = Credentials::new(
-        s3_datasource.access_key_id.clone(),
-        s3_datasource.secret_access_key.clone(),
-        None,
-        None,
-        "resy",
-    );
-
-    let mut s3_config_builder = aws_sdk_s3::config::Builder::new()
-        .credentials_provider(SharedCredentialsProvider::new(credentials))
-        .region(Region::new(s3_datasource.region.clone()))
-        .behavior_version(BehaviorVersion::latest());
-
-    if let Some(endpoint_url) = &s3_datasource.endpoint_url {
-        s3_config_builder = s3_config_builder.endpoint_url(endpoint_url);
-        s3_config_builder = s3_config_builder.force_path_style(true);
+impl S3Fetcher {
+    pub fn resy_db_filename(collection_id: CollectionId, index_id: IndexId) -> String {
+        format!("{}_{}.db", collection_id, index_id)
     }
 
-    let s3_config = s3_config_builder.build();
-    let s3_client = Client::from_conf(s3_config);
-    let mut s3_diff_client = S3::from_client(s3_client.clone(), s3_datasource.bucket.clone());
+    pub async fn validate_credentials(&self) -> Result<()> {
+        let credentials = Credentials::new(
+            self.access_key_id.clone(),
+            self.secret_access_key.clone(),
+            None,
+            None,
+            "resy",
+        );
 
-    let mut docs_to_insert = Vec::with_capacity(BATCH_SIZE);
-    let mut keys_to_remove = Vec::with_capacity(BATCH_SIZE);
+        let mut s3_config_builder = aws_sdk_s3::config::Builder::new()
+            .credentials_provider(SharedCredentialsProvider::new(credentials))
+            .region(Region::new(self.region.clone()))
+            .behavior_version(BehaviorVersion::latest());
 
-    let db_name = format!("{}_{}.db", collection_id, index_id);
-    let db_path = datasource_dir.join(db_name);
-    if let Err(e) = s3_diff_client
+        if let Some(endpoint_url) = &self.endpoint_url {
+            s3_config_builder = s3_config_builder.endpoint_url(endpoint_url);
+            s3_config_builder = s3_config_builder.force_path_style(true);
+        }
+
+        let s3_config = s3_config_builder.build();
+        let s3_client = Client::from_conf(s3_config);
+
+        s3_client.list_buckets().send().await.context(
+            "Failed to validate S3 credentials. Please check your credentials and permissions.",
+        )?;
+
+        Ok(())
+    }
+
+    pub async fn sync(
+        &self,
+        datasource_dir: PathBuf,
+        collection_id: CollectionId,
+        index_id: IndexId,
+        event_sender: tokio::sync::mpsc::Sender<SyncUpdate>,
+    ) -> Result<(), DatasourceError> {
+        let credentials = Credentials::new(
+            self.access_key_id.clone(),
+            self.secret_access_key.clone(),
+            None,
+            None,
+            "resy",
+        );
+
+        let mut s3_config_builder = aws_sdk_s3::config::Builder::new()
+            .credentials_provider(SharedCredentialsProvider::new(credentials))
+            .region(Region::new(self.region.clone()))
+            .behavior_version(BehaviorVersion::latest());
+
+        if let Some(endpoint_url) = &self.endpoint_url {
+            s3_config_builder = s3_config_builder.endpoint_url(endpoint_url);
+            s3_config_builder = s3_config_builder.force_path_style(true);
+        }
+
+        let s3_config = s3_config_builder.build();
+        let s3_client = Client::from_conf(s3_config);
+        let mut s3_diff_client = S3::from_client(s3_client.clone(), self.bucket.clone());
+
+        let mut docs_to_insert = Vec::with_capacity(BATCH_SIZE);
+        let mut keys_to_remove = Vec::with_capacity(BATCH_SIZE);
+
+        let db_name = Self::resy_db_filename(collection_id, index_id);
+        let db_path = datasource_dir.join(db_name);
+        if let Err(e) = s3_diff_client
         .stream_diff_and_update(db_path.as_path(), async |change| {
             match change {
                 Change::Added(obj) => {
-                    match fetch_document(&s3_client, &s3_datasource.bucket, &obj.key).await {
+                    match S3Fetcher::fetch_document(&s3_client, &self.bucket, &obj.key).await {
                         Ok(doc) => docs_to_insert.push(doc),
                         Err(e) => {
                             error!(error = ?e, key = %obj.key, "Failed to fetch new document");
@@ -102,7 +107,7 @@ pub async fn sync_s3_datasource(
                     }
                 }
                 Change::Modified { old: _, new } => {
-                    match fetch_document(&s3_client, &s3_datasource.bucket, &new.key).await {
+                    match S3Fetcher::fetch_document(&s3_client, &self.bucket, &new.key).await {
                         Ok(doc) => docs_to_insert.push(doc),
                         Err(e) => {
                             error!(error = ?e, key = %new.key, "Failed to fetch modified document");
@@ -142,52 +147,53 @@ pub async fn sync_s3_datasource(
         return Err(DatasourceError::SyncFailed(anyhow::anyhow!("{}", e)));
     }
 
-    if !docs_to_insert.is_empty() {
-        event_sender
-            .send(SyncUpdate {
-                collection_id,
-                index_id,
-                operation: Operation::Insert(DocumentList(docs_to_insert)),
-            })
-            .await?;
+        if !docs_to_insert.is_empty() {
+            event_sender
+                .send(SyncUpdate {
+                    collection_id,
+                    index_id,
+                    operation: Operation::Insert(DocumentList(docs_to_insert)),
+                })
+                .await?;
+        }
+
+        if !keys_to_remove.is_empty() {
+            event_sender
+                .send(SyncUpdate {
+                    collection_id,
+                    index_id,
+                    operation: Operation::Delete(keys_to_remove),
+                })
+                .await?;
+        }
+
+        Ok(())
     }
 
-    if !keys_to_remove.is_empty() {
-        event_sender
-            .send(SyncUpdate {
-                collection_id,
-                index_id,
-                operation: Operation::Delete(keys_to_remove),
-            })
-            .await?;
+    async fn fetch_document(s3_client: &Client, bucket: &str, key: &str) -> Result<Document> {
+        let obj = s3_client
+            .get_object()
+            .bucket(bucket)
+            .key(key)
+            .send()
+            .await
+            .with_context(|| format!("Failed to get object from S3 key: {}", key))?;
+
+        let body = obj
+            .body
+            .collect()
+            .await
+            .context("Failed to read S3 object body")?;
+
+        let mut inner = serde_json::from_slice::<Map<String, Value>>(&body.into_bytes())
+            .context("Failed to parse document body as JSON")?;
+
+        // adding an id key consistent with the bucket key, in order to recognize it to
+        // update/delete it in future.
+        inner.insert("id".to_string(), Value::String(key.to_string()));
+
+        Ok(Document { inner })
     }
-
-    Ok(())
-}
-
-async fn fetch_document(s3_client: &Client, bucket: &str, key: &str) -> Result<Document> {
-    let obj = s3_client
-        .get_object()
-        .bucket(bucket)
-        .key(key)
-        .send()
-        .await
-        .with_context(|| format!("Failed to get object from S3 key: {}", key))?;
-
-    let body = obj
-        .body
-        .collect()
-        .await
-        .context("Failed to read S3 object body")?;
-
-    let mut inner = serde_json::from_slice::<Map<String, Value>>(&body.into_bytes())
-        .context("Failed to parse document body as JSON")?;
-
-    // adding an id key consistent with the bucket key, in order to recognize it to
-    // update/delete it in future.
-    inner.insert("id".to_string(), Value::String(key.to_string()));
-
-    Ok(Document { inner })
 }
 
 #[cfg(test)]
@@ -200,7 +206,7 @@ mod tests {
     use std::collections::HashSet;
 
     #[tokio::test]
-    async fn test_sync_s3_datasource() {
+    async fn test_sync() {
         let (s3_client, bucket_name, _container, endpoint_url) = setup_s3_container().await;
 
         let s3_datasource = S3Fetcher {
@@ -219,15 +225,15 @@ mod tests {
         let (sync_sender, mut sync_receiver) = tokio::sync::mpsc::channel(100);
 
         // 1. Initial sync, no changes
-        sync_s3_datasource(
-            datasource_dir.clone(),
-            collection_id,
-            index_id,
-            &s3_datasource,
-            sync_sender.clone(),
-        )
-        .await
-        .unwrap();
+        s3_datasource
+            .sync(
+                datasource_dir.clone(),
+                collection_id,
+                index_id,
+                sync_sender.clone(),
+            )
+            .await
+            .unwrap();
 
         assert!(sync_receiver.try_recv().is_err());
 
@@ -250,15 +256,15 @@ mod tests {
             expected_keys.insert(key);
         }
 
-        sync_s3_datasource(
-            datasource_dir.clone(),
-            collection_id,
-            index_id,
-            &s3_datasource,
-            sync_sender.clone(),
-        )
-        .await
-        .unwrap();
+        s3_datasource
+            .sync(
+                datasource_dir.clone(),
+                collection_id,
+                index_id,
+                sync_sender.clone(),
+            )
+            .await
+            .unwrap();
 
         let mut received_keys = HashSet::new();
 
@@ -313,15 +319,15 @@ mod tests {
             .await
             .unwrap();
 
-        sync_s3_datasource(
-            datasource_dir.clone(),
-            collection_id,
-            index_id,
-            &s3_datasource,
-            sync_sender.clone(),
-        )
-        .await
-        .unwrap();
+        s3_datasource
+            .sync(
+                datasource_dir.clone(),
+                collection_id,
+                index_id,
+                sync_sender.clone(),
+            )
+            .await
+            .unwrap();
 
         let mut insert_received = false;
         let mut delete_received = false;
@@ -332,7 +338,10 @@ mod tests {
                 Operation::Insert(docs) => {
                     assert_eq!(docs.0.len(), 1);
                     let doc = &docs.0[0];
-                    assert_eq!(doc.inner.get("id").unwrap().as_str().unwrap(), key_to_modify);
+                    assert_eq!(
+                        doc.inner.get("id").unwrap().as_str().unwrap(),
+                        key_to_modify
+                    );
                     assert_eq!(
                         doc.inner.get("message").unwrap().as_str().unwrap(),
                         "Hello, Oramacore! Updated."
