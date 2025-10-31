@@ -10,6 +10,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::{sync::Arc, time};
 use thiserror::Error;
 use tokio::sync::Mutex;
+use tokio::task::JoinSet;
 use tokio::time::MissedTickBehavior;
 use tracing::{error, info};
 
@@ -269,6 +270,7 @@ impl DatasourceStorage {
             let start = tokio::time::Instant::now() + interval;
             let mut interval = tokio::time::interval_at(start, interval);
             interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
+            let mut tasks = JoinSet::new();
 
             'outer: loop {
                 tokio::select! {
@@ -278,57 +280,64 @@ impl DatasourceStorage {
                     }
                     _ = interval.tick() => {
                         info!("Running periodic datasource sync");
-                        let mut v = Vec::new();
                         let lock = map.read("run_interval").await;
                         for ((collection_id, index_id), kind) in lock.iter() {
                             if kind.in_use.compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed).is_ok() {
-                                v.push((DatasourceStorage::run_fetcher_task(
+                                let task = DatasourceStorage::run_fetcher_task(
                                     *collection_id,
                                     *index_id,
                                     base_dir.clone(),
                                     kind.fetcher.clone(),
                                     datasource_update_sender.clone(),
-                                ), kind.clone()));
+                                );
+                                let kind = kind.clone();
+                                tasks.spawn(async move {
+                                    if let Err(e) = task.await {
+                                        error!("Datasource sync task failed: {:?}", e);
+                                    }
+                                    kind.in_use.store(false, Ordering::Release);
+                                });
                             }
                         }
                         drop(lock);
-                        tokio::spawn(async move {
-                            for (handle, kind) in v {
-                                if let Err(e) = handle.await {
-                                    error!("Datasource sync task failed: {:?}", e);
-                                }
-                                kind.in_use.store(false, Ordering::Release);
-                            }
-                        });
                     }
-                Some((collection_id, index_id)) = fetcher_trigg_receiver.recv() => {
-                        let mut v = Vec::new();
+                    Some((collection_id, index_id)) = fetcher_trigg_receiver.recv() => {
                         let lock = map.read("run_explicit").await;
                         if let Some(kind) = lock.get(&(collection_id, index_id)) {
                             if kind.in_use.compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed).is_ok() {
-                                v.push((DatasourceStorage::run_fetcher_task(
+                                let task = DatasourceStorage::run_fetcher_task(
                                     collection_id,
                                     index_id,
                                     base_dir.clone(),
                                     kind.fetcher.clone(),
                                     datasource_update_sender.clone(),
-                                    ), kind.clone()));
+                                );
+                                let kind = kind.clone();
+                                tasks.spawn(async move {
+                                    if let Err(e) = task.await {
+                                        error!("Datasource sync task failed: {:?}", e);
+                                    }
+                                    kind.in_use.store(false, Ordering::Release);
+                                });
                             }
-
                         }
                         drop(lock);
-
-                        tokio::spawn(async move {
-                            for (handle , kind )in v {
-                                if let Err(e) = handle.await {
-                                    error!("Datasource sync task failed: {:?}", e);
-                                }
-                                kind.in_use.store(false, Ordering::Release);
-                            }
-                        });
+                    }
+                    Some(res) = tasks.join_next(), if !tasks.is_empty() => {
+                        if let Err(e) = res {
+                            error!("A datasource task failed: {:?}", e);
+                        }
                     }
                 };
             }
+
+            info!("Waiting for all datasource tasks to finish...");
+            while let Some(res) = tasks.join_next().await {
+                if let Err(e) = res {
+                    error!("A datasource task failed during shutdown: {:?}", e);
+                }
+            }
+            info!("All datasource tasks finished.");
 
             drop(datasource_update_sender);
 
