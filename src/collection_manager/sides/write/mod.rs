@@ -454,9 +454,18 @@ impl WriteSide {
             .await?;
 
         if let Some(datasource) = datasource {
-            self.datasource_storage
+            if let Err(e) = self
+                .datasource_storage
                 .insert(collection_id, index_id, datasource)
-                .await?;
+                .await
+            {
+                self.delete_index(write_api_key, collection_id, index_id)
+                    .await
+                    .context(
+                        "Failed to rollback index creation after datasource insertion failed",
+                    )?;
+                return Err(e.into());
+            }
         }
 
         Ok(())
@@ -663,12 +672,13 @@ impl WriteSide {
     ) -> Result<(), WriteError> {
         let collection = self.get_collection(collection_id, write_api_key).await?;
 
-        let document_to_remove = collection.delete_index(index_id).await?;
-
-        self.document_storage.remove(document_to_remove).await;
         self.datasource_storage
             .remove_index(collection_id, index_id)
             .await?;
+
+        let document_to_remove = collection.delete_index(index_id).await?;
+
+        self.document_storage.remove(document_to_remove).await;
 
         Ok(())
     }
@@ -948,6 +958,10 @@ impl WriteSide {
     ) -> Result<(), WriteError> {
         self.check_master_api_key(master_api_key)?;
 
+        self.datasource_storage
+            .remove_collection(collection_id)
+            .await?;
+
         self.write_operation_counter.fetch_add(1, Ordering::Relaxed);
         let document_ids = self.collections.delete_collection(collection_id).await;
         self.write_operation_counter.fetch_sub(1, Ordering::Relaxed);
@@ -969,10 +983,6 @@ impl WriteSide {
 
             self.document_storage.remove(document_ids).await;
         }
-
-        self.datasource_storage
-            .remove_collection(collection_id)
-            .await?;
 
         Ok(())
     }
