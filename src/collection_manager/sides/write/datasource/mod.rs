@@ -148,7 +148,7 @@ impl DatasourceStorage {
             }
         }
 
-        self.save_dump_to_disk_sync(&m)?;
+        self.save_dump_to_disk(&m).await?;
 
         drop(m);
 
@@ -176,7 +176,7 @@ impl DatasourceStorage {
             .filter_map(|key| m.remove(key).map(|f| (key.clone(), f)))
             .collect();
 
-        self.save_dump_to_disk_sync(&m)?;
+        self.save_dump_to_disk(&m).await?;
 
         for (key, f) in fetchers_to_delete {
             if let Err(e) = f.fetcher.delete(&self.base_dir, key.0, key.1).await {
@@ -194,7 +194,7 @@ impl DatasourceStorage {
         let f = m.remove(&(collection_id, index_id));
 
         if let Some(fetcher) = f {
-            self.save_dump_to_disk_sync(&m)?;
+            self.save_dump_to_disk(&m).await?;
 
             if let Err(e) = fetcher
                 .fetcher
@@ -244,7 +244,7 @@ impl DatasourceStorage {
         }
     }
 
-    fn save_dump_to_disk_sync(&self, map: &CollectionDatasources) -> Result<()> {
+    async fn save_dump_to_disk(&self, map: &CollectionDatasources) -> Result<()> {
         let file_path_tmp = self.file_path.with_extension("tmp.json");
 
         let serializable_vec: Vec<SerializableDatasourceEntry> = map
@@ -258,15 +258,16 @@ impl DatasourceStorage {
             )
             .collect();
 
-        let file = std::fs::File::create(&file_path_tmp)
+        let content = serde_json::to_vec_pretty(&serializable_vec)
+            .context("Cannot serialize datasources to json")?;
+
+        tokio::fs::write(&file_path_tmp, content)
+            .await
             .with_context(|| format!("Cannot create datasources.json at {:?}", file_path_tmp))?;
 
-        serde_json::to_writer_pretty(file, &serializable_vec)
-            .with_context(|| format!("Cannot serialize datasources to {:?}", file_path_tmp))?;
-
-        std::fs::rename(&file_path_tmp, &self.file_path).with_context(|| {
-            format!("Cannot rename {:?} to {:?}", file_path_tmp, self.file_path)
-        })?;
+        tokio::fs::rename(&file_path_tmp, &self.file_path)
+            .await
+            .with_context(|| format!("Cannot rename {:?} to {:?}", file_path_tmp, self.file_path))?;
 
         Ok(())
     }
