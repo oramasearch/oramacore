@@ -392,7 +392,7 @@ impl DatasourceStorage {
                         {
                             Ok(_) => {}
                             Err(DatasourceError::SyncFailed(e)) => {
-                                error!(error = ?e, "Failed to sync S3 datasource");
+                                error!(error = ?e, "Failed to sync S3 datasource for ({} {})", collection_id, index_id);
                             }
                         }
                     })
