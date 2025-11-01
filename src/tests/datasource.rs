@@ -80,7 +80,7 @@ async fn test_sync_with_datasource() {
         .config
         .data_dir
         .join("datasource");
-    let db_name = datasource::s3::S3Fetcher::resy_db_filename(
+    let db_name = datasource::s3::S3Fetcher::sync_state_filename(
         collection_client.collection_id.clone(),
         index_id.clone(),
     );

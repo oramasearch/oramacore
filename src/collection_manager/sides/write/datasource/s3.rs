@@ -11,10 +11,10 @@ use serde_json::{Map, Value};
 use std::path::PathBuf;
 use tracing::error;
 
-use crate::collection_manager::sides::write::datasource::{Operation, SyncUpdate};
+use crate::collection_manager::sides::write::datasource::{IndexOperation, Operation};
 use crate::types::{CollectionId, Document, DocumentList, IndexId};
 
-use super::DatasourceError;
+use super::SyncError;
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 pub struct S3Fetcher {
@@ -28,7 +28,7 @@ pub struct S3Fetcher {
 const BATCH_SIZE: usize = 10;
 
 impl S3Fetcher {
-    fn sync_state_filename(collection_id: CollectionId, index_id: IndexId) -> String {
+    pub fn sync_state_filename(collection_id: CollectionId, index_id: IndexId) -> String {
         format!("{}_{}.db", collection_id, index_id)
     }
 
@@ -85,8 +85,8 @@ impl S3Fetcher {
         datasource_dir: PathBuf,
         collection_id: CollectionId,
         index_id: IndexId,
-        event_sender: tokio::sync::mpsc::Sender<SyncUpdate>,
-    ) -> Result<(), DatasourceError> {
+        index_operation_sender: tokio::sync::mpsc::Sender<IndexOperation>,
+    ) -> Result<(), SyncError> {
         let credentials = Credentials::new(
             self.access_key_id.clone(),
             self.secret_access_key.clone(),
@@ -139,8 +139,8 @@ impl S3Fetcher {
             }
             if docs_to_insert.len() >= BATCH_SIZE {
                 let docs = std::mem::take(&mut docs_to_insert);
-                event_sender
-                    .send(SyncUpdate {
+                index_operation_sender
+                    .send(IndexOperation {
                         collection_id,
                         index_id,
                         operation: Operation::Insert(DocumentList(docs)),
@@ -150,8 +150,8 @@ impl S3Fetcher {
             }
             if keys_to_remove.len() >= BATCH_SIZE {
                 let keys = std::mem::take(&mut keys_to_remove);
-                event_sender
-                    .send(SyncUpdate {
+                index_operation_sender
+                    .send(IndexOperation {
                         collection_id,
                         index_id,
                         operation: Operation::Delete(keys),
@@ -163,12 +163,12 @@ impl S3Fetcher {
         })
         .await
     {
-        return Err(DatasourceError::SyncFailed(anyhow::anyhow!("{}", e)));
+        return Err(SyncError::Failed(anyhow::anyhow!("{}", e)));
     }
 
         if !docs_to_insert.is_empty() {
-            event_sender
-                .send(SyncUpdate {
+            index_operation_sender
+                .send(IndexOperation {
                     collection_id,
                     index_id,
                     operation: Operation::Insert(DocumentList(docs_to_insert)),
@@ -177,8 +177,8 @@ impl S3Fetcher {
         }
 
         if !keys_to_remove.is_empty() {
-            event_sender
-                .send(SyncUpdate {
+            index_operation_sender
+                .send(IndexOperation {
                     collection_id,
                     index_id,
                     operation: Operation::Delete(keys_to_remove),

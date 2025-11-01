@@ -16,13 +16,19 @@ use tracing::{error, info};
 
 #[derive(Error, Debug)]
 pub enum DatasourceError {
-    #[error("Sync failed: {0}")]
-    SyncFailed(#[from] anyhow::Error),
+    #[error("Datasource for collection {0} and index {1} already exists")]
+    AlreadyExists(CollectionId, IndexId),
 }
 
-impl From<tokio::sync::mpsc::error::SendError<SyncUpdate>> for DatasourceError {
-    fn from(e: tokio::sync::mpsc::error::SendError<SyncUpdate>) -> Self {
-        DatasourceError::SyncFailed(anyhow::anyhow!(e))
+#[derive(Error, Debug)]
+pub enum SyncError {
+    #[error("Sync failed: {0}")]
+    Failed(#[from] anyhow::Error),
+}
+
+impl From<tokio::sync::mpsc::error::SendError<IndexOperation>> for SyncError {
+    fn from(e: tokio::sync::mpsc::error::SendError<IndexOperation>) -> Self {
+        SyncError::Failed(anyhow::anyhow!(e))
     }
 }
 
@@ -31,7 +37,7 @@ pub enum Operation {
     Delete(DeleteDocuments),
 }
 
-pub struct SyncUpdate {
+pub struct IndexOperation {
     pub collection_id: CollectionId,
     pub index_id: IndexId,
     pub operation: Operation,
@@ -135,7 +141,10 @@ impl DatasourceStorage {
                 }));
             }
             std::collections::hash_map::Entry::Occupied(_) => {
-                unreachable!("Attempted to insert a datasource that already exists. This should be prevented by the caller.")
+                return Err(anyhow::anyhow!(DatasourceError::AlreadyExists(
+                    collection_id,
+                    index_id
+                )));
             }
         }
 
@@ -265,7 +274,7 @@ impl DatasourceStorage {
     pub async fn start_datasource_loop(
         &self,
         interval: time::Duration,
-        datasource_update_sender: tokio::sync::mpsc::Sender<SyncUpdate>,
+        index_operation_sender: tokio::sync::mpsc::Sender<IndexOperation>,
         mut stop_receiver: tokio::sync::broadcast::Receiver<()>,
         stop_done_sender: tokio::sync::mpsc::Sender<()>,
     ) -> Result<()> {
@@ -300,7 +309,7 @@ impl DatasourceStorage {
                                     *index_id,
                                     base_dir.clone(),
                                     kind.fetcher.clone(),
-                                    datasource_update_sender.clone(),
+                                    index_operation_sender.clone(),
                                 );
                                 let kind = kind.clone();
                                 let c_id = collection_id.clone();
@@ -325,7 +334,7 @@ impl DatasourceStorage {
                                     index_id,
                                     base_dir.clone(),
                                     kind.fetcher.clone(),
-                                    datasource_update_sender.clone(),
+                                    index_operation_sender.clone(),
                                 );
                                 let kind = kind.clone();
                                 let c_id = collection_id.clone();
@@ -356,7 +365,7 @@ impl DatasourceStorage {
             }
             info!("All datasource tasks finished.");
 
-            drop(datasource_update_sender);
+            drop(index_operation_sender);
 
             if let Err(e) = stop_done_sender.send(()).await {
                 error!(error = ?e, "Cannot send stop signal to writer side");
@@ -371,9 +380,9 @@ impl DatasourceStorage {
         index_id: IndexId,
         datasource_dir_clone: PathBuf,
         datasource: Fetcher,
-        sync_sender: tokio::sync::mpsc::Sender<SyncUpdate>,
+        index_operation_sender: tokio::sync::mpsc::Sender<IndexOperation>,
     ) -> tokio::task::JoinHandle<()> {
-        let task_sender_clone = sync_sender.clone();
+        let task_sender_clone = index_operation_sender.clone();
 
         match &datasource {
             Fetcher::S3(s3_datasource) => {
@@ -396,7 +405,7 @@ impl DatasourceStorage {
                             .await
                         {
                             Ok(_) => {}
-                            Err(DatasourceError::SyncFailed(e)) => {
+                            Err(SyncError::Failed(e)) => {
                                 error!(error = ?e, "Failed to sync S3 datasource for ({} {})", collection_id, index_id);
                             }
                         }

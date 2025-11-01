@@ -23,7 +23,7 @@ use std::{
     time::Duration,
 };
 
-use self::datasource::SyncUpdate;
+use self::datasource::IndexOperation;
 
 use super::{
     system_prompts::SystemPromptInterface, Offset, OperationSender, OperationSenderCreator,
@@ -1358,7 +1358,7 @@ impl WriteSide {
 
 fn start_datasource_loop(
     write_side: Arc<WriteSide>,
-    mut update_receiver: tokio::sync::mpsc::Receiver<SyncUpdate>,
+    mut update_receiver: tokio::sync::mpsc::Receiver<IndexOperation>,
 ) {
     tokio::spawn(async move {
         info!("Starting datasource loop");
