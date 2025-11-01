@@ -28,17 +28,17 @@ pub struct S3Fetcher {
 const BATCH_SIZE: usize = 10;
 
 impl S3Fetcher {
-    pub fn resy_db_filename(collection_id: CollectionId, index_id: IndexId) -> String {
+    fn sync_state_filename(collection_id: CollectionId, index_id: IndexId) -> String {
         format!("{}_{}.db", collection_id, index_id)
     }
 
-    pub async fn remove_resy_db(
+    pub async fn remove_sync_state_file(
         &self,
         base_dir: &PathBuf,
         collection_id: CollectionId,
         index_id: IndexId,
     ) -> Result<()> {
-        let db_name = Self::resy_db_filename(collection_id, index_id);
+        let db_name = Self::sync_state_filename(collection_id, index_id);
         let db_path = base_dir.join(db_name);
         if db_path.exists() {
             tokio::fs::remove_file(db_path).await?;
@@ -112,7 +112,7 @@ impl S3Fetcher {
         let mut docs_to_insert = Vec::with_capacity(BATCH_SIZE);
         let mut keys_to_remove = Vec::with_capacity(BATCH_SIZE);
 
-        let db_name = Self::resy_db_filename(collection_id, index_id);
+        let db_name = Self::sync_state_filename(collection_id, index_id);
         let db_path = datasource_dir.join(db_name);
         if let Err(e) = s3_diff_client
         .stream_diff_and_update(db_path.as_path(), async |change| {
@@ -204,14 +204,16 @@ impl S3Fetcher {
             .await
             .context("Failed to read S3 object body")?;
 
-        let mut inner = serde_json::from_slice::<Map<String, Value>>(&body.into_bytes())
+        let mut document_content = serde_json::from_slice::<Map<String, Value>>(&body.into_bytes())
             .context("Failed to parse document body as JSON")?;
 
         // adding an id key consistent with the bucket key, in order to recognize it to
         // update/delete it in future.
-        inner.insert("id".to_string(), Value::String(key.to_string()));
+        document_content.insert("id".to_string(), Value::String(key.to_string()));
 
-        Ok(Document { inner })
+        Ok(Document {
+            inner: document_content,
+        })
     }
 }
 

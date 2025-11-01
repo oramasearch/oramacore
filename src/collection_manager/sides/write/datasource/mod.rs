@@ -64,7 +64,7 @@ impl Fetcher {
         match self {
             Fetcher::S3(s3_fetcher) => {
                 s3_fetcher
-                    .remove_resy_db(base_dir, collection_id, index_id)
+                    .remove_sync_state_file(base_dir, collection_id, index_id)
                     .await
             }
         }
@@ -95,9 +95,9 @@ impl Drop for InUseGuard {
 pub struct DatasourceStorage {
     base_dir: PathBuf,
     file_path: PathBuf,
-    fetcher_trigg_sender: tokio::sync::mpsc::Sender<(CollectionId, IndexId)>,
-    fetcher_trigg_receiver: Mutex<Option<tokio::sync::mpsc::Receiver<(CollectionId, IndexId)>>>,
-    map: Arc<OramaAsyncLock<CollectionDatasources>>,
+    ondemand_sync_sender: tokio::sync::mpsc::Sender<(CollectionId, IndexId)>,
+    ondemand_sync_receiver: Mutex<Option<tokio::sync::mpsc::Receiver<(CollectionId, IndexId)>>>,
+    datasources: Arc<OramaAsyncLock<CollectionDatasources>>,
 }
 
 impl DatasourceStorage {
@@ -107,14 +107,14 @@ impl DatasourceStorage {
         let file_path = base_dir.join("datasources.json");
         let map = Self::load_dump_from_disk(&file_path)?;
 
-        let (fetcher_trigg_sender, fetcher_trigg_receiver) = tokio::sync::mpsc::channel(100);
+        let (ondemand_sync_sender, ondemand_sync_receiver) = tokio::sync::mpsc::channel(100);
 
         Ok(Self {
             base_dir: base_dir.clone(),
             file_path,
-            map: Arc::new(OramaAsyncLock::new("datasource_storage", map)),
-            fetcher_trigg_sender,
-            fetcher_trigg_receiver: Mutex::new(Some(fetcher_trigg_receiver)),
+            datasources: Arc::new(OramaAsyncLock::new("datasource_storage", map)),
+            ondemand_sync_sender,
+            ondemand_sync_receiver: Mutex::new(Some(ondemand_sync_receiver)),
         })
     }
 
@@ -126,7 +126,7 @@ impl DatasourceStorage {
     ) -> Result<()> {
         fetcher.validate().await?;
 
-        let mut m = self.map.write("insert").await;
+        let mut m = self.datasources.write("insert").await;
         match m.entry((collection_id, index_id)) {
             std::collections::hash_map::Entry::Vacant(entry) => {
                 entry.insert(Arc::new(DatasourceWrapper {
@@ -135,7 +135,7 @@ impl DatasourceStorage {
                 }));
             }
             std::collections::hash_map::Entry::Occupied(_) => {
-                unreachable!("nop")
+                unreachable!("Attempted to insert a datasource that already exists. This should be prevented by the caller.")
             }
         }
 
@@ -144,7 +144,7 @@ impl DatasourceStorage {
         drop(m);
 
         if let Err(e) = self
-            .fetcher_trigg_sender
+            .ondemand_sync_sender
             .try_send((collection_id, index_id))
         {
             error!("Failed to send datasource sync request: {}", e);
@@ -154,7 +154,7 @@ impl DatasourceStorage {
     }
 
     pub async fn remove_collection(&self, collection_id: CollectionId) -> Result<()> {
-        let mut m = self.map.write("remove_collection").await;
+        let mut m = self.datasources.write("remove_collection").await;
         let keys_to_remove: Vec<_> = m.keys().filter(|k| k.0 == collection_id).cloned().collect();
 
         if keys_to_remove.is_empty() {
@@ -181,7 +181,7 @@ impl DatasourceStorage {
     }
 
     pub async fn remove_index(&self, collection_id: CollectionId, index_id: IndexId) -> Result<()> {
-        let mut m = self.map.write("remove_index").await;
+        let mut m = self.datasources.write("remove_index").await;
         let f = m.remove(&(collection_id, index_id));
 
         if let Some(fetcher) = f {
@@ -205,7 +205,7 @@ impl DatasourceStorage {
     }
 
     pub async fn exists(&self, collection_id: CollectionId, index_id: IndexId) -> bool {
-        let m = self.map.read("exists").await;
+        let m = self.datasources.read("exists").await;
         m.contains_key(&(collection_id, index_id))
     }
 
@@ -269,10 +269,10 @@ impl DatasourceStorage {
         mut stop_receiver: tokio::sync::broadcast::Receiver<()>,
         stop_done_sender: tokio::sync::mpsc::Sender<()>,
     ) -> Result<()> {
-        let map = self.map.clone();
+        let datasources = self.datasources.clone();
         let base_dir = self.base_dir.clone();
-        let mut fetcher_trigg_receiver = self
-            .fetcher_trigg_receiver
+        let mut ondemand_sync_receiver = self
+            .ondemand_sync_receiver
             .lock()
             .await
             .take()
@@ -292,7 +292,7 @@ impl DatasourceStorage {
                     }
                     _ = interval.tick() => {
                         info!("Running periodic datasource sync");
-                        let lock = map.read("run_interval").await;
+                        let lock = datasources.read("run_interval").await;
                         for ((collection_id, index_id), kind) in lock.iter() {
                             if kind.in_use.compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed).is_ok() {
                                 let task = DatasourceStorage::run_fetcher_task(
@@ -303,18 +303,21 @@ impl DatasourceStorage {
                                     datasource_update_sender.clone(),
                                 );
                                 let kind = kind.clone();
+                                let c_id = collection_id.clone();
+                                let i_id = index_id.clone();
                                 tasks.spawn(async move {
                                     let _guard = InUseGuard { wrapper: kind };
                                     if let Err(e) = task.await {
-                                        error!("Datasource sync task failed: {:?}", e);
+                                        error!("Datasource sync ({} {}) task failed: {:?}", c_id, i_id,e);
                                     }
                                 });
                             }
                         }
                         drop(lock);
                     }
-                    Some((collection_id, index_id)) = fetcher_trigg_receiver.recv() => {
-                        let lock = map.read("run_explicit").await;
+                    Some((collection_id, index_id)) = ondemand_sync_receiver.recv() => {
+                        info!("Running on-demand datasource sync for ({}, {})", collection_id, index_id);
+                        let lock = datasources.read("run_ondemand").await;
                         if let Some(kind) = lock.get(&(collection_id, index_id)) {
                             if kind.in_use.compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed).is_ok() {
                                 let task = DatasourceStorage::run_fetcher_task(
@@ -325,10 +328,12 @@ impl DatasourceStorage {
                                     datasource_update_sender.clone(),
                                 );
                                 let kind = kind.clone();
+                                let c_id = collection_id.clone();
+                                let i_id = index_id.clone();
                                 tasks.spawn(async move {
                                     let _guard = InUseGuard { wrapper: kind };
                                     if let Err(e) = task.await {
-                                        error!("Datasource sync task failed: {:?}", e);
+                                        error!("Datasource sync ({} {}) task failed: {:?}", c_id, i_id,e);
                                     }
                                 });
                             }
@@ -482,7 +487,7 @@ mod tests {
             .await
             .unwrap();
 
-        let mut receiver = storage.fetcher_trigg_receiver.lock().await.take().unwrap();
+        let mut receiver = storage.ondemand_sync_receiver.lock().await.take().unwrap();
         let (received_coll_id, received_index_id) = receiver.recv().await.take().unwrap();
         assert_eq!(received_coll_id, coll_id);
         assert_eq!(received_index_id, index_id);
