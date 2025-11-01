@@ -28,6 +28,30 @@ pub struct S3Fetcher {
 const BATCH_SIZE: usize = 10;
 
 impl S3Fetcher {
+    fn create_s3_client(&self) -> Client {
+        let credentials = Credentials::new(
+            self.access_key_id.clone(),
+            self.secret_access_key.clone(),
+            None,
+            None,
+            "resy",
+        );
+
+        let mut s3_config_builder = aws_sdk_s3::config::Builder::new()
+            .credentials_provider(SharedCredentialsProvider::new(credentials))
+            .region(Region::new(self.region.clone()))
+            .behavior_version(BehaviorVersion::latest());
+
+        if let Some(endpoint_url) = &self.endpoint_url {
+            s3_config_builder = s3_config_builder
+                .endpoint_url(endpoint_url)
+                .force_path_style(true);
+        }
+
+        let s3_config = s3_config_builder.build();
+        Client::from_conf(s3_config)
+    }
+
     pub fn sync_state_filename(collection_id: CollectionId, index_id: IndexId) -> String {
         format!("{}_{}.db", collection_id, index_id)
     }
@@ -47,26 +71,7 @@ impl S3Fetcher {
     }
 
     pub async fn validate_credentials(&self) -> Result<()> {
-        let credentials = Credentials::new(
-            self.access_key_id.clone(),
-            self.secret_access_key.clone(),
-            None,
-            None,
-            "resy",
-        );
-
-        let mut s3_config_builder = aws_sdk_s3::config::Builder::new()
-            .credentials_provider(SharedCredentialsProvider::new(credentials))
-            .region(Region::new(self.region.clone()))
-            .behavior_version(BehaviorVersion::latest());
-
-        if let Some(endpoint_url) = &self.endpoint_url {
-            s3_config_builder = s3_config_builder.endpoint_url(endpoint_url);
-            s3_config_builder = s3_config_builder.force_path_style(true);
-        }
-
-        let s3_config = s3_config_builder.build();
-        let s3_client = Client::from_conf(s3_config);
+        let s3_client = self.create_s3_client();
 
         s3_client
             .head_bucket()
@@ -87,26 +92,7 @@ impl S3Fetcher {
         index_id: IndexId,
         index_operation_sender: tokio::sync::mpsc::Sender<IndexOperation>,
     ) -> Result<(), SyncError> {
-        let credentials = Credentials::new(
-            self.access_key_id.clone(),
-            self.secret_access_key.clone(),
-            None,
-            None,
-            "resy",
-        );
-
-        let mut s3_config_builder = aws_sdk_s3::config::Builder::new()
-            .credentials_provider(SharedCredentialsProvider::new(credentials))
-            .region(Region::new(self.region.clone()))
-            .behavior_version(BehaviorVersion::latest());
-
-        if let Some(endpoint_url) = &self.endpoint_url {
-            s3_config_builder = s3_config_builder.endpoint_url(endpoint_url);
-            s3_config_builder = s3_config_builder.force_path_style(true);
-        }
-
-        let s3_config = s3_config_builder.build();
-        let s3_client = Client::from_conf(s3_config);
+        let s3_client = self.create_s3_client();
         let mut s3_diff_client = S3::from_client(s3_client.clone(), self.bucket.clone());
 
         let mut docs_to_insert = Vec::with_capacity(BATCH_SIZE);
