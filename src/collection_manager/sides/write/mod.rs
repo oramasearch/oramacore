@@ -1,5 +1,6 @@
 pub mod collection;
 mod collections;
+pub mod datasource;
 pub mod document_storage;
 mod embedding;
 pub mod index;
@@ -21,6 +22,8 @@ use std::{
     },
     time::Duration,
 };
+
+use self::datasource::IndexOperation;
 
 use super::{
     system_prompts::SystemPromptInterface, Offset, OperationSender, OperationSenderCreator,
@@ -117,6 +120,11 @@ pub struct CollectionsWriterConfig {
     pub javascript_queue_limit: usize,
     #[serde(deserialize_with = "deserialize_duration")]
     pub commit_interval: Duration,
+    #[serde(
+        default = "default_datasource_interval",
+        deserialize_with = "deserialize_duration"
+    )]
+    pub datasource_interval: Duration,
     #[serde(default = "default_temp_index_cleanup_config")]
     pub temp_index_cleanup: TempIndexCleanupConfig,
 }
@@ -138,6 +146,7 @@ pub struct WriteSide {
     operation_counter: OramaAsyncLock<u64>,
     insert_batch_commit_size: u64,
 
+    datasource_storage: datasource::DatasourceStorage,
     document_storage: DocumentStorage,
     system_prompts: SystemPromptInterface,
     training_sets: TrainingSetInterface,
@@ -178,10 +187,12 @@ impl WriteSide {
         let master_api_key = config.master_api_key;
         let collections_writer_config = config.config;
         let data_dir = collections_writer_config.data_dir.clone();
+        let datasource_dir = data_dir.clone().join("datasource");
 
         let insert_batch_commit_size = collections_writer_config.insert_batch_commit_size;
         let temp_index_cleanup_config = collections_writer_config.temp_index_cleanup.clone();
 
+        let datasource_interval = collections_writer_config.datasource_interval;
         let commit_interval = collections_writer_config.commit_interval;
         let embedding_queue_limit = collections_writer_config.embedding_queue_limit;
 
@@ -244,11 +255,26 @@ impl WriteSide {
             .await
             .context("Cannot create document storage")?;
 
-        let (stop_done_sender, stop_done_receiver) = tokio::sync::mpsc::channel(1);
+        let (stop_done_sender, stop_done_receiver) = tokio::sync::mpsc::channel(4);
         let (stop_sender, _) = tokio::sync::broadcast::channel(1);
         let commit_loop_receiver = stop_sender.subscribe();
         let temp_index_cleanup_receiver = stop_sender.subscribe();
+        let datasource_loop_receiver = stop_sender.subscribe();
         let receive_operation_loop_receiver = stop_sender.subscribe();
+        let (datasource_sender, datasource_receiver) = tokio::sync::mpsc::channel(100);
+
+        let datasource_storage = datasource::DatasourceStorage::try_new(&datasource_dir)
+            .context("Cannot create datasource storage")?;
+
+        datasource_storage
+            .start_datasource_loop(
+                datasource_interval,
+                datasource_sender,
+                datasource_loop_receiver,
+                stop_done_sender.clone(),
+            )
+            .await
+            .context("Cannot start the datasource loop")?;
 
         let jwt_manager = JwtManager::new(config.jwt)
             .await
@@ -259,6 +285,7 @@ impl WriteSide {
         let write_side = Self {
             document_count,
             collections: collections_writer,
+            datasource_storage,
             document_storage,
             data_dir,
             insert_batch_commit_size,
@@ -277,6 +304,8 @@ impl WriteSide {
         };
 
         let write_side = Arc::new(write_side);
+
+        start_datasource_loop(write_side.clone(), datasource_receiver);
 
         start_commit_loop(
             write_side.clone(),
@@ -309,23 +338,20 @@ impl WriteSide {
 
     pub async fn stop(&self) -> Result<()> {
         info!("Stopping writer side");
-        // Broadcast
-        self.stop_sender
-            .send(())
-            .context("Cannot send stop signal")?;
-        let mut stop_done_receiver = self.stop_done_receiver.write("stop").await;
-        // Commit loop
-        stop_done_receiver
-            .recv()
-            .await
-            .context("Cannot send stop signal")?;
-        // embedding calulcation loop
-        stop_done_receiver
-            .recv()
-            .await
-            .context("Cannot send stop signal")?;
-        info!("Writer side stopped");
+        self.stop_sender.send(()).ok();
 
+        let mut stop_done_receiver = self.stop_done_receiver.write("stop").await;
+        // Wait for all 4 loops (datasource, commit, temp_index, embedding) to signal completion.
+        for i in 0..4 {
+            if stop_done_receiver.recv().await.is_none() {
+                warn!(
+                    "A background loop sender was dropped before signaling shutdown. Loop count: {}",
+                    i + 1
+                );
+            }
+        }
+
+        info!("Writer side stopped");
         Ok(())
     }
 
@@ -410,6 +436,7 @@ impl WriteSide {
             index_id,
             embedding,
             type_strategy,
+            datasource,
         } = req;
 
         let default_string_calculation = if cfg!(test) {
@@ -422,6 +449,21 @@ impl WriteSide {
         collection
             .create_index(index_id, embedding, type_strategy.enum_strategy)
             .await?;
+
+        if let Some(datasource) = datasource {
+            if let Err(e) = self
+                .datasource_storage
+                .insert(collection_id, index_id, datasource)
+                .await
+            {
+                self.delete_index(write_api_key, collection_id, index_id)
+                    .await
+                    .context(
+                        "Failed to rollback index creation after datasource insertion failed",
+                    )?;
+                return Err(e.into());
+            }
+        }
 
         Ok(())
     }
@@ -626,6 +668,10 @@ impl WriteSide {
         index_id: IndexId,
     ) -> Result<(), WriteError> {
         let collection = self.get_collection(collection_id, write_api_key).await?;
+
+        self.datasource_storage
+            .remove_index(collection_id, index_id)
+            .await?;
 
         let document_to_remove = collection.delete_index(index_id).await?;
 
@@ -908,6 +954,10 @@ impl WriteSide {
         collection_id: CollectionId,
     ) -> Result<(), WriteError> {
         self.check_master_api_key(master_api_key)?;
+
+        self.datasource_storage
+            .remove_collection(collection_id)
+            .await?;
 
         self.write_operation_counter.fetch_add(1, Ordering::Relaxed);
         let document_ids = self.collections.delete_collection(collection_id).await;
@@ -1306,6 +1356,55 @@ impl WriteSide {
     }
 }
 
+fn start_datasource_loop(
+    write_side: Arc<WriteSide>,
+    mut update_receiver: tokio::sync::mpsc::Receiver<IndexOperation>,
+) {
+    tokio::spawn(async move {
+        info!("Starting datasource loop");
+        while let Some(sync_msg) = update_receiver.recv().await {
+            match sync_msg.operation {
+                datasource::Operation::Insert(docs) => {
+                    if let Err(e) = write_side
+                        .insert_documents(
+                            WriteApiKey::ApiKey(write_side.master_api_key.clone()),
+                            sync_msg.collection_id,
+                            sync_msg.index_id,
+                            docs,
+                        )
+                        .await
+                    {
+                        error!(
+                            error = ?e,
+                            "Failed to insert documents from datasource collection: {} index: {}",
+                            sync_msg.collection_id,
+                            sync_msg.index_id,
+                        );
+                    }
+                }
+                datasource::Operation::Delete(keys_to_remove) => {
+                    if let Err(e) = write_side
+                        .delete_documents(
+                            WriteApiKey::ApiKey(write_side.master_api_key.clone()),
+                            sync_msg.collection_id,
+                            sync_msg.index_id,
+                            keys_to_remove,
+                        )
+                        .await
+                    {
+                        error!(
+                            error = ?e,
+                            "Failed to delete documents from datasource collection: {} index: {}",
+                            sync_msg.collection_id,
+                            sync_msg.index_id,
+                        );
+                    }
+                }
+            }
+        }
+    });
+}
+
 fn start_commit_loop(
     write_side: Arc<WriteSide>,
     insert_batch_commit_size: Duration,
@@ -1420,6 +1519,10 @@ fn embedding_model_default() -> OramaModelSerializable {
 
 fn default_insert_batch_commit_size() -> u64 {
     1_000
+}
+
+fn default_datasource_interval() -> Duration {
+    Duration::from_secs(3600)
 }
 
 fn default_temp_index_cleanup_config() -> TempIndexCleanupConfig {

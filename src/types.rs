@@ -3,6 +3,7 @@ use crate::ai::RemoteLLMProvider;
 
 use crate::ai::automatic_embeddings_selector::ChosenProperties;
 
+use crate::collection_manager::sides::write::datasource::Fetcher;
 use crate::collection_manager::sides::write::index::{EnumStrategy, FieldType, GeoPoint};
 use crate::collection_manager::sides::write::OramaModelSerializable;
 use crate::collection_manager::sides::{deserialize_api_key, serialize_api_key};
@@ -1767,6 +1768,7 @@ pub struct CreateIndexRequest {
     pub embedding: Option<IndexEmbeddingsCalculation>,
     #[serde(default)]
     pub type_strategy: TypeParsingStrategies,
+    pub datasource: Option<Fetcher>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -2288,6 +2290,8 @@ impl<const N: usize> Display for StackString<N> {
 
 #[cfg(test)]
 mod tests {
+    use crate::collection_manager::sides::write::datasource::s3::S3Fetcher;
+
     use super::*;
     use chrono::SecondsFormat;
 
@@ -2540,6 +2544,38 @@ mod tests {
                 "b".to_string()
             ]))
         );
+
+        let j = json!({
+            "id": "foo-ds",
+            "embedding": null,
+            "datasource": {
+                "s3": {
+                    "bucket": "test-bucket",
+                    "region": "us-west-2",
+                    "access_key_id": "key123",
+                    "secret_access_key": "secret456",
+                    "endpoint_url": "https://my-s3.com"
+                }
+            }
+        });
+
+        let p = serde_json::from_value::<CreateIndexRequest>(j).unwrap();
+        assert_eq!(p.index_id, IndexId::try_new("foo-ds").unwrap());
+
+        let expected_s3 = S3Fetcher {
+            bucket: "test-bucket".to_string(),
+            region: "us-west-2".to_string(),
+            access_key_id: "key123".to_string(),
+            secret_access_key: "secret456".to_string(),
+            endpoint_url: Some("https://my-s3.com".to_string()),
+        };
+        assert_eq!(p.datasource, Some(Fetcher::S3(expected_s3)));
+
+        let j = json!({
+            "id": "foo-no-ds"
+        });
+        let p = serde_json::from_value::<CreateIndexRequest>(j).unwrap();
+        assert_eq!(p.datasource, None);
     }
 
     #[test]
