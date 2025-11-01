@@ -101,56 +101,56 @@ impl S3Fetcher {
         let db_name = Self::sync_state_filename(collection_id, index_id);
         let db_path = datasource_dir.join(db_name);
         if let Err(e) = s3_diff_client
-        .stream_diff_and_update(db_path.as_path(), async |change| {
-            match change {
-                Change::Added(obj) => {
-                    match S3Fetcher::fetch_document(&s3_client, &self.bucket, &obj.key).await {
-                        Ok(doc) => docs_to_insert.push(doc),
-                        Err(e) => {
-                            error!(error = ?e, key = %obj.key, "Failed to fetch new document");
+            .stream_diff_and_update(db_path.as_path(), async |change| {
+                match change {
+                    Change::Added(obj) => {
+                        match S3Fetcher::fetch_document(&s3_client, &self.bucket, &obj.key).await {
+                            Ok(doc) => docs_to_insert.push(doc),
+                            Err(e) => {
+                                error!(error = ?e, key = %obj.key, "Failed to fetch new document");
+                            }
                         }
                     }
-                }
-                Change::Modified { old: _, new } => {
-                    match S3Fetcher::fetch_document(&s3_client, &self.bucket, &new.key).await {
-                        Ok(doc) => docs_to_insert.push(doc),
-                        Err(e) => {
-                            error!(error = ?e, key = %new.key, "Failed to fetch modified document");
+                    Change::Modified { old: _, new } => {
+                        match S3Fetcher::fetch_document(&s3_client, &self.bucket, &new.key).await {
+                            Ok(doc) => docs_to_insert.push(doc),
+                            Err(e) => {
+                                error!(error = ?e, key = %new.key, "Failed to fetch modified document");
+                            }
                         }
                     }
+                    Change::Deleted(obj) => {
+                        keys_to_remove.push(obj.key);
+                    }
                 }
-                Change::Deleted(obj) => {
-                    keys_to_remove.push(obj.key);
+                if docs_to_insert.len() >= BATCH_SIZE {
+                    let docs = std::mem::take(&mut docs_to_insert);
+                    index_operation_sender
+                        .send(IndexOperation {
+                            collection_id,
+                            index_id,
+                            operation: Operation::Insert(DocumentList(docs)),
+                        })
+                        .await
+                        .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?;
                 }
-            }
-            if docs_to_insert.len() >= BATCH_SIZE {
-                let docs = std::mem::take(&mut docs_to_insert);
-                index_operation_sender
-                    .send(IndexOperation {
-                        collection_id,
-                        index_id,
-                        operation: Operation::Insert(DocumentList(docs)),
-                    })
-                    .await
-                    .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?;
-            }
-            if keys_to_remove.len() >= BATCH_SIZE {
-                let keys = std::mem::take(&mut keys_to_remove);
-                index_operation_sender
-                    .send(IndexOperation {
-                        collection_id,
-                        index_id,
-                        operation: Operation::Delete(keys),
-                    })
-                    .await
-                    .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?;
-            }
-            Ok(())
-        })
-        .await
-    {
-        return Err(SyncError::Failed(anyhow::anyhow!("{}", e)));
-    }
+                if keys_to_remove.len() >= BATCH_SIZE {
+                    let keys = std::mem::take(&mut keys_to_remove);
+                    index_operation_sender
+                        .send(IndexOperation {
+                            collection_id,
+                            index_id,
+                            operation: Operation::Delete(keys),
+                        })
+                        .await
+                        .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?;
+                }
+                Ok(())
+            })
+            .await
+        {
+            return Err(SyncError::Failed(anyhow::anyhow!(e)));
+        }
 
         if !docs_to_insert.is_empty() {
             index_operation_sender
