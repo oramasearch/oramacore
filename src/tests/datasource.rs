@@ -121,3 +121,62 @@ async fn test_sync_with_datasource() {
         "Resy file should be deleted after datasource removal"
     );
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_sync_with_invalid_datasource_credentials() {
+    let test_context = TestContext::new().await;
+    let collection_client = test_context.create_collection().await.unwrap();
+
+    let index_id = IndexId::try_new("test-invalid-s3-index".to_string()).unwrap();
+
+    let create_index_result = test_context
+        .writer
+        .create_index(
+            collection_client.write_api_key.clone(),
+            collection_client.collection_id.clone(),
+            CreateIndexRequest {
+                index_id: index_id.clone(),
+                embedding: None,
+                type_strategy: Default::default(),
+                datasource: Some(datasource::Fetcher::S3(datasource::s3::S3Fetcher {
+                    bucket: "foo".to_string(),
+                    region: "us-east-1".to_string(),
+                    access_key_id: "invalid_access_key".to_string(), // Invalid credential
+                    secret_access_key: "invalid_secret_key".to_string(), // Invalid credential
+                    endpoint_url: Some("http://localhost:4566".to_string()),
+                })),
+            },
+        )
+        .await;
+
+    assert!(
+        create_index_result.is_err(),
+        "Index creation should fail with invalid credentials"
+    );
+
+    // Verify that the index itself is not listed
+    let list_collections_response = test_context
+        .writer
+        .list_collections(test_context.master_api_key.clone())
+        .await
+        .unwrap();
+
+    let collection_response = list_collections_response
+        .into_iter()
+        .find(|c| c.id == collection_client.collection_id);
+
+    assert!(
+        collection_response.is_some(),
+        "Collection should still exist"
+    );
+
+    let collection_response = collection_response.unwrap();
+
+    assert!(
+        !collection_response
+            .indexes
+            .iter()
+            .any(|idx| idx.id == index_id),
+        "Index should not be listed after failed creation with invalid credentials"
+    );
+}
