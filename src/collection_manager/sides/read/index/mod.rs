@@ -2529,11 +2529,12 @@ impl Index {
             // Anyway, if the user seach in different index, we are re-calculating the embedding.
             // We should put a sort of cache here.
             // TODO: think about this.
-            let targets = self.context.embeddings_service.calculate_embeddings(
-                vec![term.to_string()],
-                Intent::Query,
-                model,
-            )?;
+            let targets = self
+                .context
+                .python_service
+                .embeddings_service
+                .clone()
+                .calculate_embeddings(vec![term.to_string()], Intent::Query, model)?;
 
             for target in targets {
                 uncommitted.search(

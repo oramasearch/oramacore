@@ -19,7 +19,6 @@ use tracing::level_filters::LevelFilter;
 use tracing::{info, warn};
 use web_server::{HttpConfig, WebServer};
 
-use crate::python::embeddings::EmbeddingsService;
 pub mod lock;
 
 pub mod types;
@@ -153,8 +152,6 @@ pub async fn build_orama(
         }
     };
 
-    let embeddings_service = Arc::new(EmbeddingsService::new()?);
-
     #[cfg(feature = "writer")]
     let writer_sender_config: Option<OutputSideChannelType> =
         Some(config.writer_side.output.clone());
@@ -170,6 +167,9 @@ pub async fn build_orama(
 
     info!("Building nlp_service");
     let nlp_service = Arc::new(nlp::NLPService::new());
+
+    info!("Building Python service");
+    let python_service = Arc::new(python::PythonService::new()?);
 
     #[cfg(feature = "writer")]
     let write_side = {
@@ -190,7 +190,7 @@ pub async fn build_orama(
             nlp_service.clone(),
             llm_service.clone(),
             automatic_embeddings_selector,
-            embeddings_service.clone(),
+            python_service.clone(),
         )
         .await
         .context("Cannot create write side")?;
@@ -214,12 +214,13 @@ pub async fn build_orama(
             llm_service,
             config.reader_side,
             local_gpu_manager,
-            embeddings_service,
+            python_service.clone(),
         )
         .await
         .context("Cannot create read side")?;
         Some(read_side)
     };
+
     #[cfg(not(feature = "reader"))]
     let read_side = {
         warn!("Building read_side skipped due to compilation flag");
