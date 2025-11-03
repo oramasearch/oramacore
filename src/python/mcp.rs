@@ -118,6 +118,7 @@ impl SearchService {
     fn nlp_search(&self, py: Python, params: Bound<'_, PyDict>) -> PyResult<Py<PyAny>> {
         let nlp_request: NLPSearchRequest =
             serde_pyobject::from_pyobject(params.clone()).map_err(|e| {
+                tracing::error!("Failed to deserialize MCP NLP search params: {}", e);
                 PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
                     "Failed to deserialize MCP NLP search params: {}",
                     e
@@ -128,20 +129,26 @@ impl SearchService {
         let api_key = self.api_key;
         let collection_id = self.collection_id;
 
-        let result = tokio::task::block_in_place(|| {
-            tokio::runtime::Handle::current().block_on(async move {
-                let logs = read_side.get_hook_logs();
-                let log_sender = logs.get_sender(&collection_id);
+        // Release the GIL before blocking on async operations
+        // @todo: remove this once on Python v3.14
+        #[allow(deprecated)]
+        let result = py.allow_threads(|| {
+            tokio::task::block_in_place(|| {
+                tokio::runtime::Handle::current().block_on(async move {
+                    let logs = read_side.get_hook_logs();
+                    let log_sender = logs.get_sender(&collection_id);
+                    let result = read_side
+                        .nlp_search(
+                            axum::extract::State(read_side.clone()),
+                            api_key,
+                            collection_id,
+                            nlp_request,
+                            log_sender,
+                        )
+                        .await;
 
-                read_side
-                    .nlp_search(
-                        axum::extract::State(read_side.clone()),
-                        api_key,
-                        collection_id,
-                        nlp_request,
-                        log_sender,
-                    )
-                    .await
+                    result
+                })
             })
         });
 
