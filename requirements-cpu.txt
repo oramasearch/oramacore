@@ -20,5 +20,4 @@ onnxruntime==1.23.1
 accelerate==1.10.1
 einops==0.8.1
 
-fastmcp==2.12.5
 pydantic==2.11.7
