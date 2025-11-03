@@ -44,7 +44,7 @@ pub use context::WriteSideContext;
 
 use crate::collection_manager::sides::write::document_storage::ZeboDocument;
 use crate::lock::OramaAsyncLock;
-use crate::python::embeddings::{EmbeddingsService, Model};
+use crate::python::embeddings::Model;
 use crate::python::PythonService;
 use crate::{
     ai::{

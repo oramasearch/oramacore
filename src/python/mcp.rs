@@ -178,8 +178,8 @@ pub struct McpService {
 impl McpService {
     pub fn new(
         read_side: Arc<ReadSide>,
-        api_key: ApiKey,
         collection_id: CollectionId,
+        api_key: ApiKey,
         collection_description: String,
     ) -> PyResult<Self> {
         Python::attach(|py| {

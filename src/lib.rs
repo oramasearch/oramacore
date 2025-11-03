@@ -13,14 +13,12 @@ use collection_manager::sides::{
 };
 use metrics_exporter_prometheus::PrometheusBuilder;
 use oramacore_lib::nlp;
-use rand::rand_core::le;
 use serde::Deserialize;
 use tracing::level_filters::LevelFilter;
 #[allow(unused_imports)]
 use tracing::{info, warn};
 use web_server::{HttpConfig, WebServer};
 
-use crate::python::embeddings::EmbeddingsService;
 pub mod lock;
 
 pub mod types;
@@ -216,12 +214,13 @@ pub async fn build_orama(
             llm_service,
             config.reader_side,
             local_gpu_manager,
-            python_service,
+            python_service.clone(),
         )
         .await
         .context("Cannot create read side")?;
         Some(read_side)
     };
+
     #[cfg(not(feature = "reader"))]
     let read_side = {
         warn!("Building read_side skipped due to compilation flag");

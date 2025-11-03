@@ -112,8 +112,8 @@ async fn mcp_endpoint(
 
     let mcp_service = match McpService::new(
         read_side.clone(),
-        api_key,
         collection_id,
+        api_key,
         collection_description,
     ) {
         Ok(service) => service,

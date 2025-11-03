@@ -18,7 +18,6 @@ impl PythonService {
     pub fn new() -> PyResult<Self> {
         Python::initialize();
 
-        // Extract Python scripts directory before attaching to Python
         let python_scripts_dir = Self::extract_python_scripts().map_err(|e| {
             PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!(
                 "Failed to extract Python scripts: {}",
@@ -34,8 +33,10 @@ impl PythonService {
 
             Self::initialize_python_env(py, &python_scripts_dir)?;
 
+            let embeddings_serivce = embeddings::EmbeddingsService::new()?;
+
             Ok(PythonService {
-                embeddings_service: Arc::new(embeddings::EmbeddingsService::new()?),
+                embeddings_service: Arc::new(embeddings_serivce),
             })
         })
     }
