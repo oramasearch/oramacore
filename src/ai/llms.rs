@@ -9,6 +9,7 @@ use async_openai::{
     },
 };
 use futures::{Stream, StreamExt};
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::mpsc;
@@ -171,6 +172,15 @@ pub fn format_prompt(prompt: String, variables: HashMap<String, String>) -> Stri
     result
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ModelInfo {
+    pub id: String,
+    pub name: String,
+    pub provider: RemoteLLMProvider,
+    pub max_input_tokens: u8,
+    pub max_output_tokens: u8,
+}
+
 #[derive(Debug)]
 pub struct LLMService {
     pub local_vllm_client: Option<async_openai::Client<OpenAIConfig>>,
@@ -180,6 +190,7 @@ pub struct LLMService {
     pub default_remote_models: Option<HashMap<RemoteLLMProvider, String>>,
     pub local_gpu_manager: Arc<LocalGPUManager>,
     pub is_unified_remote: bool,
+    pub models_info: HashMap<String, ModelInfo>,
 }
 
 impl LLMService {
@@ -415,6 +426,24 @@ impl LLMService {
             _ => Some(default_remote_models),
         };
 
+        let models_info_file = include_str!("./models_info.json");
+        let models_info_values = serde_json::from_str::<Vec<ModelInfo>>(models_info_file)
+            .context("Unable to parse models info JSON")?;
+
+        let mut models_info: HashMap<String, ModelInfo> = HashMap::new();
+        for model in models_info_values {
+            models_info.insert(
+                model.id.clone(),
+                ModelInfo {
+                    id: model.id.clone(),
+                    name: model.name.clone(),
+                    provider: RemoteLLMProvider::from(model.provider),
+                    max_input_tokens: model.max_input_tokens,
+                    max_output_tokens: model.max_output_tokens,
+                },
+            );
+        }
+
         Ok(Self {
             local_vllm_client,
             unified_remote_client,
@@ -423,6 +452,7 @@ impl LLMService {
             model: llm_config.model,
             local_gpu_manager,
             is_unified_remote,
+            models_info,
         })
     }
 
