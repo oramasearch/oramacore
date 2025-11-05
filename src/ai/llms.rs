@@ -172,13 +172,22 @@ pub fn format_prompt(prompt: String, variables: HashMap<String, String>) -> Stri
     result
 }
 
+#[derive(Debug, Clone, Deserialize)]
+struct ModelInfoRaw {
+    pub id: String,
+    pub name: String,
+    pub provider: String,
+    pub max_input_tokens: u32,
+    pub max_output_tokens: u32,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModelInfo {
     pub id: String,
     pub name: String,
     pub provider: RemoteLLMProvider,
-    pub max_input_tokens: u8,
-    pub max_output_tokens: u8,
+    pub max_input_tokens: u32,
+    pub max_output_tokens: u32,
 }
 
 #[derive(Debug)]
@@ -426,8 +435,8 @@ impl LLMService {
             _ => Some(default_remote_models),
         };
 
-        let models_info_file = include_str!("./models_info.json");
-        let models_info_values = serde_json::from_str::<Vec<ModelInfo>>(models_info_file)
+        let models_info_file = include_str!("models_info.json");
+        let models_info_values = serde_json::from_str::<Vec<ModelInfoRaw>>(models_info_file)
             .context("Unable to parse models info JSON")?;
 
         let mut models_info: HashMap<String, ModelInfo> = HashMap::new();
@@ -437,7 +446,10 @@ impl LLMService {
                 ModelInfo {
                     id: model.id.clone(),
                     name: model.name.clone(),
-                    provider: RemoteLLMProvider::from(model.provider),
+                    provider: model
+                        .provider
+                        .parse()
+                        .context("Invalid provider in models_info.json")?,
                     max_input_tokens: model.max_input_tokens,
                     max_output_tokens: model.max_output_tokens,
                 },
