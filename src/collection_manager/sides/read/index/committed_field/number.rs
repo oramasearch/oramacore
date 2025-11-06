@@ -6,7 +6,7 @@ use oramacore_lib::data_structures::ordered_key::BoundedValue;
 use serde::{Deserialize, Serialize};
 
 use crate::types::{DocumentId, Number, NumberFilter, SerializableNumber};
-use oramacore_lib::fs::create_if_not_exists;
+use oramacore_lib::fs::{create_if_not_exists, BufferedFile};
 
 #[derive(Debug)]
 pub struct CommittedNumberField {
@@ -35,12 +35,16 @@ impl CommittedNumberField {
     #[allow(deprecated)]
     pub fn try_load(info: NumberFieldInfo) -> Result<Self> {
         let data_dir = info.data_dir;
-        let vec = match std::fs::File::open(data_dir.join("number_vec.bin")) {
-            Ok(file) => {
-                bincode::deserialize_from::<_, Vec<(SerializableNumber, HashSet<DocumentId>)>>(file)
-                    .context("Failed to deserialize number_vec.bin")?
+        // Try to load from the new format first, and track if we need to commit (migrate from old format)
+        let (vec, needs_commit) = match BufferedFile::open(data_dir.join("number_vec.bin"))
+            .and_then(|f| f.read_bincode_data::<Vec<(SerializableNumber, HashSet<DocumentId>)>>())
+        {
+            Ok(vec) => {
+                // Successfully loaded from new format, no commit needed
+                (vec, false)
             }
             Err(_) => {
+                // Failed to load from new format, try to migrate from old format
                 use oramacore_lib::data_structures::ordered_key::OrderedKeyIndex;
                 let inner =
                     OrderedKeyIndex::<SerializableNumber, DocumentId>::load(data_dir.clone())?;
@@ -55,7 +59,8 @@ impl CommittedNumberField {
                 let mut vec: Vec<_> = items.map(|item| (item.key, item.values)).collect();
                 // ensure the order is by key. This should not be necessary, but we do it to ensure consistency.
                 vec.sort_by_key(|(key, _)| key.0);
-                vec
+                // Need to commit to save in new format
+                (vec, true)
             }
         };
 
@@ -65,7 +70,10 @@ impl CommittedNumberField {
             data_dir,
         };
 
-        s.commit().context("Failed to commit number field")?;
+        // Only commit if we migrated from old format
+        if needs_commit {
+            s.commit().context("Failed to commit number field")?;
+        }
 
         Ok(s)
     }
@@ -74,9 +82,10 @@ impl CommittedNumberField {
         // Ensure the data directory exists
         create_if_not_exists(&self.data_dir).context("Failed to create data directory")?;
 
-        let file_path = self.data_dir.join("number_vec.bin");
-        let file = std::fs::File::create(&file_path).context("Failed to create number_vec.bin")?;
-        bincode::serialize_into(file, &self.vec).context("Failed to serialize number vec")?;
+        BufferedFile::create_or_overwrite(self.data_dir.join("number_vec.bin"))
+            .context("Failed to create number_vec.bin")?
+            .write_bincode_data(&self.vec)
+            .context("Failed to serialize number vec")?;
 
         Ok(())
     }
