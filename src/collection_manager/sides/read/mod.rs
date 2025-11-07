@@ -44,6 +44,7 @@ use crate::ai::llms::{self, KnownPrompts, LLMService};
 use crate::ai::tools::{CollectionToolsRuntime, ToolError, ToolsRuntime};
 use crate::ai::training_sets::{TrainingDestination, TrainingSetInterface};
 use crate::ai::RemoteLLMProvider;
+use crate::collection_manager::sides::read::collection::FilterableFieldsStats;
 pub use crate::collection_manager::sides::read::context::ReadSideContext;
 use crate::collection_manager::sides::read::logs::HookLogs;
 use crate::collection_manager::sides::read::notify::Notifier;
@@ -333,6 +334,24 @@ impl ReadSide {
         collection.check_read_api_key(read_api_key, self.master_api_key)?;
 
         collection.stats(req).await
+    }
+
+    pub async fn filterable_fields(
+        &self,
+        read_api_key: ApiKey,
+        collection_id: CollectionId,
+        with_keys: bool,
+    ) -> Result<Vec<FilterableFieldsStats>, ReadError> {
+        let collection = self
+            .collections
+            .get_collection(collection_id)
+            .await
+            .ok_or_else(|| ReadError::NotFound(collection_id))?;
+        collection.check_read_api_key(read_api_key, self.master_api_key)?;
+
+        let fields = collection.get_filterable_fields(with_keys).await?;
+
+        Ok(fields)
     }
 
     pub async fn update(&self, (offset, op): (Offset, WriteOperation)) -> Result<()> {

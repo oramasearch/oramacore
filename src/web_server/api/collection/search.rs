@@ -20,6 +20,10 @@ pub fn apis(read_side: Arc<ReadSide>) -> Router {
     Router::new()
         .route("/v1/collections/{collection_id}/search", post(search))
         .route("/v1/collections/{collection_id}/stats", get(stats))
+        .route(
+            "/v1/collections/{collection_id}/filterable_fields",
+            get(filterable_fields),
+        )
         .with_state(read_side)
 }
 
@@ -27,6 +31,14 @@ pub fn apis(read_side: Arc<ReadSide>) -> Router {
 struct SearchQueryParams {
     #[serde(rename = "api-key")]
     api_key: ApiKey,
+}
+
+#[derive(Deserialize)]
+struct FilterableFieldsSearchQueryParams {
+    #[serde(rename = "api-key")]
+    api_key: ApiKey,
+    #[serde(rename = "with-keys")]
+    with_keys: Option<bool>,
 }
 
 async fn search(
@@ -68,6 +80,20 @@ async fn stats(
             collection_id,
             CollectionStatsRequest { with_keys: false },
         )
+        .await
+        .map(Json)
+}
+
+async fn filterable_fields(
+    Path(collection_id): Path<CollectionId>,
+    read_side: State<Arc<ReadSide>>,
+    Query(query): Query<FilterableFieldsSearchQueryParams>,
+) -> impl IntoResponse {
+    let read_api_key = query.api_key;
+    let with_keys = query.with_keys.unwrap_or(false);
+
+    read_side
+        .filterable_fields(read_api_key, collection_id, with_keys)
         .await
         .map(Json)
 }
