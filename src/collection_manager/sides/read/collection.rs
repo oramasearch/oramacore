@@ -74,11 +74,18 @@ pub struct FilterableFieldNumber {
 }
 
 #[derive(Serialize)]
+pub struct FilterableFieldString {
+    pub field_type: String,
+    pub count: usize,
+}
+
+#[derive(Serialize)]
 pub enum FilterableField {
     Bool(FilterableFieldBool),
     GeoPoint(FilterableFieldGeoPoint),
     Date(FilterableFieldDate),
     Number(FilterableFieldNumber),
+    String(FilterableFieldString),
 }
 
 #[derive(Serialize)]
@@ -872,7 +879,7 @@ impl CollectionReader {
     pub async fn get_filterable_fields(
         &self,
         with_keys: bool,
-    ) -> Result<CollectionStats, ReadError> {
+    ) -> Result<Vec<FilterableFieldsStats>, ReadError> {
         let mut stats = self.stats(CollectionStatsRequest { with_keys }).await?;
 
         stats.indexes_stats = stats
@@ -896,9 +903,11 @@ impl CollectionReader {
             })
             .collect();
 
-        let mut final_stats: HashMap<FieldId, FilterableField> = HashMap::new();
+        let mut result: Vec<FilterableFieldsStats> = Vec::new();
 
         for stat in stats.indexes_stats.iter() {
+            let mut final_stats: HashMap<FieldId, FilterableField> = HashMap::new();
+
             for field in stat.fields_stats.iter() {
                 match &field.stats {
                     IndexFieldStatsType::CommittedBoolean(CommittedBoolFieldStats {
@@ -1026,12 +1035,75 @@ impl CollectionReader {
                             }),
                         );
                     }
+                    IndexFieldStatsType::UncommittedNumber(UncommittedNumberFieldStats {
+                        min,
+                        max,
+                        ..
+                    }) => {
+                        if let Some(existing_stats) = final_stats.get(&field.field_id) {
+                            if let FilterableField::Number(number_stats) = existing_stats {
+                                let min_as_f64 = match min {
+                                    Number::I32(i) => *i as f64,
+                                    Number::F32(f) => *f as f64,
+                                };
+                                let max_as_f64 = match max {
+                                    Number::I32(i) => *i as f64,
+                                    Number::F32(f) => *f as f64,
+                                };
+
+                                let new_min = min_as_f64.min(number_stats.min);
+                                let new_max = max_as_f64.max(number_stats.max);
+
+                                final_stats.insert(
+                                    field.field_id,
+                                    FilterableField::Number(FilterableFieldNumber {
+                                        field_type: "number".to_string(),
+                                        min: new_min,
+                                        max: new_max,
+                                    }),
+                                );
+                            }
+                        }
+                    }
+                    IndexFieldStatsType::CommittedStringFilter(
+                        CommittedStringFilterFieldStats { key_count, .. },
+                    ) => {
+                        final_stats.insert(
+                            field.field_id,
+                            FilterableField::String(FilterableFieldString {
+                                field_type: "string".to_string(),
+                                count: *key_count,
+                            }),
+                        );
+                    }
+                    IndexFieldStatsType::UncommittedStringFilter(
+                        UncommittedStringFilterFieldStats { key_count, .. },
+                    ) => {
+                        if *key_count > 0 {
+                            if let Some(existing_stats) = final_stats.get(&field.field_id) {
+                                if let FilterableField::String(string_stats) = existing_stats {
+                                    final_stats.insert(
+                                        field.field_id,
+                                        FilterableField::String(FilterableFieldString {
+                                            field_type: "string".to_string(),
+                                            count: string_stats.count + *key_count,
+                                        }),
+                                    );
+                                }
+                            }
+                        }
+                    }
                     _ => {}
                 }
             }
+
+            result.push(FilterableFieldsStats {
+                index_id: stat.id,
+                fields: final_stats.into_iter().map(|(_, v)| v).collect(),
+            });
         }
 
-        Ok(stats)
+        Ok(result)
     }
 
     async fn get_index_mut(&self, index_id: IndexId) -> Option<IndexWriteLock<'_>> {

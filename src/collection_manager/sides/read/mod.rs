@@ -44,6 +44,7 @@ use crate::ai::llms::{self, KnownPrompts, LLMService};
 use crate::ai::tools::{CollectionToolsRuntime, ToolError, ToolsRuntime};
 use crate::ai::training_sets::{TrainingDestination, TrainingSetInterface};
 use crate::ai::RemoteLLMProvider;
+use crate::collection_manager::sides::read::collection::FilterableFieldsStats;
 pub use crate::collection_manager::sides::read::context::ReadSideContext;
 use crate::collection_manager::sides::read::logs::HookLogs;
 use crate::collection_manager::sides::read::notify::Notifier;
@@ -340,7 +341,7 @@ impl ReadSide {
         read_api_key: ApiKey,
         collection_id: CollectionId,
         with_keys: bool,
-    ) -> Result<CollectionStats, ReadError> {
+    ) -> Result<Vec<FilterableFieldsStats>, ReadError> {
         let collection = self
             .collections
             .get_collection(collection_id)
