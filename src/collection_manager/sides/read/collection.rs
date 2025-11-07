@@ -1,5 +1,6 @@
 use anyhow::{anyhow, bail, Context, Result};
 use std::{
+    collections::HashMap,
     io::ErrorKind,
     ops::{Deref, DerefMut},
     path::PathBuf,
@@ -27,7 +28,8 @@ use crate::{
     },
     lock::{OramaAsyncLock, OramaAsyncLockReadGuard, OramaAsyncLockWriteGuard},
     types::{
-        ApiKey, CollectionId, CollectionStatsRequest, FieldId, IndexId, InteractionMessage, Role,
+        ApiKey, CollectionId, CollectionStatsRequest, FieldId, IndexId, InteractionMessage, Number,
+        OramaDate, Role,
     },
 };
 
@@ -42,6 +44,48 @@ use super::{
 use crate::types::NLPSearchRequest;
 use oramacore_lib::fs::*;
 use oramacore_lib::nlp::locales::Locale;
+
+#[derive(Serialize)]
+pub struct FilterableFieldBool {
+    pub field_type: String,
+    pub count_true: usize,
+    pub count_false: usize,
+    pub count: usize,
+}
+
+#[derive(Serialize)]
+pub struct FilterableFieldGeoPoint {
+    pub field_type: String,
+    pub count: usize,
+}
+
+#[derive(Serialize)]
+pub struct FilterableFieldDate {
+    pub field_type: String,
+    pub min: Option<OramaDate>,
+    pub max: Option<OramaDate>,
+}
+
+#[derive(Serialize)]
+pub struct FilterableFieldNumber {
+    pub field_type: String,
+    pub min: f64,
+    pub max: f64,
+}
+
+#[derive(Serialize)]
+pub enum FilterableField {
+    Bool(FilterableFieldBool),
+    GeoPoint(FilterableFieldGeoPoint),
+    Date(FilterableFieldDate),
+    Number(FilterableFieldNumber),
+}
+
+#[derive(Serialize)]
+pub struct FilterableFieldsStats {
+    pub index_id: IndexId,
+    pub fields: Vec<FilterableField>,
+}
 
 pub struct CollectionReader {
     data_dir: PathBuf,
@@ -851,6 +895,141 @@ impl CollectionReader {
                 index_stats
             })
             .collect();
+
+        let mut final_stats: HashMap<FieldId, FilterableField> = HashMap::new();
+
+        for stat in stats.indexes_stats.iter() {
+            for field in stat.fields_stats.iter() {
+                match &field.stats {
+                    IndexFieldStatsType::CommittedBoolean(CommittedBoolFieldStats {
+                        false_count,
+                        true_count,
+                    }) => {
+                        final_stats.insert(
+                            field.field_id,
+                            FilterableField::Bool(FilterableFieldBool {
+                                field_type: "boolean".to_string(),
+                                count_true: *true_count,
+                                count_false: *false_count,
+                                count: *true_count + *false_count,
+                            }),
+                        );
+                    }
+                    IndexFieldStatsType::UncommittedBoolean(UncommittedBoolFieldStats {
+                        false_count,
+                        true_count,
+                    }) => {
+                        if *false_count > 0 || *true_count > 0 {
+                            if let Some(existing_stats) = final_stats.get(&field.field_id) {
+                                if let FilterableField::Bool(bool_stats) = existing_stats {
+                                    final_stats.insert(
+                                        field.field_id,
+                                        FilterableField::Bool(FilterableFieldBool {
+                                            field_type: "boolean".to_string(),
+                                            count_true: bool_stats.count_true + *true_count,
+                                            count_false: bool_stats.count_false + *false_count,
+                                            count: bool_stats.count + *true_count + *false_count,
+                                        }),
+                                    );
+                                }
+                            }
+                        }
+                    }
+                    IndexFieldStatsType::CommittedGeoPoint(CommittedGeoPointFieldStats {
+                        count,
+                    }) => {
+                        final_stats.insert(
+                            field.field_id,
+                            FilterableField::GeoPoint(FilterableFieldGeoPoint {
+                                field_type: "geopoint".to_string(),
+                                count: *count,
+                            }),
+                        );
+                    }
+                    IndexFieldStatsType::UncommittedGeoPoint(UncommittedGeoPointFieldStats {
+                        count,
+                    }) => {
+                        if *count > 0 {
+                            if let Some(existing_stats) = final_stats.get(&field.field_id) {
+                                if let FilterableField::GeoPoint(geo_stats) = existing_stats {
+                                    final_stats.insert(
+                                        field.field_id,
+                                        FilterableField::GeoPoint(FilterableFieldGeoPoint {
+                                            field_type: "geopoint".to_string(),
+                                            count: geo_stats.count + *count,
+                                        }),
+                                    );
+                                }
+                            }
+                        }
+                    }
+                    IndexFieldStatsType::CommittedDate(CommittedDateFieldStats { min, max }) => {
+                        final_stats.insert(
+                            field.field_id,
+                            FilterableField::Date(FilterableFieldDate {
+                                field_type: "date".to_string(),
+                                min: min.clone(),
+                                max: max.clone(),
+                            }),
+                        );
+                    }
+                    IndexFieldStatsType::UncommittedDate(UncommittedDateFieldStats {
+                        min,
+                        max,
+                        ..
+                    }) => {
+                        if let Some(existing_stats) = final_stats.get(&field.field_id) {
+                            if let FilterableField::Date(date_stats) = existing_stats {
+                                let new_min = match (date_stats.min.clone(), min) {
+                                    (Some(existing_min), Some(new_min)) => {
+                                        Some(OramaDate::try_from_i64(existing_min.as_i64().min(new_min.as_i64())).expect("Unable to conver i64 back to date format. This is a bug. Please report at https://github.com/oramasearch/oramacore"))
+                                    }
+                                    (Some(existing_min), None) => Some(existing_min),
+                                    (None, Some(new_min)) => Some(new_min.clone()),
+                                    (None, None) => None,
+                                };
+                                let new_max = match (date_stats.max.clone(), max) {
+                                    (Some(existing_max), Some(new_max)) => {
+                                        Some(OramaDate::try_from_i64(existing_max.as_i64().max(new_max.as_i64())).expect("Unable to conver i64 back to date format. This is a bug. Please report at https://github.com/oramasearch/oramacore"))
+                                    }
+                                    (Some(existing_max), None) => Some(existing_max),
+                                    (None, Some(new_max)) => Some(new_max.clone()),
+                                    (None, None) => None,
+                                };
+                                final_stats.insert(
+                                    field.field_id,
+                                    FilterableField::Date(FilterableFieldDate {
+                                        field_type: "date".to_string(),
+                                        min: new_min,
+                                        max: new_max,
+                                    }),
+                                );
+                            }
+                        }
+                    }
+                    IndexFieldStatsType::CommittedNumber(CommittedNumberFieldStats {
+                        min,
+                        max,
+                    }) => {
+                        final_stats.insert(
+                            field.field_id,
+                            FilterableField::Number(FilterableFieldNumber {
+                                field_type: "number".to_string(),
+                                min: match min {
+                                    crate::types::Number::I32(i) => *i as f64,
+                                    crate::types::Number::F32(f) => *f as f64,
+                                },
+                                max: match max {
+                                    crate::types::Number::I32(i) => *i as f64,
+                                    crate::types::Number::F32(f) => *f as f64,
+                                },
+                            }),
+                        );
+                    }
+                    _ => {}
+                }
+            }
+        }
 
         Ok(stats)
     }
