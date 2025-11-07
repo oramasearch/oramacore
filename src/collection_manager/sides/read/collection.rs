@@ -47,6 +47,7 @@ use oramacore_lib::nlp::locales::Locale;
 
 #[derive(Serialize)]
 pub struct FilterableFieldBool {
+    pub field_path: String,
     pub field_type: String,
     pub count_true: usize,
     pub count_false: usize,
@@ -55,12 +56,14 @@ pub struct FilterableFieldBool {
 
 #[derive(Serialize)]
 pub struct FilterableFieldGeoPoint {
+    pub field_path: String,
     pub field_type: String,
     pub count: usize,
 }
 
 #[derive(Serialize)]
 pub struct FilterableFieldDate {
+    pub field_path: String,
     pub field_type: String,
     pub min: Option<OramaDate>,
     pub max: Option<OramaDate>,
@@ -68,6 +71,7 @@ pub struct FilterableFieldDate {
 
 #[derive(Serialize)]
 pub struct FilterableFieldNumber {
+    pub field_path: String,
     pub field_type: String,
     pub min: f64,
     pub max: f64,
@@ -75,11 +79,13 @@ pub struct FilterableFieldNumber {
 
 #[derive(Serialize)]
 pub struct FilterableFieldString {
+    pub field_path: String,
     pub field_type: String,
     pub count: usize,
 }
 
 #[derive(Serialize)]
+#[serde(untagged)]
 pub enum FilterableField {
     Bool(FilterableFieldBool),
     GeoPoint(FilterableFieldGeoPoint),
@@ -917,6 +923,7 @@ impl CollectionReader {
                         final_stats.insert(
                             field.field_id,
                             FilterableField::Bool(FilterableFieldBool {
+                                field_path: field.field_path.clone(),
                                 field_type: "boolean".to_string(),
                                 count_true: *true_count,
                                 count_false: *false_count,
@@ -934,6 +941,7 @@ impl CollectionReader {
                                     final_stats.insert(
                                         field.field_id,
                                         FilterableField::Bool(FilterableFieldBool {
+                                            field_path: field.field_path.clone(),
                                             field_type: "boolean".to_string(),
                                             count_true: bool_stats.count_true + *true_count,
                                             count_false: bool_stats.count_false + *false_count,
@@ -950,6 +958,7 @@ impl CollectionReader {
                         final_stats.insert(
                             field.field_id,
                             FilterableField::GeoPoint(FilterableFieldGeoPoint {
+                                field_path: field.field_path.clone(),
                                 field_type: "geopoint".to_string(),
                                 count: *count,
                             }),
@@ -964,6 +973,7 @@ impl CollectionReader {
                                     final_stats.insert(
                                         field.field_id,
                                         FilterableField::GeoPoint(FilterableFieldGeoPoint {
+                                            field_path: field.field_path.clone(),
                                             field_type: "geopoint".to_string(),
                                             count: geo_stats.count + *count,
                                         }),
@@ -976,6 +986,7 @@ impl CollectionReader {
                         final_stats.insert(
                             field.field_id,
                             FilterableField::Date(FilterableFieldDate {
+                                field_path: field.field_path.clone(),
                                 field_type: "date".to_string(),
                                 min: min.clone(),
                                 max: max.clone(),
@@ -1008,6 +1019,7 @@ impl CollectionReader {
                                 final_stats.insert(
                                     field.field_id,
                                     FilterableField::Date(FilterableFieldDate {
+                                        field_path: field.field_path.clone(),
                                         field_type: "date".to_string(),
                                         min: new_min,
                                         max: new_max,
@@ -1023,6 +1035,7 @@ impl CollectionReader {
                         final_stats.insert(
                             field.field_id,
                             FilterableField::Number(FilterableFieldNumber {
+                                field_path: field.field_path.clone(),
                                 field_type: "number".to_string(),
                                 min: match min {
                                     Number::I32(i) => *i as f64,
@@ -1057,6 +1070,7 @@ impl CollectionReader {
                                 final_stats.insert(
                                     field.field_id,
                                     FilterableField::Number(FilterableFieldNumber {
+                                        field_path: field.field_path.clone(),
                                         field_type: "number".to_string(),
                                         min: new_min,
                                         max: new_max,
@@ -1071,7 +1085,8 @@ impl CollectionReader {
                         final_stats.insert(
                             field.field_id,
                             FilterableField::String(FilterableFieldString {
-                                field_type: "string".to_string(),
+                                field_path: field.field_path.clone(),
+                                field_type: "enum".to_string(),
                                 count: *key_count,
                             }),
                         );
@@ -1085,7 +1100,8 @@ impl CollectionReader {
                                     final_stats.insert(
                                         field.field_id,
                                         FilterableField::String(FilterableFieldString {
-                                            field_type: "string".to_string(),
+                                            field_path: field.field_path.clone(),
+                                            field_type: "enum".to_string(),
                                             count: string_stats.count + *key_count,
                                         }),
                                     );
