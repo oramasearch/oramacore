@@ -1016,12 +1016,12 @@ impl CollectionReader {
                             FilterableField::Number(FilterableFieldNumber {
                                 field_type: "number".to_string(),
                                 min: match min {
-                                    crate::types::Number::I32(i) => *i as f64,
-                                    crate::types::Number::F32(f) => *f as f64,
+                                    Number::I32(i) => *i as f64,
+                                    Number::F32(f) => *f as f64,
                                 },
                                 max: match max {
-                                    crate::types::Number::I32(i) => *i as f64,
-                                    crate::types::Number::F32(f) => *f as f64,
+                                    Number::I32(i) => *i as f64,
+                                    Number::F32(f) => *f as f64,
                                 },
                             }),
                         );
