@@ -825,6 +825,36 @@ impl CollectionReader {
         })
     }
 
+    pub async fn get_filterable_fields(
+        &self,
+        with_keys: bool,
+    ) -> Result<CollectionStats, ReadError> {
+        let mut stats = self.stats(CollectionStatsRequest { with_keys }).await?;
+
+        stats.indexes_stats = stats
+            .indexes_stats
+            .into_iter()
+            .map(|mut index_stats| {
+                index_stats.fields_stats = index_stats
+                    .fields_stats
+                    .into_iter()
+                    .filter(|stat| {
+                        !matches!(
+                            &stat.stats,
+                            IndexFieldStatsType::CommittedString(_)
+                                | IndexFieldStatsType::UncommittedString(_)
+                                | IndexFieldStatsType::CommittedVector(_)
+                                | IndexFieldStatsType::UncommittedVector(_)
+                        )
+                    })
+                    .collect();
+                index_stats
+            })
+            .collect();
+
+        Ok(stats)
+    }
+
     async fn get_index_mut(&self, index_id: IndexId) -> Option<IndexWriteLock<'_>> {
         let indexes_lock = self.indexes.write("get_index_mut").await;
         IndexWriteLock::try_new(indexes_lock, index_id)

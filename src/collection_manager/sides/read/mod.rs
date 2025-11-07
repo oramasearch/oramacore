@@ -335,6 +335,24 @@ impl ReadSide {
         collection.stats(req).await
     }
 
+    pub async fn filterable_fields(
+        &self,
+        read_api_key: ApiKey,
+        collection_id: CollectionId,
+        with_keys: bool,
+    ) -> Result<CollectionStats, ReadError> {
+        let collection = self
+            .collections
+            .get_collection(collection_id)
+            .await
+            .ok_or_else(|| ReadError::NotFound(collection_id))?;
+        collection.check_read_api_key(read_api_key, self.master_api_key)?;
+
+        let fields = collection.get_filterable_fields(with_keys).await?;
+
+        Ok(fields)
+    }
+
     pub async fn update(&self, (offset, op): (Offset, WriteOperation)) -> Result<()> {
         trace!(offset=?offset, "Updating read side");
 
