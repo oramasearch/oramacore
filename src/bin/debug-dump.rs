@@ -9,6 +9,7 @@ use oramacore::{
         document_storage::{DocumentStorage, DocumentStorageConfig},
         Index, ReadSideContext,
     },
+    python::{embeddings::EmbeddingsService, PythonService},
     types::{DocumentId, IndexId},
     OramacoreConfig,
 };
@@ -75,9 +76,6 @@ async fn main() -> anyhow::Result<()> {
             let index_id = IndexId::try_new(index_id)
                 .map_err(|e| anyhow::anyhow!("Failed to create IndexId: {}", e))?;
 
-            let ai_service = AIService::new(config.ai_server.clone());
-            let ai_service = Arc::new(ai_service);
-
             let local_gpu_manager = Arc::new(LocalGPUManager::new());
 
             let llm_service = match LLMService::try_new(
@@ -95,9 +93,10 @@ async fn main() -> anyhow::Result<()> {
             };
 
             let nlp_service = Arc::new(NLPService::new());
+            let python_service = Arc::new(PythonService::new()?);
 
             let context = ReadSideContext {
-                ai_service,
+                python_service: python_service.clone(),
                 nlp_service: nlp_service.clone(),
                 llm_service: llm_service.clone(),
                 notifier: None,

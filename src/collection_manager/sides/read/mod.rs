@@ -44,6 +44,7 @@ use crate::ai::llms::{self, KnownPrompts, LLMService};
 use crate::ai::tools::{CollectionToolsRuntime, ToolError, ToolsRuntime};
 use crate::ai::training_sets::{TrainingDestination, TrainingSetInterface};
 use crate::ai::RemoteLLMProvider;
+use crate::collection_manager::sides::read::collection::FilterableFieldsStats;
 pub use crate::collection_manager::sides::read::context::ReadSideContext;
 use crate::collection_manager::sides::read::logs::HookLogs;
 use crate::collection_manager::sides::read::notify::Notifier;
@@ -51,12 +52,13 @@ use crate::collection_manager::sides::read::search::Search;
 use crate::lock::{OramaAsyncLock, OramaAsyncMutex};
 use crate::metrics::operations::OPERATION_COUNT;
 use crate::metrics::Empty;
+use crate::python::PythonService;
+use crate::types::CollectionId;
 use crate::types::{
     ApiKey, CollectionStatsRequest, InteractionLLMConfig, SearchMode, SearchModeResult,
     SearchResult,
 };
 use crate::types::{IndexId, NLPSearchRequest};
-use crate::{ai::AIService, types::CollectionId};
 use oramacore_lib::fs::BufferedFile;
 use oramacore_lib::generic_kv::{KVConfig, KV};
 use oramacore_lib::nlp::NLPService;
@@ -139,16 +141,18 @@ pub struct ReadSide {
     // This is used to stop the read side when the server is shutting down
     stop_sender: tokio::sync::broadcast::Sender<()>,
     stop_done_receiver: OramaAsyncLock<tokio::sync::mpsc::Receiver<()>>,
+
+    python_service: Arc<PythonService>,
 }
 
 impl ReadSide {
     pub async fn try_load(
         operation_receiver_creator: OperationReceiverCreator,
-        ai_service: Arc<AIService>,
         nlp_service: Arc<NLPService>,
         llm_service: Arc<LLMService>,
         config: ReadSideConfig,
         local_gpu_manager: Arc<LocalGPUManager>,
+        python_service: Arc<PythonService>,
     ) -> Result<Arc<Self>> {
         let mut document_storage = DocumentStorage::try_new(DocumentStorageConfig {
             data_dir: config.config.data_dir.join("docs"),
@@ -167,7 +171,7 @@ impl ReadSide {
         }
 
         let context = ReadSideContext {
-            ai_service: ai_service.clone(),
+            python_service: python_service.clone(),
             nlp_service: nlp_service.clone(),
             llm_service: llm_service.clone(),
             notifier,
@@ -238,6 +242,7 @@ impl ReadSide {
 
             stop_sender,
             stop_done_receiver: OramaAsyncLock::new("stop_done_receiver", stop_done_receiver),
+            python_service,
         };
 
         let operation_receiver = operation_receiver_creator.create(last_offset).await?;
@@ -329,6 +334,24 @@ impl ReadSide {
         collection.check_read_api_key(read_api_key, self.master_api_key)?;
 
         collection.stats(req).await
+    }
+
+    pub async fn filterable_fields(
+        &self,
+        read_api_key: ApiKey,
+        collection_id: CollectionId,
+        with_keys: bool,
+    ) -> Result<Vec<FilterableFieldsStats>, ReadError> {
+        let collection = self
+            .collections
+            .get_collection(collection_id)
+            .await
+            .ok_or_else(|| ReadError::NotFound(collection_id))?;
+        collection.check_read_api_key(read_api_key, self.master_api_key)?;
+
+        let fields = collection.get_filterable_fields(with_keys).await?;
+
+        Ok(fields)
     }
 
     pub async fn update(&self, (offset, op): (Offset, WriteOperation)) -> Result<()> {
@@ -530,12 +553,6 @@ impl ReadSide {
                 log_sender,
             )
             .await
-    }
-
-    // This is wrong. We should not expose the ai service to the read side.
-    // @todo: Remove this method.
-    pub fn get_ai_service(&self) -> Arc<AIService> {
-        self.collections.get_ai_service()
     }
 
     // This is wrong. We should not expose the vllm service to the read side.

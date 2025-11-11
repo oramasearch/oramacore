@@ -1,8 +1,6 @@
 use crate::{
-    collection_manager::sides::write::{
-        index::{EnumStrategy, IndexedValue},
-        OramaModelSerializable,
-    },
+    collection_manager::sides::write::index::{EnumStrategy, IndexedValue},
+    python::embeddings::Model,
     types::{
         ApiKey, CollectionId, DocumentFields, DocumentId, FieldId, IndexId, Number, RawJSONDocument,
     },
@@ -127,7 +125,7 @@ pub enum IndexWriteOperationFieldType {
     Date,
     GeoPoint,
     String,
-    Embedding(OramaModelSerializable),
+    Embedding(Model),
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -250,7 +248,7 @@ pub enum TypedFieldWrapper {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EmbeddingTypedFieldWrapper {
-    pub model: OramaModelSerializable,
+    pub model: Model,
     pub document_fields: DocumentFieldsWrapper,
 }
 
@@ -518,9 +516,7 @@ mod tests {
                         field_id,
                         field_path: field_path.clone(),
                         is_array: false,
-                        field_type: IndexWriteOperationFieldType::Embedding(
-                            OramaModelSerializable(crate::ai::OramaModel::BgeSmall),
-                        ),
+                        field_type: IndexWriteOperationFieldType::Embedding(Model::BGESmall),
                     },
                 ),
             ),

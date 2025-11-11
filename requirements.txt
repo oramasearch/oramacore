@@ -1,0 +1,29 @@
+--extra-index-url https://download.pytorch.org/whl/cu124
+--extra-index-url https://aiinfra.pkgs.visualstudio.com/PublicPackages/_packaging/onnxruntime-cuda-12/pypi/simple/
+
+numpy==2.3.4
+
+torch==2.6.0+cu124
+torchvision==0.21.0+cu124
+torchaudio==2.6.0+cu124
+
+opentelemetry-api==1.29.0
+opentelemetry-sdk==1.29.0
+
+python-dotenv==1.0.1
+fastembed-gpu==0.5.1
+
+pyyaml==6.0.2
+cachetools==6.2.1
+json-repair==0.52.0
+pillow==10.4.0
+
+pytest==8.3.4
+pytest-mock==3.14.0
+
+onnxruntime-gpu==1.23.0
+accelerate==1.2.1
+einops==0.8.0
+bitsandbytes==0.48.1
+
+pydantic==2.11.7

@@ -70,33 +70,6 @@ def extend_supported_models():
             "model_file": "onnx/model.onnx",
         },
         {
-            "model": "BAAI/bge-small-en-v1.5-raw",
-            "dim": 384,
-            "description": "Text embeddings, English",
-            "license": "mit",
-            "size_in_GB": 0.4,
-            "sources": {"hf": "BAAI/bge-small-en-v1.5"},
-            "model_file": "onnx/model.onnx",
-        },
-        {
-            "model": "BAAI/bge-base-en-v1.5-raw",
-            "dim": 768,
-            "description": "Text embeddings, English",
-            "license": "mit",
-            "size_in_GB": 1.11,
-            "sources": {"hf": "BAAI/bge-base-en-v1.5"},
-            "model_file": "onnx/model.onnx",
-        },
-        {
-            "model": "BAAI/bge-large-en-v1.5-raw",
-            "dim": 1024,
-            "description": "Text embeddings, English",
-            "license": "mit",
-            "size_in_GB": 1.20,
-            "sources": {"hf": "BAAI/bge-large-en-v1.5"},
-            "model_file": "onnx/model.onnx",
-        },
-        {
             "model": "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
             "dim": 768,
             "description": "Text embeddings in many languages",
@@ -128,26 +101,6 @@ def get_supported_models_info():
         m["model"]: {"dimensions": m["dim"], "model_name": m["model"]} for m in TextEmbedding.list_supported_models()
     }
 
-    raw_models = {
-        "BAAI/bge-small-en-v1.5-raw": {
-            "dimensions": 384,
-            "model_name": "BAAI/bge-small-en-v1.5-raw",
-        },
-        "BAAI/bge-base-en-v1.5-raw": {
-            "dimensions": 768,
-            "model_name": "BAAI/bge-base-en-v1.5-raw",
-        },
-        "BAAI/bge-large-en-v1.5-raw": {
-            "dimensions": 1024,
-            "model_name": "BAAI/bge-large-en-v1.5-raw",
-        },
-        "intfloat/multilingual-e5-large-raw": {
-            "dimensions": 1024,
-            "model_name": "intfloat/multilingual-e5-large-raw",
-        },
-    }
-
-    supported_models.update(raw_models)
     return supported_models
 
 
@@ -159,16 +112,10 @@ class OramaModelInfo(Enum):
     BGEBase = SUPPORTED_MODELS_INFO["BAAI/bge-base-en-v1.5"]
     BGELarge = SUPPORTED_MODELS_INFO["BAAI/bge-large-en-v1.5"]
 
-    # Raw variants
-    BGESmallRaw = SUPPORTED_MODELS_INFO["BAAI/bge-small-en-v1.5-raw"]
-    BGEBaseRaw = SUPPORTED_MODELS_INFO["BAAI/bge-base-en-v1.5-raw"]
-    BGELargeRaw = SUPPORTED_MODELS_INFO["BAAI/bge-large-en-v1.5-raw"]
-
     # Multilingual models
     MultilingualE5Small = SUPPORTED_MODELS_INFO["intfloat/multilingual-e5-small"]
     MultilingualE5Base = SUPPORTED_MODELS_INFO["intfloat/multilingual-e5-base"]
     MultilingualE5Large = SUPPORTED_MODELS_INFO["intfloat/multilingual-e5-large"]
-    MultilingualE5LargeRaw = SUPPORTED_MODELS_INFO["intfloat/multilingual-e5-large-raw"]
     MultilingualMiniLML12V2 = SUPPORTED_MODELS_INFO["sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"]
 
     # Code models
@@ -184,7 +131,6 @@ class ModelGroups(Enum):
         OramaModelInfo.MultilingualMiniLML12V2,
     ]
     small = [
-        OramaModelInfo.BGESmallRaw,
         OramaModelInfo.BGESmall,
         OramaModelInfo.MultilingualE5Small,
     ]

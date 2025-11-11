@@ -2,7 +2,7 @@ use std::{collections::HashMap, path::PathBuf, sync::Arc};
 
 use ai::{
     automatic_embeddings_selector::AutomaticEmbeddingsSelector, gpu::LocalGPUManager,
-    llms::LLMService, AIService, AIServiceConfig,
+    llms::LLMService, AIServiceConfig,
 };
 use anyhow::{Context, Result};
 use collection_manager::sides::{
@@ -18,6 +18,7 @@ use tracing::level_filters::LevelFilter;
 #[allow(unused_imports)]
 use tracing::{info, warn};
 use web_server::{HttpConfig, WebServer};
+
 pub mod lock;
 
 pub mod types;
@@ -37,6 +38,8 @@ mod merger;
 pub mod build_info;
 
 pub mod ai;
+
+pub mod python;
 
 #[cfg(test)]
 pub mod tests;
@@ -128,11 +131,6 @@ pub async fn build_orama(
     }
 
     info!("Building ai_service");
-    let ai_service = AIService::new(config.ai_server.clone());
-
-    ai_service.wait_ready().await?;
-
-    let ai_service = Arc::new(ai_service);
 
     let local_gpu_manager = Arc::new(LocalGPUManager::new());
 
@@ -170,6 +168,9 @@ pub async fn build_orama(
     info!("Building nlp_service");
     let nlp_service = Arc::new(nlp::NLPService::new());
 
+    info!("Building Python service");
+    let python_service = Arc::new(python::PythonService::new()?);
+
     #[cfg(feature = "writer")]
     let write_side = {
         info!("Building write_side");
@@ -186,10 +187,10 @@ pub async fn build_orama(
         let write_side = WriteSide::try_load(
             sender_creator,
             config.writer_side,
-            ai_service.clone(),
             nlp_service.clone(),
             llm_service.clone(),
             automatic_embeddings_selector,
+            python_service.clone(),
         )
         .await
         .context("Cannot create write side")?;
@@ -209,16 +210,17 @@ pub async fn build_orama(
         let receiver_creator = receiver_creator.expect("Receiver is not created");
         let read_side = ReadSide::try_load(
             receiver_creator,
-            ai_service,
             nlp_service,
             llm_service,
             config.reader_side,
             local_gpu_manager,
+            python_service.clone(),
         )
         .await
         .context("Cannot create read side")?;
         Some(read_side)
     };
+
     #[cfg(not(feature = "reader"))]
     let read_side = {
         warn!("Building read_side skipped due to compilation flag");

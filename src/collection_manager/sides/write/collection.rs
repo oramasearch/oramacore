@@ -8,16 +8,14 @@ use serde::{Deserialize, Serialize};
 use tracing::{info, warn};
 
 use crate::{
-    ai::OramaModel,
     collection_manager::sides::{
         field_name_to_path,
-        write::{
-            context::WriteSideContext, index::EnumStrategy, OramaModelSerializable, WriteError,
-        },
+        write::{context::WriteSideContext, index::EnumStrategy, WriteError},
         CollectionWriteOperation, DocumentStorageWriteOperation, ReplaceIndexReason,
         WriteOperation,
     },
     lock::{OramaAsyncLock, OramaAsyncLockReadGuard},
+    python::embeddings::Model,
     types::{
         ApiKey, CollectionId, DescribeCollectionResponse, DocumentId, IndexEmbeddingsCalculation,
         IndexId, WriteApiKey,
@@ -34,7 +32,7 @@ pub const DEFAULT_EMBEDDING_FIELD_NAME: &str = "___orama_auto_embedding";
 
 struct CollectionRuntimeConfig {
     default_locale: Locale,
-    embeddings_model: OramaModel,
+    embeddings_model: Model,
 }
 
 pub struct CollectionWriter {
@@ -154,7 +152,7 @@ impl CollectionWriter {
                 "runtime_config",
                 CollectionRuntimeConfig {
                     default_locale,
-                    embeddings_model: dump.embeddings_model.0,
+                    embeddings_model: dump.embeddings_model,
                 },
             ),
             context,
@@ -241,7 +239,7 @@ impl CollectionWriter {
             write_api_key: self.write_api_key.expose().to_string(),
             read_api_key: self.read_api_key.expose().to_string(),
             default_locale,
-            embeddings_model: OramaModelSerializable(embeddings_model),
+            embeddings_model,
             indexes,
             temporary_indexes,
             created_at: self.created_at,
@@ -392,7 +390,7 @@ impl CollectionWriter {
     pub async fn change_runtime_config(
         &self,
         new_default_locale: Locale,
-        new_embeddings_model: OramaModel,
+        new_embeddings_model: Model,
     ) {
         let mut runtime_config = self.runtime_config.write("change_runtime_config").await;
         runtime_config.default_locale = new_default_locale;
@@ -693,7 +691,7 @@ struct CollectionDumpV1 {
     write_api_key: String,
     read_api_key: String,
     default_locale: Locale,
-    embeddings_model: OramaModelSerializable,
+    embeddings_model: Model,
     indexes: Vec<IndexId>,
     temporary_indexes: Vec<IndexId>,
     created_at: DateTime<Utc>,
@@ -736,5 +734,5 @@ pub struct CreateEmptyCollection {
     pub write_api_key: ApiKey,
     pub read_api_key: ApiKey,
     pub default_locale: Locale,
-    pub embeddings_model: OramaModel,
+    pub embeddings_model: Model,
 }
