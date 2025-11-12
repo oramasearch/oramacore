@@ -1,0 +1,107 @@
+[
+  {
+    "name": "Haiku 4.5",
+    "provider": "anthropic",
+    "max_input_tokens": 200000,
+    "max_output_tokens": 64000,
+    "id": "claude-haiku-4-5"
+  },
+  {
+    "name": "Kimi K2",
+    "provider": "groq",
+    "max_input_tokens": 262144,
+    "max_output_tokens": 16384,
+    "id": "moonshotai/kimi-k2-instruct-0905"
+  },
+  {
+    "name": "Gemini 2.5 Flash",
+    "provider": "google",
+    "max_input_tokens": 1048576,
+    "max_output_tokens": 65535,
+    "id": "gemini-2.5-flash"
+  },
+  {
+    "name": "Sonnet 4.5",
+    "provider": "anthropic",
+    "max_input_tokens": 200000,
+    "max_output_tokens": 64000,
+    "id": "claude-sonnet-4-5"
+  },
+  {
+    "name": "GPT-5",
+    "provider": "openai",
+    "max_input_tokens": 400000,
+    "max_output_tokens": 128000,
+    "id": "gpt-5"
+  },
+  {
+    "name": "Qwen 3 32B",
+    "provider": "groq",
+    "max_input_tokens": 131072,
+    "max_output_tokens": 40960,
+    "id": "qwen/qwen3-32b"
+  },
+  {
+    "name": "GPT-5 Nano",
+    "provider": "openai",
+    "max_input_tokens": 400000,
+    "max_output_tokens": 128000,
+    "id": "gpt-5-nano"
+  },
+  {
+    "name": "Gemini 2.5 Flash Lite",
+    "provider": "google",
+    "max_input_tokens": 1048576,
+    "max_output_tokens": 65536,
+    "id": "gemini-2.5-flash-lite"
+  },
+  {
+    "name": "Llama 4 Maverick",
+    "provider": "groq",
+    "max_input_tokens": 131072,
+    "max_output_tokens": 8192,
+    "id": "meta-llama/llama-4-maverick-17b-128e-instruct"
+  },
+  {
+    "name": "GPT-OSS 120B",
+    "provider": "groq",
+    "max_input_tokens": 131072,
+    "max_output_tokens": 65536,
+    "id": "openai/gpt-oss-120b"
+  },
+  {
+    "name": "GPT-5 Pro",
+    "provider": "openai",
+    "max_input_tokens": 400000,
+    "max_output_tokens": 272000,
+    "id": "gpt-5-pro"
+  },
+  {
+    "name": "Llama 3.3 70B",
+    "provider": "groq",
+    "max_input_tokens": 131072,
+    "max_output_tokens": 32760,
+    "id": "llama-3.3-70b-versatile"
+  },
+  {
+    "name": "Gemini 2.5 Pro",
+    "provider": "google",
+    "max_input_tokens": 1048576,
+    "max_output_tokens": 65535,
+    "id": "gemini-2.5-pro"
+  },
+  {
+    "name": "Opus 4.1",
+    "provider": "anthropic",
+    "max_input_tokens": 200000,
+    "max_output_tokens": 32000,
+    "id": "claude-opus-4-1"
+  },
+  {
+    "name": "GPT-5 Mini",
+    "provider": "openai",
+    "max_input_tokens": 400000,
+    "max_output_tokens": 128000,
+    "id": "gpt-5-mini"
+  }
+]
