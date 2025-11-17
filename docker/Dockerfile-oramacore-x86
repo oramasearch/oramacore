@@ -41,10 +41,8 @@ WORKDIR /usr/src/app
 # Copy Python venv from python-builder stage for PyO3 linking
 COPY --from=python-builder /app/.venv /app/.venv
 
-# Set Python environment for PyO3 to use the venv
-ENV PYO3_PYTHON=/app/.venv/bin/python3
-ENV VIRTUAL_ENV=/app/.venv
-ENV PATH="$VIRTUAL_ENV/bin:$PATH"
+# Set Python environment for PyO3 to use system Python for building
+ENV PYO3_PYTHON=/usr/bin/python3.11
 
 # Copy source code
 COPY . .
