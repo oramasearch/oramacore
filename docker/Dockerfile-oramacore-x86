@@ -38,11 +38,12 @@ ENV V8_FROM_SOURCE=0
 
 WORKDIR /usr/src/app
 
-# Copy Python venv from python-builder stage for PyO3 linking
+# Copy Python venv from python-builder stage (for runtime dependencies)
 COPY --from=python-builder /app/.venv /app/.venv
 
-# Set Python environment for PyO3 to use the venv
-ENV PYO3_PYTHON=/app/.venv/bin/python3
+# Set Python environment for PyO3 to use system Python (not venv)
+# The venv Python interpreter is just a symlink that breaks across stages
+ENV PYO3_PYTHON=/usr/bin/python3.11
 ENV VIRTUAL_ENV=/app/.venv
 ENV PATH="$VIRTUAL_ENV/bin:$PATH"
 
