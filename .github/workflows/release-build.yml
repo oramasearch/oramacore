@@ -36,6 +36,10 @@ jobs:
           override: true
 
       - name: Build Default Binary
+        env:
+          PYO3_PYTHON: python3
+          RUSTY_V8_MIRROR: https://github.com/denoland/rusty_v8/releases/download
+          V8_FROM_SOURCE: "0"
         uses: actions-rs/cargo@v1
         with:
           command: build
@@ -45,6 +49,10 @@ jobs:
         run: cp ./target/release/oramacore ./target/release/oramacore-compact
 
       - name: Build Reader Binary
+        env:
+          PYO3_PYTHON: python3
+          RUSTY_V8_MIRROR: https://github.com/denoland/rusty_v8/releases/download
+          V8_FROM_SOURCE: "0"
         uses: actions-rs/cargo@v1
         with:
           command: build
@@ -54,6 +62,10 @@ jobs:
         run: cp ./target/release/oramacore ./target/release/oramacore-reader
 
       - name: Build Writer Binary
+        env:
+          PYO3_PYTHON: python3
+          RUSTY_V8_MIRROR: https://github.com/denoland/rusty_v8/releases/download
+          V8_FROM_SOURCE: "0"
         uses: actions-rs/cargo@v1
         with:
           command: build
