@@ -277,9 +277,9 @@ impl LoadedCommittedVectorField {
         let dump_file_path = info.data_dir.join("index.hnsw");
 
         let inner: HNSW2Index<DocumentId> = BufferedFile::open(dump_file_path)
-            .map_err(|e| anyhow!("Cannot open hnsw file: {}", e))?
+            .map_err(|e| anyhow!("Cannot open hnsw file: {e}"))?
             .read_bincode_data()
-            .map_err(|e| anyhow!("Cannot read hnsw file: {}", e))?;
+            .map_err(|e| anyhow!("Cannot read hnsw file: {e}"))?;
 
         Ok(Self {
             field_path: info.field_path,

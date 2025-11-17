@@ -703,7 +703,7 @@ impl AdvancedAutoQuery {
                 .iter()
                 .find(|index| index.id == index_id)
                 .ok_or_else(|| {
-                    anyhow::anyhow!("Collection {} not found in stats", collection_name)
+                    anyhow::anyhow!("Collection {collection_name} not found in stats")
                 })?;
 
             // Extract keys for each property

@@ -4,12 +4,12 @@ use anyhow::Context;
 use clap::{Parser, Subcommand};
 use config::Config;
 use oramacore::{
-    ai::{gpu::LocalGPUManager, llms::LLMService, AIService},
+    ai::{gpu::LocalGPUManager, llms::LLMService},
     collection_manager::sides::read::{
         document_storage::{DocumentStorage, DocumentStorageConfig},
         Index, ReadSideContext,
     },
-    python::{embeddings::EmbeddingsService, PythonService},
+    python::PythonService,
     types::{DocumentId, IndexId},
     OramacoreConfig,
 };
@@ -74,7 +74,7 @@ async fn main() -> anyhow::Result<()> {
                 .join("indexes")
                 .join(&index_id);
             let index_id = IndexId::try_new(index_id)
-                .map_err(|e| anyhow::anyhow!("Failed to create IndexId: {}", e))?;
+                .map_err(|e| anyhow::anyhow!("Failed to create IndexId: {e}"))?;
 
             let local_gpu_manager = Arc::new(LocalGPUManager::new());
 
@@ -86,8 +86,7 @@ async fn main() -> anyhow::Result<()> {
                 Ok(service) => Arc::new(service),
                 Err(err) => {
                     anyhow::bail!(
-                        "Failed to create LLMService: {}. Please check your configuration.",
-                        err
+                        "Failed to create LLMService: {err}. Please check your configuration."
                     );
                 }
             };

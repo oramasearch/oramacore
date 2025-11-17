@@ -146,8 +146,7 @@ pub async fn build_orama(
         Ok(service) => Arc::new(service),
         Err(err) => {
             anyhow::bail!(
-                "Failed to create LLMService: {}. Please check your configuration.",
-                err
+                "Failed to create LLMService: {err}. Please check your configuration."
             );
         }
     };

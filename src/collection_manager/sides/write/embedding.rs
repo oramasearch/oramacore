@@ -63,7 +63,7 @@ where
                 match embeddings_service.calculate_embeddings(
                     text_inputs,
                     Intent::Passage,
-                    model.clone(),
+                    model,
                 ) {
                     Ok(embeddings) => {
                         let mut local_res: HashMap<FieldId, HashMap<DocumentId, Vec<Vec<f32>>>> =

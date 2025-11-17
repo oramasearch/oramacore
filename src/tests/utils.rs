@@ -542,7 +542,7 @@ impl TestCollectionClient {
                 {
                     return Ok(());
                 }
-                bail!("Collection still exists: {}", collection_id);
+                bail!("Collection still exists: {collection_id}");
             }
             .boxed()
         })

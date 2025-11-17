@@ -585,7 +585,7 @@ impl CollectionReader {
             })
             .next();
         if let Some(unknown_index) = unknown_index {
-            bail!("Unknown index: {:?}", unknown_index);
+            bail!("Unknown index: {unknown_index:?}");
         }
 
         Ok(ReadIndexesLockGuard::new(lock, index_ids))
@@ -612,9 +612,7 @@ impl CollectionReader {
             .collect::<Vec<_>>();
         if !unknown_indexes.is_empty() {
             bail!(
-                "Unknown indexes: {:?}. Available indexes: {:?}",
-                unknown_indexes,
-                all_indexes
+                "Unknown indexes: {unknown_indexes:?}. Available indexes: {all_indexes:?}"
             )
         }
 
@@ -744,7 +742,7 @@ impl CollectionReader {
                 } else {
                     let index = self.get_index_mut(index_id).await;
                     let Some(mut index) = index else {
-                        bail!("Index {} not found", index_id)
+                        bail!("Index {index_id} not found")
                     };
                     index
                         .update(index_op)
@@ -764,10 +762,10 @@ impl CollectionReader {
                 let temp_i = get_index_in_vector(&temp_index_lock, temp_index_id);
 
                 let Some(runtime_i) = runtime_i else {
-                    bail!("Runtime index {} not found", runtime_index_id);
+                    bail!("Runtime index {runtime_index_id} not found");
                 };
                 let Some(temp_i) = temp_i else {
-                    bail!("Temp index {} not found", temp_index_id);
+                    bail!("Temp index {temp_index_id} not found");
                 };
 
                 let old_index = runtime_index_lock
@@ -892,10 +890,7 @@ impl CollectionReader {
             .indexes_stats
             .into_iter()
             .map(|mut index_stats| {
-                index_stats.fields_stats = index_stats
-                    .fields_stats
-                    .into_iter()
-                    .filter(|stat| {
+                index_stats.fields_stats.retain(|stat| {
                         !matches!(
                             &stat.stats,
                             IndexFieldStatsType::CommittedString(_)
@@ -903,8 +898,7 @@ impl CollectionReader {
                                 | IndexFieldStatsType::CommittedVector(_)
                                 | IndexFieldStatsType::UncommittedVector(_)
                         )
-                    })
-                    .collect();
+                    });
                 index_stats
             })
             .collect();
@@ -1115,7 +1109,7 @@ impl CollectionReader {
 
             result.push(FilterableFieldsStats {
                 index_id: stat.id,
-                fields: final_stats.into_iter().map(|(_, v)| v).collect(),
+                fields: final_stats.into_values().collect(),
             });
         }
 

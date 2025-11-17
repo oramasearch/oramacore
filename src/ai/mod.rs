@@ -50,7 +50,7 @@ impl FromStr for RemoteLLMProvider {
             "vertex" => Ok(RemoteLLMProvider::GoogleVertex),
             "groq" => Ok(RemoteLLMProvider::Groq),
             "anthropic" => Ok(RemoteLLMProvider::Anthropic),
-            _ => Err(anyhow!("Invalid remote LLM provider: {}", s)),
+            _ => Err(anyhow!("Invalid remote LLM provider: {s}")),
         }
     }
 }

@@ -98,8 +98,7 @@ impl CommittedStringField {
             InnerCommittedField::Loaded { field, .. } => field,
             InnerCommittedField::Unloaded { field_info, .. } => {
                 return Err(anyhow::anyhow!(
-                    "Cannot commit to an unloaded committed string field: {:?}",
-                    field_info
+                    "Cannot commit to an unloaded committed string field: {field_info:?}"
                 ));
             }
         };

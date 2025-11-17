@@ -365,8 +365,7 @@ impl Stream for RabbitOperationReceiver {
                 Ok(op) => op,
                 Err(e) => {
                     return Poll::Ready(Some(Err(anyhow::anyhow!(
-                        "Error deserializing message: {:?}",
-                        e
+                        "Error deserializing message: {e:?}"
                     ))));
                 }
             };

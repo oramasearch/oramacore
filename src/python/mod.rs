@@ -20,8 +20,7 @@ impl PythonService {
 
         let python_scripts_dir = Self::extract_python_scripts().map_err(|e| {
             PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!(
-                "Failed to extract Python scripts: {}",
-                e
+                "Failed to extract Python scripts: {e}"
             ))
         })?;
 
@@ -89,8 +88,7 @@ impl PythonService {
 
                 if !allow_local_fallback {
                     anyhow::bail!(
-                        "Failed to extract embedded Python scripts and local fallback is disabled. Error: {}",
-                        e
+                        "Failed to extract embedded Python scripts and local fallback is disabled. Error: {e}"
                     );
                 }
 
@@ -107,7 +105,7 @@ impl PythonService {
                     tracing::error!("[PYTHON] This should NOT happen in production!");
                     Ok(local_path)
                 } else {
-                    anyhow::bail!("Python scripts not found. Extraction failed: {}, and local path does not exist", e);
+                    anyhow::bail!("Python scripts not found. Extraction failed: {e}, and local path does not exist");
                 }
             }
         }

@@ -981,8 +981,7 @@ impl Index {
             }
             Err(e) => {
                 return Err(anyhow::anyhow!(
-                    "Cannot read index data dir for cleanup: {:?}",
-                    e
+                    "Cannot read index data dir for cleanup: {e:?}"
                 ));
             }
         };
@@ -1258,8 +1257,7 @@ impl Index {
             FieldType::Number => {
                 if !uncommitted_fields.number_fields.contains_key(&field_id) {
                     return Err(ReadError::Generic(anyhow::anyhow!(
-                        "Field {} is not a number field",
-                        field_name
+                        "Field {field_name} is not a number field"
                     )));
                 };
 
@@ -1274,8 +1272,7 @@ impl Index {
             FieldType::Bool => {
                 if !uncommitted_fields.bool_fields.contains_key(&field_id) {
                     return Err(ReadError::Generic(anyhow::anyhow!(
-                        "Field {} is not a bool field",
-                        field_name
+                        "Field {field_name} is not a bool field"
                     )));
                 };
 
@@ -1291,8 +1288,7 @@ impl Index {
             FieldType::Date => {
                 if !uncommitted_fields.date_fields.contains_key(&field_id) {
                     return Err(ReadError::Generic(anyhow::anyhow!(
-                        "Field {} is not a date field",
-                        field_name
+                        "Field {field_name} is not a date field"
                     )));
                 };
 
@@ -1806,9 +1802,7 @@ impl Index {
                 }
                 (_, t) => {
                     bail!(
-                        "Cannot calculate facet on field {:?}: wrong type. Expected {:?} facet",
-                        field_name,
-                        t
+                        "Cannot calculate facet on field {field_name:?}: wrong type. Expected {t:?} facet"
                     );
                 }
             }
@@ -1870,21 +1864,21 @@ impl Index {
                     let f = uncommitted
                         .bool_fields
                         .get(field_id)
-                        .ok_or(anyhow!("Cannot find bool field {:?}", field_id))?;
+                        .ok_or(anyhow!("Cannot find bool field {field_id:?}"))?;
                     Box::new(f)
                 }
                 FieldType::Number => {
                     let f = uncommitted
                         .number_fields
                         .get(field_id)
-                        .ok_or(anyhow!("Cannot find number field {:?}", field_id))?;
+                        .ok_or(anyhow!("Cannot find number field {field_id:?}"))?;
                     Box::new(f)
                 }
                 FieldType::StringFilter => {
                     let f = uncommitted
                         .string_filter_fields
                         .get(field_id)
-                        .ok_or(anyhow!("Cannot find string filter field {:?}", field_id))?;
+                        .ok_or(anyhow!("Cannot find string filter field {field_id:?}"))?;
                     Box::new(f)
                 }
                 FieldType::GeoPoint => {
@@ -1892,7 +1886,7 @@ impl Index {
                 }
                 _ => {
                     debug_panic!("Invalid field type {:?} for group", field_type);
-                    bail!("Cannot calculate group on {:?} field", field_type);
+                    bail!("Cannot calculate group on {field_type:?} field");
                 }
             };
 
@@ -1928,7 +1922,7 @@ impl Index {
                 }
                 _ => {
                     debug_panic!("Invalid field type {:?} for group", field_type);
-                    bail!("Cannot calculate group on {:?} field", field_type);
+                    bail!("Cannot calculate group on {field_type:?} field");
                 }
             };
 
@@ -2518,7 +2512,7 @@ impl Index {
 
         for field_id in properties {
             let Some(uncommitted) = uncommitted_fields.vector_fields.get(&field_id) else {
-                bail!("Cannot search on field {:?}: unknown field", field_id);
+                bail!("Cannot search on field {field_id:?}: unknown field");
             };
             let committed = committed_fields.vector_fields.get(&field_id);
 
