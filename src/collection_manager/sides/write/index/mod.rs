@@ -205,6 +205,10 @@ impl Index {
         self.runtime_index_id.is_some()
     }
 
+    pub fn is_runtime(&self) -> bool {
+        self.runtime_index_id.is_none()
+    }
+
     pub fn created_at(&self) -> DateTime<Utc> {
         self.created_at
     }
