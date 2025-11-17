@@ -272,16 +272,12 @@ impl ReadSide {
             .send(())
             .context("Cannot send stop signal")?;
         let mut stop_done_receiver = self.stop_done_receiver.write("stop").await;
-        // Commit loop
-        stop_done_receiver
-            .recv()
-            .await
-            .context("Cannot send stop signal")?;
-        // Operation receiver loop
-        stop_done_receiver
-            .recv()
-            .await
-            .context("Cannot send stop signal")?;
+
+        // We have three tasks to wait for.
+            stop_done_receiver
+                .recv()
+                .await
+                .context("Cannot send stop signal")?;
         info!("Read side stopped");
 
         Ok(())
