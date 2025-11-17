@@ -4,10 +4,10 @@ FROM python:3.11-slim-bookworm AS python-builder
 WORKDIR /app
 
 # Install Python dependencies into a virtual environment
-COPY requirements.txt .
+COPY requirements-cpu.txt .
 RUN python3.11 -m venv .venv && \
     .venv/bin/pip install --upgrade pip && \
-    .venv/bin/pip install -r requirements.txt
+    .venv/bin/pip install -r requirements-cpu.txt
 
 # Stage 2: Build Rust application with PyO3
 FROM rust:1.85-slim-bookworm AS rust-builder
