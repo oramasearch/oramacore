@@ -60,11 +60,7 @@ where
                 // If something goes wrong, we will just log it and continue
                 // We should put a circuit breaker here like https://docs.rs/tokio-retry2/latest/tokio_retry2/
                 // TODO: Add circuit breaker
-                match embeddings_service.calculate_embeddings(
-                    text_inputs,
-                    Intent::Passage,
-                    model,
-                ) {
+                match embeddings_service.calculate_embeddings(text_inputs, Intent::Passage, model) {
                     Ok(embeddings) => {
                         let mut local_res: HashMap<FieldId, HashMap<DocumentId, Vec<Vec<f32>>>> =
                             HashMap::new();

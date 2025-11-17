@@ -236,9 +236,7 @@ impl AutomaticEmbeddingsSelector {
         }
 
         Err(last_error.unwrap_or_else(|| {
-            anyhow::anyhow!(
-                "Failed after {MAX_RETRIES} attempts with no specific error"
-            )
+            anyhow::anyhow!("Failed after {MAX_RETRIES} attempts with no specific error")
         }))
     }
 }

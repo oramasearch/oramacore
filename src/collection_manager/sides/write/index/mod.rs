@@ -205,6 +205,10 @@ impl Index {
         self.runtime_index_id.is_some()
     }
 
+    pub fn is_runtime(&self) -> bool {
+        self.runtime_index_id.is_none()
+    }
+
     pub fn created_at(&self) -> DateTime<Utc> {
         self.created_at
     }
@@ -586,7 +590,7 @@ impl Index {
         // Sort by field id to a consistent order
         fields.sort_by_key(|a| a.field_id.0);
 
-        let document_count = self.doc_id_storage.read("describe").await.len();
+        let document_count = self.get_document_count("describe").await;
 
         // FieldId(0) is the default embedding field by construction
         let automatically_chosen_properties = if let Some(IndexScoreField::Embedding(field)) =
@@ -604,6 +608,11 @@ impl Index {
             automatically_chosen_properties,
             created_at: self.created_at,
         }
+    }
+
+    pub async fn get_document_count(&self, reason: &'static str) -> usize {
+        let doc_id_storage = self.doc_id_storage.read(reason).await;
+        doc_id_storage.len()
     }
 
     pub async fn add_fields_if_needed(&self, docs: &DocumentList) -> Result<()> {

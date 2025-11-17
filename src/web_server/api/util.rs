@@ -328,9 +328,15 @@ impl IntoResponse for WriteError {
                 let body = format!("Invalid hook: {e:?}");
                 (StatusCode::BAD_REQUEST, body).into_response()
             }
-            WriteError::PinRulesError(e) => {
+            Self::PinRulesError(e) => {
                 let body = format!("Invalid hook: {e:?}");
                 (StatusCode::BAD_REQUEST, body).into_response()
+            }
+            Self::DocumentLimitExceeded(collection_id, limit) => {
+                let body = format!(
+                    "Document limit exceeded for collection {collection_id}. Limit: {limit}"
+                );
+                (StatusCode::PAYMENT_REQUIRED, body).into_response()
             }
         }
     }
