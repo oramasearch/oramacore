@@ -5,6 +5,7 @@ mod answer;
 mod api_key_chain;
 mod boost_integration;
 mod bugs;
+mod claim_limitations;
 mod commit;
 mod concurrency;
 mod delete_doc;

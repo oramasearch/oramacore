@@ -20,8 +20,7 @@ impl SearchService {
         let search_params: SearchParams =
             serde_pyobject::from_pyobject(params.clone()).map_err(|e| {
                 PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
-                    "Failed to deserialize search params: {}",
-                    e
+                    "Failed to deserialize search params: {e}"
                 ))
             })?;
 
@@ -50,8 +49,7 @@ impl SearchService {
             Ok(search_result) => {
                 let json = serde_json::to_value(&search_result).map_err(|e| {
                     PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
-                        "Failed to serialize MCP search result: {}",
-                        e
+                        "Failed to serialize MCP search result: {e}"
                     ))
                 })?;
 
@@ -59,14 +57,12 @@ impl SearchService {
                     .map(|obj| obj.unbind())
                     .map_err(|e| {
                         PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
-                            "Failed to convert to Python: {}",
-                            e
+                            "Failed to convert to Python: {e}"
                         ))
                     })
             }
             Err(e) => Err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!(
-                "MCP Search failed: {}",
-                e
+                "MCP Search failed: {e}"
             ))),
         }
     }
@@ -75,8 +71,7 @@ impl SearchService {
         let search_params: SearchParams = serde_json::from_str(&params_json).map_err(|e| {
             tracing::error!("Failed to parse MCP search params JSON: {}", e);
             PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
-                "Failed to parse MCP search params JSON: {}",
-                e
+                "Failed to parse MCP search params JSON: {e}"
             ))
         })?;
 
@@ -104,13 +99,11 @@ impl SearchService {
         match result {
             Ok(search_result) => serde_json::to_string(&search_result).map_err(|e| {
                 PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
-                    "Failed to serialize search result: {}",
-                    e
+                    "Failed to serialize search result: {e}"
                 ))
             }),
             Err(e) => Err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!(
-                "MCP Search failed: {}",
-                e
+                "MCP Search failed: {e}"
             ))),
         }
     }
@@ -120,8 +113,7 @@ impl SearchService {
             serde_pyobject::from_pyobject(params.clone()).map_err(|e| {
                 tracing::error!("Failed to deserialize MCP NLP search params: {}", e);
                 PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
-                    "Failed to deserialize MCP NLP search params: {}",
-                    e
+                    "Failed to deserialize MCP NLP search params: {e}"
                 ))
             })?;
 
@@ -156,8 +148,7 @@ impl SearchService {
             Ok(nlp_result) => {
                 let json = serde_json::to_value(&nlp_result).map_err(|e| {
                     PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
-                        "Failed to serialize MCP NLP result: {}",
-                        e
+                        "Failed to serialize MCP NLP result: {e}"
                     ))
                 })?;
 
@@ -165,14 +156,12 @@ impl SearchService {
                     .map(|obj| obj.unbind())
                     .map_err(|e| {
                         PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
-                            "Failed to convert to Python: {}",
-                            e
+                            "Failed to convert to Python: {e}"
                         ))
                     })
             }
             Err(e) => Err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!(
-                "MCP NLP search failed: {}",
-                e
+                "MCP NLP search failed: {e}"
             ))),
         }
     }
@@ -211,7 +200,7 @@ impl McpService {
             let instance = self.instance.bind(py);
             let tools = instance.call_method0("list_tools")?;
             let tools_json: Value = serde_pyobject::from_pyobject(tools)
-                .map_err(|e| anyhow!("Failed to convert tools list: {}", e))?;
+                .map_err(|e| anyhow!("Failed to convert tools list: {e}"))?;
 
             Ok(tools_json)
         })
@@ -221,11 +210,11 @@ impl McpService {
         Python::attach(|py| {
             let instance = self.instance.bind(py);
             let args_py = serde_pyobject::to_pyobject(py, &arguments)
-                .map_err(|e| anyhow!("Failed to convert arguments to Python: {}", e))?;
+                .map_err(|e| anyhow!("Failed to convert arguments to Python: {e}"))?;
 
             let result = instance.call_method1("call_tool", (tool_name, args_py))?;
             let result_json: Value = serde_pyobject::from_pyobject(result)
-                .map_err(|e| anyhow!("Failed to convert result from Python: {}", e))?;
+                .map_err(|e| anyhow!("Failed to convert result from Python: {e}"))?;
 
             Ok(result_json)
         })
@@ -237,7 +226,7 @@ impl McpService {
             let result = instance.call_method1("handle_jsonrpc_request", (request_str,))?;
             let response_str: String = result
                 .extract()
-                .map_err(|e| anyhow!("Failed to extract JSON-RPC response string: {}", e))?;
+                .map_err(|e| anyhow!("Failed to extract JSON-RPC response string: {e}"))?;
             Ok(response_str)
         })
     }

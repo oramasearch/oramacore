@@ -2172,7 +2172,7 @@ impl IndexId {
     pub fn try_new<A: AsRef<str>>(key: A) -> Result<Self> {
         StackString::<64>::try_new(key)
             .map(IndexId)
-            .map_err(|e| anyhow::anyhow!("IndexId is too long. Max 64 char. {:?}", e))
+            .map_err(|e| anyhow::anyhow!("IndexId is too long. Max 64 char. {e:?}"))
     }
 
     pub fn as_str(&self) -> &str {
@@ -2191,7 +2191,7 @@ impl TrainingSetId {
     pub fn try_new<A: AsRef<str>>(key: A) -> Result<Self> {
         StackString::<64>::try_new(key)
             .map(TrainingSetId)
-            .map_err(|e| anyhow::anyhow!("TrainingSetId is too long. Max 64 char. {:?}", e))
+            .map_err(|e| anyhow::anyhow!("TrainingSetId is too long. Max 64 char. {e:?}"))
     }
 
     pub fn as_str(&self) -> &str {
@@ -2271,7 +2271,7 @@ impl<const N: usize> StackString<N> {
         let mut s = ArrayString::<N>::new();
         let r = s.try_push_str(key);
         if let Err(e) = r {
-            bail!("Parameter is too long. Max {} char. {:?}", N, e);
+            bail!("Parameter is too long. Max {N} char. {e:?}");
         }
         Ok(Self(s))
     }

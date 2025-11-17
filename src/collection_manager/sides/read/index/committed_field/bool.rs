@@ -86,8 +86,7 @@ impl CommittedBoolField {
                     Ok(index) => index,
                     Err(e) => {
                         return Err(anyhow::anyhow!(
-                            "Failed to load OrderedKeyIndex for bool field: {}",
-                            e
+                            "Failed to load OrderedKeyIndex for bool field: {e}"
                         ));
                     }
                 };

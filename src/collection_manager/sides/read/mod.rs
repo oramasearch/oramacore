@@ -272,12 +272,8 @@ impl ReadSide {
             .send(())
             .context("Cannot send stop signal")?;
         let mut stop_done_receiver = self.stop_done_receiver.write("stop").await;
-        // Commit loop
-        stop_done_receiver
-            .recv()
-            .await
-            .context("Cannot send stop signal")?;
-        // Operation receiver loop
+
+        // We have three tasks to wait for.
         stop_done_receiver
             .recv()
             .await
@@ -724,7 +720,7 @@ impl ReadSide {
         let known_prompt: KnownPrompts = system_prompt_id
             .as_str()
             .try_into()
-            .map_err(|e| ReadError::Generic(anyhow::anyhow!("Unknown system prompt ID: {}", e)))?;
+            .map_err(|e| ReadError::Generic(anyhow::anyhow!("Unknown system prompt ID: {e}")))?;
 
         let prompt = known_prompt.get_prompts().system;
 
@@ -751,8 +747,7 @@ impl ReadSide {
         {
             Ok(training_sets) => Ok(training_sets),
             Err(e) => Err(ReadError::Generic(anyhow::anyhow!(
-                "Failed to list training data: {}",
-                e
+                "Failed to list training data: {e}"
             ))),
         }
     }
@@ -780,8 +775,7 @@ impl ReadSide {
             Some(training_data_result) => match training_data_result {
                 Ok(training_data) => Some(Ok(training_data)),
                 Err(e) => Some(Err(ReadError::Generic(anyhow::anyhow!(
-                    "Failed to get training data: {}",
-                    e
+                    "Failed to get training data: {e}"
                 )))),
             },
             None => None,

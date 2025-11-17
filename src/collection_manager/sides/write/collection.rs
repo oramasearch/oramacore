@@ -516,6 +516,39 @@ impl CollectionWriter {
         Ok(())
     }
 
+    pub async fn check_claim_limitations(
+        &self,
+        api_key: WriteApiKey,
+        new_add: usize,
+        will_remove: usize,
+    ) -> Result<(), WriteError> {
+        let claims = match api_key {
+            WriteApiKey::ApiKey(_) => {
+                // No limit
+                return Ok(());
+            }
+            WriteApiKey::Claims(claim) => claim,
+        };
+
+        let max_doc_count = claims.limits.max_doc_count;
+
+        let mut document_count = 0_usize;
+        let indexes = self.indexes.read("as_dto").await;
+        for index in indexes.values() {
+            document_count += index.get_document_count("check_doc_number").await;
+        }
+        drop(indexes);
+
+        let future_document_count = document_count
+            .saturating_add(new_add)
+            .saturating_sub(will_remove);
+        if future_document_count > max_doc_count {
+            return Err(WriteError::DocumentLimitExceeded(self.id, max_doc_count));
+        }
+
+        Ok(())
+    }
+
     pub async fn as_dto(&self) -> DescribeCollectionResponse {
         let mut indexes_desc = vec![];
         let mut document_count = 0_usize;
@@ -581,7 +614,7 @@ impl CollectionWriter {
         temp_index_id: IndexId,
         reason: ReplaceIndexReason,
         reference: Option<String>,
-    ) -> Result<(), WriteError> {
+    ) -> Result<Option<Index>, WriteError> {
         let indexes_lock = self.indexes.read("replace_index").await;
         if !indexes_lock.contains_key(&runtime_index_id) {
             return Err(WriteError::IndexNotFound(self.id, runtime_index_id));
@@ -597,14 +630,17 @@ impl CollectionWriter {
         };
         temp_index.set_index_id(runtime_index_id);
         let mut indexes_lock = self.indexes.write("replace_index").await;
-        match indexes_lock.insert(runtime_index_id, temp_index) {
-            Some(_) => {
+        let old = match indexes_lock.insert(runtime_index_id, temp_index) {
+            Some(prev) => {
                 info!(coll_id= ?self.id, "Index {} replaced with temporary index {}", runtime_index_id, temp_index_id);
+
+                Some(prev)
             }
             None => {
                 warn!(coll_id= ?self.id, "Index {} replaced with temporary index {} but before it was not found. This is just a warning", runtime_index_id, temp_index_id);
+                None
             }
-        }
+        };
         drop(temp_indexes_lock);
 
         self.context
@@ -621,7 +657,7 @@ impl CollectionWriter {
             .await
             .context("Cannot send operation")?;
 
-        Ok(())
+        Ok(old)
     }
 
     pub fn get_hook_storage(&self) -> &HookWriter {

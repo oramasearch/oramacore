@@ -13,7 +13,6 @@ use tokio::time::sleep;
 
 use anyhow::Context;
 use duration_string::DurationString;
-use http::uri::Scheme;
 use oramacore::{
     ai::{AIServiceConfig, AIServiceLLMConfig},
     build_orama,

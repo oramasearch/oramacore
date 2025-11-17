@@ -94,6 +94,8 @@ pub enum WriteError {
     HookWriterError(#[from] HookWriterError),
     #[error("Error in pin rule")]
     PinRulesError(#[from] PinRulesWriterError),
+    #[error("Document limit exceeded for collection {0}. Limit: {1}")]
+    DocumentLimitExceeded(CollectionId, usize),
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -588,7 +590,38 @@ impl WriteSide {
     ) -> Result<(), WriteError> {
         let collection = self.get_collection(collection_id, write_api_key).await?;
 
+        let temp_index = match collection.get_temporary_index(req.temp_index_id).await {
+            Some(temp_index) => temp_index,
+            None => {
+                return Err(WriteError::TempIndexNotFound(
+                    collection_id,
+                    req.temp_index_id,
+                ))
+            }
+        };
+
+        let index = match collection.get_index(req.runtime_index_id).await {
+            Some(index) => index,
+            None => {
+                return Err(WriteError::IndexNotFound(
+                    collection_id,
+                    req.runtime_index_id,
+                ))
+            }
+        };
+
+        let temp_index_count = temp_index
+            .get_document_count("replace_index_check_limits")
+            .await;
+        let prev_index_count = index.get_document_count("replace_index_check_limits").await;
+
         collection
+            .check_claim_limitations(write_api_key, temp_index_count, prev_index_count)
+            .await?;
+        drop(temp_index);
+        drop(index);
+
+        let old = collection
             .replace_index(
                 req.runtime_index_id,
                 req.temp_index_id,
@@ -596,6 +629,23 @@ impl WriteSide {
                 req.reference,
             )
             .await?;
+
+        if let Some(old_index) = old {
+            let document_ids = old_index.get_document_ids().await;
+            self.document_storage.remove(document_ids).await;
+
+            // Forward document deletions to the reader side
+            let old_doc_ids = old_index.get_document_ids().await;
+            self.context
+                .op_sender
+                .send(WriteOperation::DocumentStorage(
+                    DocumentStorageWriteOperation::DeleteDocuments {
+                        doc_ids: old_doc_ids,
+                    },
+                ))
+                .await
+                .context("Cannot send operation to delete old index documents")?;
+        }
 
         Ok(())
     }
@@ -653,6 +703,13 @@ impl WriteSide {
             .get_index(index_id)
             .await
             .ok_or_else(|| WriteError::IndexNotFound(collection_id, index_id))?;
+
+        // Constraint checks
+        if index.is_runtime() {
+            collection
+                .check_claim_limitations(write_api_key, document_list.len(), 0)
+                .await?;
+        }
 
         // The doc_id_str is the composition of index_id + document_id
         // Anyway, for temp indexes, instead of using the temp index id,
@@ -733,14 +790,21 @@ impl WriteSide {
         update_document_request: UpdateDocumentRequest,
     ) -> Result<UpdateDocumentsResult, WriteError> {
         let mut collection = self.get_collection(collection_id, write_api_key).await?;
+        let document_count = update_document_request.documents.len();
+
         let mut index = collection
             .get_index(index_id)
             .await
             .ok_or_else(|| WriteError::IndexNotFound(collection_id, index_id))?;
 
-        let target_index_id = index.get_runtime_index_id().unwrap_or(index_id);
+        // Constraint checks
+        if index.is_runtime() {
+            collection
+                .check_claim_limitations(write_api_key, document_count, 0)
+                .await?;
+        }
 
-        let document_count = update_document_request.documents.0.len();
+        let target_index_id = index.get_runtime_index_id().unwrap_or(index_id);
 
         // Prepare document ID mapping
         let document_id_storage = index.get_document_id_storage().await;
