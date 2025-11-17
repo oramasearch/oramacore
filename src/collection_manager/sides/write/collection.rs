@@ -516,6 +516,35 @@ impl CollectionWriter {
         Ok(())
     }
 
+    pub async fn check_claim_limitations(
+        &self,
+        api_key: WriteApiKey,
+        new_add: usize,
+    ) -> Result<(), WriteError> {
+        let claims = match api_key {
+            WriteApiKey::ApiKey(_) => {
+                // No limit
+                return Ok(());
+            }
+            WriteApiKey::Claims(claim) => claim,
+        };
+
+        let max_doc_count = claims.limits.max_doc_count;
+
+        let mut document_count = 0_usize;
+        let indexes = self.indexes.read("as_dto").await;
+        for index in indexes.values() {
+            document_count += index.get_document_count("check_doc_number").await;
+        }
+        drop(indexes);
+
+        if document_count + new_add > max_doc_count {
+            return Err(WriteError::DocumentLimitExceeded(self.id, max_doc_count));
+        }
+
+        Ok(())
+    }
+
     pub async fn as_dto(&self) -> DescribeCollectionResponse {
         let mut indexes_desc = vec![];
         let mut document_count = 0_usize;

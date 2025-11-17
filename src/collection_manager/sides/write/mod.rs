@@ -94,6 +94,8 @@ pub enum WriteError {
     HookWriterError(#[from] HookWriterError),
     #[error("Error in pin rule")]
     PinRulesError(#[from] PinRulesWriterError),
+    #[error("Document limit exceeded for collection {0}. Limit: {1}")]
+    DocumentLimitExceeded(CollectionId, usize),
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -649,6 +651,10 @@ impl WriteSide {
 
         let collection = self.get_collection(collection_id, write_api_key).await?;
 
+        collection
+            .check_claim_limitations(write_api_key, document_list.len())
+            .await?;
+
         let index = collection
             .get_index(index_id)
             .await
@@ -733,14 +739,18 @@ impl WriteSide {
         update_document_request: UpdateDocumentRequest,
     ) -> Result<UpdateDocumentsResult, WriteError> {
         let mut collection = self.get_collection(collection_id, write_api_key).await?;
+        let document_count = update_document_request.documents.len();
+
+        collection
+            .check_claim_limitations(write_api_key, document_count)
+            .await?;
+
         let mut index = collection
             .get_index(index_id)
             .await
             .ok_or_else(|| WriteError::IndexNotFound(collection_id, index_id))?;
 
         let target_index_id = index.get_runtime_index_id().unwrap_or(index_id);
-
-        let document_count = update_document_request.documents.0.len();
 
         // Prepare document ID mapping
         let document_id_storage = index.get_document_id_storage().await;
