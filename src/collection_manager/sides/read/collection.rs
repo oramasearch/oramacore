@@ -611,9 +611,7 @@ impl CollectionReader {
             .filter(|index| !all_indexes.contains(index))
             .collect::<Vec<_>>();
         if !unknown_indexes.is_empty() {
-            bail!(
-                "Unknown indexes: {unknown_indexes:?}. Available indexes: {all_indexes:?}"
-            )
+            bail!("Unknown indexes: {unknown_indexes:?}. Available indexes: {all_indexes:?}")
         }
 
         let res = all_indexes
@@ -891,14 +889,14 @@ impl CollectionReader {
             .into_iter()
             .map(|mut index_stats| {
                 index_stats.fields_stats.retain(|stat| {
-                        !matches!(
-                            &stat.stats,
-                            IndexFieldStatsType::CommittedString(_)
-                                | IndexFieldStatsType::UncommittedString(_)
-                                | IndexFieldStatsType::CommittedVector(_)
-                                | IndexFieldStatsType::UncommittedVector(_)
-                        )
-                    });
+                    !matches!(
+                        &stat.stats,
+                        IndexFieldStatsType::CommittedString(_)
+                            | IndexFieldStatsType::UncommittedString(_)
+                            | IndexFieldStatsType::CommittedVector(_)
+                            | IndexFieldStatsType::UncommittedVector(_)
+                    )
+                });
                 index_stats
             })
             .collect();

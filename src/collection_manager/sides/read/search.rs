@@ -356,9 +356,7 @@ async fn calculate_facets(
             .iter()
             .filter(|f| !present_facet_fields.contains(f))
             .collect();
-        bail!(
-            "Some fields are not present in the collection for facets: {missing_facet_fields:?}"
-        );
+        bail!("Some fields are not present in the collection for facets: {missing_facet_fields:?}");
     }
 
     Ok(result)
