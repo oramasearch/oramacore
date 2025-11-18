@@ -10,6 +10,7 @@ mod context;
 pub mod jwt_manager;
 
 use std::borrow::Cow;
+use std::collections::HashSet;
 use std::{
     collections::HashMap,
     ops::Deref,
@@ -848,6 +849,9 @@ impl WriteSide {
             })
             .collect();
 
+        let mut pin_rules_writer = collection.get_pin_rule_writer("update_documents").await;
+        let mut pin_rules_touched = HashSet::new();
+
         let mut result = UpdateDocumentsResult {
             inserted: 0,
             updated: 0,
@@ -878,6 +882,7 @@ impl WriteSide {
 
             // Check for pending write operations and yield if needed
             if self.write_operation_counter.load(Ordering::Relaxed) > 0 {
+                drop(pin_rules_writer);
                 drop(index);
                 drop(collection);
 
@@ -891,6 +896,7 @@ impl WriteSide {
                     Some(index) => index,
                     None => return Err(WriteError::IndexNotFound(collection_id, index_id)),
                 };
+                pin_rules_writer = collection.get_pin_rule_writer("update_documents").await;
             }
 
             if let Some(doc_id_str) = document_ids_map.get(&doc_id) {
@@ -926,8 +932,21 @@ impl WriteSide {
                             .await
                             .context("Cannot send document storage operation")?;
 
+                        let doc_id_str = new_document
+                            .inner
+                            .get("id")
+                            .context("Document does not have an id")?
+                            .as_str()
+                            .context("Document id is not a string")?
+                            .to_string();
+
                         match index
-                            .process_new_document(doc_id, new_document, &mut index_operation_batch)
+                            .process_new_document(
+                                doc_id,
+                                doc_id_str,
+                                new_document,
+                                &mut index_operation_batch,
+                            )
                             .await
                             .context("Cannot process document")
                         {
@@ -950,8 +969,12 @@ impl WriteSide {
                         };
                     }
                 }
+
+                pin_rules_touched.extend(pin_rules_writer.get_matching_rules_ids(doc_id_str));
             }
         }
+
+        collection.update_pin_rules(pin_rules_touched, &mut index_operation_batch).await;
 
         if !index_operation_batch.is_empty() {
             trace!("Sending operations");
@@ -1167,6 +1190,9 @@ impl WriteSide {
             None => return Err(WriteError::IndexNotFound(collection_id, index_id)),
         };
 
+        let mut pin_rules_writer = collection.get_pin_rule_writer("process_documents").await;
+        let mut pin_rules_touched = HashSet::new();
+
         let document_count = document_list.len();
 
         let mut index_operation_batch = Vec::with_capacity(document_count * 10);
@@ -1190,6 +1216,7 @@ impl WriteSide {
             // Check for pending write operations and yield if needed
             if self.write_operation_counter.load(Ordering::Relaxed) > 0 {
                 // We need to drop the index lock before waiting
+                drop(pin_rules_writer);
                 drop(index);
                 drop(collection);
 
@@ -1204,10 +1231,19 @@ impl WriteSide {
                     Some(index) => index,
                     None => return Err(WriteError::IndexNotFound(collection_id, index_id)),
                 };
+                pin_rules_writer = collection.get_pin_rule_writer("process_documents").await;
             }
 
+            let doc_id_str = doc
+                .inner
+                .get("id")
+                .context("Document does not have an id")?
+                .as_str()
+                .context("Document id is not a string")?
+                .to_string();
+
             match index
-                .process_new_document(doc_id, doc, &mut index_operation_batch)
+                .process_new_document(doc_id, doc_id_str.clone(), doc, &mut index_operation_batch)
                 .await
                 .context("Cannot process document")
             {
@@ -1226,10 +1262,15 @@ impl WriteSide {
 
                     tracing::error!(error = ?e, "Cannot process document");
                     result.failed += 1;
+                    continue;
                 }
             };
+
+            pin_rules_touched.extend(pin_rules_writer.get_matching_rules_ids(&doc_id_str));
         }
         debug!("All documents processed {}", document_count);
+
+        collection.update_pin_rules(pin_rules_touched, &mut index_operation_batch).await;
 
         if !index_operation_batch.is_empty() {
             trace!("Sending operations");

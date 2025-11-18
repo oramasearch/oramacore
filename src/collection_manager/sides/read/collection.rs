@@ -11,7 +11,10 @@ use axum::extract::State;
 use chrono::{DateTime, Utc};
 use debug_panic::debug_panic;
 use orama_js_pool::OutputChannel;
-use oramacore_lib::hook_storage::{HookReader, HookType};
+use oramacore_lib::{
+    hook_storage::{HookReader, HookType},
+    pin_rules::PinRulesReader,
+};
 use serde::{Deserialize, Serialize};
 use tracing::{debug, error, info, warn};
 
@@ -28,8 +31,8 @@ use crate::{
     },
     lock::{OramaAsyncLock, OramaAsyncLockReadGuard, OramaAsyncLockWriteGuard},
     types::{
-        ApiKey, CollectionId, CollectionStatsRequest, FieldId, IndexId, InteractionMessage, Number,
-        OramaDate, Role,
+        ApiKey, CollectionId, CollectionStatsRequest, DocumentId, FieldId, IndexId,
+        InteractionMessage, Number, OramaDate, Role,
     },
 };
 
@@ -123,6 +126,8 @@ pub struct CollectionReader {
     updated_at: OramaAsyncLock<DateTime<Utc>>,
 
     document_count_estimation: AtomicU64,
+
+    pin_rules_reader: OramaAsyncLock<PinRulesReader<DocumentId>>,
 }
 
 impl CollectionReader {
@@ -162,6 +167,8 @@ impl CollectionReader {
             updated_at: OramaAsyncLock::new("collection_updated_at", Utc::now()),
 
             document_count_estimation: AtomicU64::new(0),
+
+            pin_rules_reader: OramaAsyncLock::new("pin_rules_reader", PinRulesReader::empty()),
 
             data_dir,
         })
@@ -236,6 +243,11 @@ impl CollectionReader {
             updated_at: OramaAsyncLock::new("collection_updated_at", dump.updated_at),
 
             document_count_estimation: AtomicU64::new(document_count_estimation),
+
+            pin_rules_reader: OramaAsyncLock::new(
+                "pin_rules_reader",
+                PinRulesReader::try_new(data_dir.join("pin_rules"))?,
+            ),
 
             data_dir,
         };
@@ -331,6 +343,12 @@ impl CollectionReader {
         let mut hook_lock = self.hook.write("commit").await;
         hook_lock.commit()?;
         drop(hook_lock);
+
+        let mut pin_rules_reader = self.pin_rules_reader.write("commit").await;
+        pin_rules_reader
+            .commit(self.data_dir.join("pin_rules"))
+            .context("Cannot commit pin rules")?;
+        drop(pin_rules_reader);
 
         let dump = Dump::V1(DumpV1 {
             id: self.id,
@@ -818,6 +836,14 @@ impl CollectionReader {
             CollectionWriteOperation::UpdateMcpDescription { mcp_description } => {
                 self.update_mcp_description(mcp_description).await?;
             }
+            CollectionWriteOperation::PinRule(op) => {
+                println!("Applying pin rule operation: {:?}", op);
+                let mut pin_rules_lock = self.pin_rules_reader.write("update_pin_rule").await;
+                pin_rules_lock
+                    .update(op)
+                    .context("Cannot apply pin rule operation")?;
+                drop(pin_rules_lock);
+            }
         }
 
         Ok(())
@@ -1122,6 +1148,13 @@ impl CollectionReader {
     async fn get_temp_index_mut(&self, index_id: IndexId) -> Option<IndexWriteLock<'_>> {
         let indexes_lock = self.temp_indexes.write("get_temp_index_mut").await;
         IndexWriteLock::try_new(indexes_lock, index_id)
+    }
+
+    pub async fn get_pin_rules_reader(
+        &self,
+        reason: &'static str,
+    ) -> OramaAsyncLockReadGuard<'_, PinRulesReader<DocumentId>> {
+        self.pin_rules_reader.read(reason).await
     }
 }
 

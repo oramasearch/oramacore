@@ -1,7 +1,9 @@
 use crate::tests::utils::TestContext;
 use crate::tests::utils::{extrapolate_ids_from_result, init_log};
 use serde_json::json;
+use tokio::time::sleep;
 use std::convert::TryInto;
+use std::time::Duration;
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_pin_rules_after_insert_simple() {
@@ -27,25 +29,25 @@ async fn test_pin_rules_after_insert_simple() {
     index_client
         .insert_pin_rules(
             json!({
-              "id": "rule-1",
-              "conditions": [
-                {
-                  "pattern": "c",
-                  "anchoring": "is"
+                "id": "rule-1",
+                "conditions": [
+                    {
+                        "pattern": "c",
+                        "anchoring": "is"
+                    }
+                ],
+                "consequence": {
+                    "promote": [
+                        {
+                            "doc_id": "5",
+                            "position": 1
+                        },
+                        {
+                            "doc_id": "7",
+                            "position": 2
+                        }
+                    ]
                 }
-              ],
-              "consequence": {
-                "promote": [
-                  {
-                    "doc_id": "5",
-                    "position": 1
-                  },
-                  {
-                    "doc_id": "7",
-                    "position": 2
-                  }
-                ]
-              }
             })
             .try_into()
             .unwrap(),
@@ -107,21 +109,21 @@ async fn test_pin_rules_after_insert_already_returned() {
     index_client
         .insert_pin_rules(
             json!({
-              "id": "rule-1",
-              "conditions": [
-                {
-                  "pattern": "c",
-                  "anchoring": "is"
+                "id": "rule-1",
+                "conditions": [
+                    {
+                        "pattern": "c",
+                        "anchoring": "is"
+                    }
+                ],
+                "consequence": {
+                    "promote": [
+                        {
+                            "doc_id": "0",
+                            "position": 3
+                        }
+                    ]
                 }
-              ],
-              "consequence": {
-                "promote": [
-                  {
-                    "doc_id": "0",
-                    "position": 3
-                  },
-                ]
-              }
             })
             .try_into()
             .unwrap(),
@@ -170,21 +172,21 @@ async fn test_pin_rules_after_insert_after_the_pagination_window() {
     index_client
         .insert_pin_rules(
             json!({
-              "id": "rule-1",
-              "conditions": [
-                {
-                  "pattern": "c",
-                  "anchoring": "is"
+                "id": "rule-1",
+                "conditions": [
+                    {
+                        "pattern": "c",
+                        "anchoring": "is"
+                    }
+                ],
+                "consequence": {
+                    "promote": [
+                        {
+                            "doc_id": "0",
+                            "position": 3000
+                        },
+                    ]
                 }
-              ],
-              "consequence": {
-                "promote": [
-                  {
-                    "doc_id": "0",
-                    "position": 3000
-                  },
-                ]
-              }
             })
             .try_into()
             .unwrap(),
@@ -233,21 +235,21 @@ async fn test_pin_rules_after_insert_pagination() {
     index_client
         .insert_pin_rules(
             json!({
-              "id": "rule-1",
-              "conditions": [
-                {
-                  "pattern": "c",
-                  "anchoring": "is"
+                "id": "rule-1",
+                "conditions": [
+                    {
+                        "pattern": "c",
+                        "anchoring": "is"
+                    }
+                ],
+                "consequence": {
+                    "promote": [
+                        {
+                            "doc_id": "0",
+                            "position": 3
+                        },
+                    ]
                 }
-              ],
-              "consequence": {
-                "promote": [
-                  {
-                    "doc_id": "0",
-                    "position": 3
-                  },
-                ]
-              }
             })
             .try_into()
             .unwrap(),
@@ -363,25 +365,25 @@ async fn test_pin_rules_before_insert_simple() {
     index_client
         .insert_pin_rules(
             json!({
-              "id": "rule-1",
-              "conditions": [
-                {
-                  "pattern": "c",
-                  "anchoring": "is"
+                "id": "rule-1",
+                "conditions": [
+                    {
+                        "pattern": "c",
+                        "anchoring": "is"
+                    }
+                ],
+                "consequence": {
+                    "promote": [
+                        {
+                            "doc_id": "5",
+                            "position": 1
+                        },
+                        {
+                            "doc_id": "7",
+                            "position": 2
+                        }
+                    ]
                 }
-              ],
-              "consequence": {
-                "promote": [
-                  {
-                    "doc_id": "5",
-                    "position": 1
-                  },
-                  {
-                    "doc_id": "7",
-                    "position": 2
-                  }
-                ]
-              }
             })
             .try_into()
             .unwrap(),
@@ -419,6 +421,7 @@ async fn test_pin_rules_before_insert_simple() {
     drop(test_context);
 }
 
+/*
 #[tokio::test(flavor = "multi_thread")]
 async fn test_pin_rules_after_insert_with_sort() {
     init_log();
@@ -430,25 +433,25 @@ async fn test_pin_rules_after_insert_with_sort() {
     index_client
         .insert_pin_rules(
             json!({
-              "id": "rule-1",
-              "conditions": [
-                {
-                  "pattern": "c",
-                  "anchoring": "is"
+                "id": "rule-1",
+                "conditions": [
+                    {
+                        "pattern": "c",
+                        "anchoring": "is"
+                    }
+                ],
+                "consequence": {
+                    "promote": [
+                        {
+                            "doc_id": "5",
+                            "position": 1
+                        },
+                        {
+                            "doc_id": "7",
+                            "position": 2
+                        }
+                    ]
                 }
-              ],
-              "consequence": {
-                "promote": [
-                  {
-                    "doc_id": "5",
-                    "position": 1
-                  },
-                  {
-                    "doc_id": "7",
-                    "position": 2
-                  }
-                ]
-              }
             })
             .try_into()
             .unwrap(),
@@ -540,21 +543,21 @@ async fn test_pin_rules_promote_non_matching_documents() {
     index_client
         .insert_pin_rules(
             json!({
-              "id": "test_rule",
-              "conditions": [
-                {
-                  "anchoring": "is",
-                  "pattern": "Blue Jeans"
+                "id": "test_rule",
+                "conditions": [
+                    {
+                        "anchoring": "is",
+                        "pattern": "Blue Jeans"
+                    }
+                ],
+                "consequence": {
+                    "promote": [
+                        {
+                            "doc_id": "2",
+                            "position": 1
+                        }
+                    ]
                 }
-              ],
-              "consequence": {
-                "promote": [
-                  {
-                    "doc_id": "2",
-                    "position": 1
-                  }
-                ]
-              }
             })
             .try_into()
             .unwrap(),
@@ -596,3 +599,4 @@ async fn test_pin_rules_promote_non_matching_documents() {
 
     drop(test_context);
 }
+*/

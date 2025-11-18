@@ -231,6 +231,7 @@ pub enum CollectionWriteOperation {
     UpdateMcpDescription {
         mcp_description: Option<String>,
     },
+    PinRule(PinRuleOperation<DocumentId>),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -422,6 +423,14 @@ impl WriteOperation {
                     IndexWriteOperation::PinRule(PinRuleOperation::Delete(_)),
                 ),
             ) => "delete_pin_rule",
+            WriteOperation::Collection(
+                _,
+                CollectionWriteOperation::PinRule(PinRuleOperation::Insert(_)),
+            ) => "insert_merchandising_pin_rule",
+            WriteOperation::Collection(
+                _,
+                CollectionWriteOperation::PinRule(PinRuleOperation::Delete(_)),
+            ) => "delete_merchandising_pin_rule",
             WriteOperation::DocumentStorage(DocumentStorageWriteOperation::InsertDocument {
                 ..
             }) => "document_storage_insert_document",

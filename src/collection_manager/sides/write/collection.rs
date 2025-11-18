@@ -1,9 +1,9 @@
-use std::{collections::HashMap, ops::Deref, path::PathBuf, sync::Arc};
+use std::{collections::{HashMap, HashSet}, ops::Deref, path::PathBuf, sync::Arc};
 
 use anyhow::{bail, Context, Result};
 use chrono::{DateTime, Utc};
 use futures::{future::join_all, FutureExt};
-use oramacore_lib::hook_storage::HookWriter;
+use oramacore_lib::{hook_storage::HookWriter, pin_rules::PinRulesWriter};
 use serde::{Deserialize, Serialize};
 use tracing::{info, warn};
 
@@ -24,7 +24,6 @@ use crate::{
 use oramacore_lib::fs::BufferedFile;
 
 use super::index::Index;
-use crate::collection_manager::sides::IndexWriteOperation;
 use oramacore_lib::nlp::{locales::Locale, TextParser};
 use oramacore_lib::pin_rules::{PinRule, PinRuleOperation};
 
@@ -50,6 +49,8 @@ pub struct CollectionWriter {
     created_at: DateTime<Utc>,
 
     hook: HookWriter,
+
+    pin_rules_writer: OramaAsyncLock<PinRulesWriter>,
 
     is_new: bool,
 }
@@ -97,6 +98,8 @@ impl CollectionWriter {
 
             hook: HookWriter::try_new(data_dir.join("hooks"), send_hook_operation_cb)
                 .context("Cannot create hook writer")?,
+
+            pin_rules_writer: OramaAsyncLock::new("pin_rules_writer", PinRulesWriter::empty()?),
 
             is_new: true,
         })
@@ -177,6 +180,8 @@ impl CollectionWriter {
                 }),
             )
             .context("Cannot create hook writer")?,
+
+            pin_rules_writer: OramaAsyncLock::new("pin_rules_writer", PinRulesWriter::empty()?),
 
             is_new: false,
         })
@@ -664,52 +669,114 @@ impl CollectionWriter {
         &self.hook
     }
 
-    pub async fn insert_pin_rule(
+    pub async fn insert_merchandising_pin_rule(
         &self,
-        index_id: IndexId,
         rule: PinRule<String>,
     ) -> Result<(), WriteError> {
-        let Some(index) = self.get_index(index_id).await else {
-            return Err(WriteError::IndexNotFound(self.id, index_id));
-        };
-        let mut pin_rule_writer = index.get_write_pin_rule_writer().await;
+        let mut pin_rule_writer = self.pin_rules_writer.write("iinsert_pin_rule").await;
         pin_rule_writer.insert_pin_rule(rule.clone()).await?;
 
-        let storage = index.get_document_id_storage().await;
+        let indexes_lock = self.indexes.read("insert_merchandising_pin_rule").await;
+        let mut storages = Vec::with_capacity(indexes_lock.len());
+        for index in indexes_lock.values() {
+            let storage = index.get_document_id_storage().await;
+            storages.push(storage);
+        }
+
         let new_rule = rule
             .convert_ids(|id| {
+                for storage in &storages {
+                    if let Some(doc_id) = storage.get(&id) {
+                        return doc_id;
+                    }
+                }
                 // DocumentId(u64::MAX) is never used, so this is equal to say
                 // "ignore this rules"
-                storage.get(&id).unwrap_or(DocumentId(u64::MAX))
+                DocumentId(u64::MAX)
             })
             .await;
+
+        drop(pin_rule_writer);
 
         self.context
             .op_sender
             .send(WriteOperation::Collection(
                 self.id,
-                CollectionWriteOperation::IndexWriteOperation(
-                    index_id,
-                    IndexWriteOperation::PinRule(PinRuleOperation::Insert(new_rule)),
-                ),
+                CollectionWriteOperation::PinRule(PinRuleOperation::Insert(new_rule)),
             ))
             .await?;
 
         Ok(())
     }
 
-    pub async fn delete_pin_rule(
-        &self,
-        index_id: IndexId,
-        rule_id: String,
-    ) -> Result<(), WriteError> {
-        let Some(index) = self.get_index(index_id).await else {
-            return Err(WriteError::IndexNotFound(self.id, index_id));
-        };
-        let mut pin_rule_writer = index.get_write_pin_rule_writer().await;
+    pub async fn delete_merchandising_pin_rule(&self, rule_id: String) -> Result<(), WriteError> {
+        let mut pin_rule_writer = self.pin_rules_writer.write("delete_pin_rule").await;
         pin_rule_writer.delete_pin_rule(&rule_id).await?;
+        drop(pin_rule_writer);
+
+        self.context
+            .op_sender
+            .send(WriteOperation::Collection(
+                self.id,
+                CollectionWriteOperation::PinRule(PinRuleOperation::Delete(rule_id)),
+            ))
+            .await?;
 
         Ok(())
+    }
+
+    pub async fn get_pin_rule_writer(
+        &self,
+        reason: &'static str,
+    ) -> OramaAsyncLockReadGuard<'_, PinRulesWriter> {
+        self.pin_rules_writer.read(reason).await
+    }
+
+    pub async fn update_pin_rules(
+        &self,
+        pin_rule_ids_touched: HashSet<String>,
+        index_operation_batch: &mut Vec<WriteOperation>,
+    ) {
+        if pin_rule_ids_touched.is_empty() {
+            return;
+        }
+
+        let indexes_lock = self.indexes.read("update_pin_rules").await;
+        let mut storages = Vec::with_capacity(indexes_lock.len());
+        for index in indexes_lock.values() {
+            let storage = index.get_document_id_storage().await;
+            storages.push(storage);
+        }
+
+        let pin_rule_writer = self.pin_rules_writer.read("update_pin_rules").await;
+
+        for rule_id in pin_rule_ids_touched {
+            let rule = match pin_rule_writer.get_by_id(&rule_id) {
+                Some(rule) => rule.clone(),
+                None => {
+                    // This rule was deleted
+                    continue;
+                }
+            };
+
+            let new_rule = rule
+                .convert_ids(|id| {
+                    for storage in &storages {
+                        if let Some(doc_id) = storage.get(&id) {
+                            return doc_id;
+                        }
+                    }
+                    // DocumentId(u64::MAX) is never used, so this is equal to say
+                    // "ignore this rules"
+                    DocumentId(u64::MAX)
+                })
+                .await;
+            println!("Inserting updated pin rule: {:#?}", new_rule);
+            index_operation_batch.push(WriteOperation::Collection(
+                self.id,
+                CollectionWriteOperation::PinRule(PinRuleOperation::Insert(new_rule)),
+            ));
+        }
     }
 }
 

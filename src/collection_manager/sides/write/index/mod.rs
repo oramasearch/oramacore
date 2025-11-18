@@ -29,7 +29,7 @@ use crate::{
         DocumentStorageWriteOperation, IndexWriteOperation, IndexWriteOperationFieldType,
         WriteOperation,
     },
-    lock::{OramaAsyncLock, OramaAsyncLockReadGuard, OramaAsyncLockWriteGuard},
+    lock::{OramaAsyncLock, OramaAsyncLockReadGuard},
     python::embeddings::Model,
     types::{
         CollectionId, DescribeCollectionIndexResponse, Document, DocumentId, DocumentList, FieldId,
@@ -40,7 +40,6 @@ use oramacore_lib::fs::BufferedFile;
 use oramacore_lib::nlp::{locales::Locale, TextParser};
 
 pub use fields::{EnumStrategy, FieldType, GeoPoint, IndexedValue};
-use oramacore_lib::pin_rules::{PinRuleOperation, PinRulesWriter};
 
 #[derive(Clone)]
 pub enum EmbeddingStringCalculation {
@@ -67,8 +66,6 @@ pub struct Index {
     created_at: DateTime<Utc>,
 
     runtime_index_id: Option<IndexId>,
-
-    pin_rules_writer: OramaAsyncLock<PinRulesWriter>,
 
     enum_strategy: EnumStrategy,
 
@@ -108,8 +105,6 @@ impl Index {
             created_at: Utc::now(),
 
             runtime_index_id,
-
-            pin_rules_writer: OramaAsyncLock::new("pin_rules_writer", PinRulesWriter::empty()?),
 
             enum_strategy,
 
@@ -165,18 +160,13 @@ impl Index {
             filter_fields: OramaAsyncLock::new("filter_fields", filter_fields),
             score_fields: OramaAsyncLock::new("score_fields", score_fields),
 
-            field_id_generator: AtomicU16::new(0),
+            field_id_generator: AtomicU16::new(dump.field_id_generator),
 
             context,
 
             created_at: dump.created_at,
 
             runtime_index_id: dump.runtime_index_id,
-
-            pin_rules_writer: OramaAsyncLock::new(
-                "pin_rules_writer",
-                PinRulesWriter::try_new(data_dir.join("pin_rules"))?,
-            ),
 
             enum_strategy: dump.enum_strategy,
 
@@ -336,11 +326,6 @@ impl Index {
             .write_json_data(&dump)
             .context("Cannot serialize collection info")?;
 
-        let mut pin_rules_writer = self.pin_rules_writer.write("commit").await;
-        pin_rules_writer
-            .commit(data_dir.join("pin_rules"))
-            .context("Cannot commit index")?;
-
         let doc_id_storage = self.doc_id_storage.read("commit").await;
         doc_id_storage
             .commit(data_dir)
@@ -383,24 +368,15 @@ impl Index {
     pub async fn process_new_document(
         &self,
         doc_id: DocumentId,
+        doc_id_str: String,
         doc: Document,
         index_operation_batch: &mut Vec<WriteOperation>,
     ) -> Result<Option<DocumentId>> {
         let mut old_document_id = None;
 
-        // Those `?` is never triggered, but it's here to make the compiler happy:
-        // The "id" property is always present in the document.
-        // TODO: do this better
-        let doc_id_str = doc
-            .inner
-            .get("id")
-            .context("Document does not have an id")?
-            .as_str()
-            .context("Document id is not a string")?;
-
         // Check if the document is already indexed. If so, we will replace it
         let mut doc_id_storage = self.doc_id_storage.write("new_doc").await;
-        if let Some(old_doc_id) = doc_id_storage.insert_document_id(doc_id_str.to_string(), doc_id)
+        if let Some(old_doc_id) = doc_id_storage.insert_document_id(doc_id_str, doc_id)
         {
             trace!("Document already indexed, replacing it.");
             old_document_id = Some(old_doc_id);
@@ -423,51 +399,11 @@ impl Index {
         }
         drop(doc_id_storage);
 
-        self.update_pin_rules(&doc, index_operation_batch).await;
-
         self.process_document(doc_id, doc, index_operation_batch)
             .await
             .context("Cannot process document")?;
 
         Ok(old_document_id)
-    }
-
-    async fn update_pin_rules(
-        &self,
-        new_document: &Document,
-        index_operation_batch: &mut Vec<WriteOperation>,
-    ) {
-        let pin_rules_writer = self.pin_rules_writer.write("update").await;
-        let rules = pin_rules_writer.get_matching_rules(
-            new_document
-                .inner
-                .get("id")
-                .expect("Document does not have an id")
-                .as_str()
-                .expect("Document id is not a string"),
-        );
-        if !rules.is_empty() {
-            let storage = self.get_document_id_storage().await;
-            let storage = &*storage;
-            for rule in rules {
-                let new_rule = rule
-                    .convert_ids(|id| {
-                        // DocumentId(u64::MAX) is never used, so this is equal to say
-                        // "ignore this rules"
-                        storage.get(&id).unwrap_or(DocumentId(u64::MAX))
-                    })
-                    .await;
-                index_operation_batch.push(WriteOperation::Collection(
-                    self.collection_id,
-                    CollectionWriteOperation::IndexWriteOperation(
-                        self.index_id,
-                        IndexWriteOperation::PinRule(PinRuleOperation::Insert(new_rule)),
-                    ),
-                ));
-            }
-        }
-
-        self.is_dirty.store(true, Ordering::SeqCst);
     }
 
     async fn process_document(
@@ -798,14 +734,6 @@ impl Index {
         self.is_dirty.store(true, Ordering::SeqCst);
 
         Ok(())
-    }
-
-    pub async fn get_pin_rule_writer(&self) -> OramaAsyncLockReadGuard<'_, PinRulesWriter> {
-        self.pin_rules_writer.read("get").await
-    }
-
-    pub async fn get_write_pin_rule_writer(&self) -> OramaAsyncLockWriteGuard<'_, PinRulesWriter> {
-        self.pin_rules_writer.write("get").await
     }
 }
 
