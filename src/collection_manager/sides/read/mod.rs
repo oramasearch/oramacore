@@ -551,6 +551,21 @@ impl ReadSide {
             .await
     }
 
+    pub async fn get_collection(
+        &self,
+        collection_id: CollectionId,
+        read_api_key: ApiKey,
+    ) -> Result<CollectionReadLock, ReadError> {
+        let collection = self.collections.get_collection(collection_id).await;
+        let collection = match collection {
+            None => return Err(ReadError::NotFound(collection_id)),
+            Some(collection) => collection,
+        };
+        collection.check_read_api_key(read_api_key, self.master_api_key)?;
+
+        Ok(collection)
+    }
+
     // This is wrong. We should not expose the vllm service to the read side.
     // @todo: Remove this method.
     pub fn get_llm_service(&self) -> Arc<LLMService> {
@@ -782,6 +797,7 @@ impl ReadSide {
         }
     }
 
+    /*
     pub async fn list_pin_rule_ids(
         &self,
         collection_id: CollectionId,
@@ -803,6 +819,7 @@ impl ReadSide {
 
         Ok(ids)
     }
+    */
 }
 
 fn default_insert_batch_commit_size() -> u64 {
