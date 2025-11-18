@@ -811,12 +811,9 @@ impl TestIndexClient {
             let collection_id = s.collection_id;
             let r = &rule_id;
             async move {
-                let collection = reader
-                    .get_collection(collection_id, read_api_key)
-                    .await?;
+                let collection = reader.get_collection(collection_id, read_api_key).await?;
                 let reader = collection.get_pin_rules_reader("test").await;
-                let ids = reader
-                    .get_rule_ids();
+                let ids = reader.get_rule_ids();
 
                 if ids.contains(r) {
                     return Ok(());

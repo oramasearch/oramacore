@@ -376,8 +376,7 @@ impl Index {
 
         // Check if the document is already indexed. If so, we will replace it
         let mut doc_id_storage = self.doc_id_storage.write("new_doc").await;
-        if let Some(old_doc_id) = doc_id_storage.insert_document_id(doc_id_str, doc_id)
-        {
+        if let Some(old_doc_id) = doc_id_storage.insert_document_id(doc_id_str, doc_id) {
             trace!("Document already indexed, replacing it.");
             old_document_id = Some(old_doc_id);
 

@@ -1,4 +1,9 @@
-use std::{collections::{HashMap, HashSet}, ops::Deref, path::PathBuf, sync::Arc};
+use std::{
+    collections::{HashMap, HashSet},
+    ops::Deref,
+    path::PathBuf,
+    sync::Arc,
+};
 
 use anyhow::{bail, Context, Result};
 use chrono::{DateTime, Utc};
@@ -771,7 +776,7 @@ impl CollectionWriter {
                     DocumentId(u64::MAX)
                 })
                 .await;
-            println!("Inserting updated pin rule: {:#?}", new_rule);
+            println!("Inserting updated pin rule: {new_rule:#?}");
             index_operation_batch.push(WriteOperation::Collection(
                 self.id,
                 CollectionWriteOperation::PinRule(PinRuleOperation::Insert(new_rule)),

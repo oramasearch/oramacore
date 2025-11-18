@@ -837,7 +837,7 @@ impl CollectionReader {
                 self.update_mcp_description(mcp_description).await?;
             }
             CollectionWriteOperation::PinRule(op) => {
-                println!("Applying pin rule operation: {:?}", op);
+                println!("Applying pin rule operation: {op:?}");
                 let mut pin_rules_lock = self.pin_rules_reader.write("update_pin_rule").await;
                 pin_rules_lock
                     .update(op)

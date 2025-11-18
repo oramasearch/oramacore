@@ -974,7 +974,9 @@ impl WriteSide {
             }
         }
 
-        collection.update_pin_rules(pin_rules_touched, &mut index_operation_batch).await;
+        collection
+            .update_pin_rules(pin_rules_touched, &mut index_operation_batch)
+            .await;
 
         if !index_operation_batch.is_empty() {
             trace!("Sending operations");
@@ -1270,7 +1272,9 @@ impl WriteSide {
         }
         debug!("All documents processed {}", document_count);
 
-        collection.update_pin_rules(pin_rules_touched, &mut index_operation_batch).await;
+        collection
+            .update_pin_rules(pin_rules_touched, &mut index_operation_batch)
+            .await;
 
         if !index_operation_batch.is_empty() {
             trace!("Sending operations");

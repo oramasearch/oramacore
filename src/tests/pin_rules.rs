@@ -1,9 +1,7 @@
 use crate::tests::utils::TestContext;
 use crate::tests::utils::{extrapolate_ids_from_result, init_log};
 use serde_json::json;
-use tokio::time::sleep;
 use std::convert::TryInto;
-use std::time::Duration;
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_pin_rules_after_insert_simple() {
