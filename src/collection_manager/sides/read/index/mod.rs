@@ -77,7 +77,6 @@ pub use committed_field::{
 };
 use debug_panic::debug_panic;
 pub use group::GroupValue;
-use oramacore_lib::pin_rules::PinRulesReader;
 use std::iter::Peekable;
 use std::{
     collections::{HashMap, HashSet},
@@ -152,7 +151,6 @@ pub struct Index {
     created_at: DateTime<Utc>,
     updated_at: DateTime<Utc>,
 
-    pin_rules_reader: OramaAsyncLock<PinRulesReader<DocumentId>>,
     enum_strategy: EnumStrategy,
 }
 
@@ -186,8 +184,6 @@ impl Index {
 
             created_at: Utc::now(),
             updated_at: Utc::now(),
-
-            pin_rules_reader: OramaAsyncLock::new("pin_rules_reader", PinRulesReader::empty()),
 
             enum_strategy,
         }
@@ -337,10 +333,6 @@ impl Index {
             created_at: dump.created_at,
             updated_at: dump.updated_at,
 
-            pin_rules_reader: OramaAsyncLock::new(
-                "pin_rules_reader",
-                PinRulesReader::try_new(data_dir.join("pin_rules"))?,
-            ),
             enum_strategy: dump.enum_strategy,
         })
     }
@@ -902,12 +894,6 @@ impl Index {
         drop(uncommitted_fields);
         drop(committed_fields);
 
-        let mut pin_rules_reader = self.pin_rules_reader.write("commit").await;
-        pin_rules_reader
-            .commit(data_dir.join("pin_rules"))
-            .context("Cannot commit pin rules")?;
-        drop(pin_rules_reader);
-
         self.try_unload_fields().await;
 
         BufferedFile::create_or_overwrite(data_dir.join("index.json"))
@@ -1219,11 +1205,8 @@ impl Index {
                 self.uncommitted_deleted_documents.extend(doc_ids);
                 self.document_count = self.document_count.saturating_sub(len);
             }
-            IndexWriteOperation::PinRule(op) => {
-                let pin_rules_lock = self.pin_rules_reader.get_mut();
-                pin_rules_lock
-                    .update(op)
-                    .context("Cannot apply pin rule operation")?;
+            IndexWriteOperation::PinRule(_) => {
+                warn!("Ignore this rule");
             }
         };
 
@@ -2554,6 +2537,7 @@ impl Index {
         Ok(output)
     }
 
+    /*
     pub async fn get_pin_rule_ids(&self) -> Vec<String> {
         let pin_rules_reader = self.pin_rules_reader.read("get_pin_rule_ids").await;
         pin_rules_reader.get_rule_ids()
@@ -2566,6 +2550,7 @@ impl Index {
             .read("get_read_lock_on_pin_rules")
             .await
     }
+    */
 }
 
 #[derive(Serialize, Debug)]

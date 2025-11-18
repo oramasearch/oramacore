@@ -2,7 +2,7 @@ use std::{borrow::Cow, collections::HashMap, time::Instant};
 
 use anyhow::{bail, Result};
 use futures::StreamExt;
-use oramacore_lib::pin_rules::Consequence;
+use oramacore_lib::pin_rules::{Consequence, PinRulesReader};
 
 use crate::{
     collection_manager::sides::read::{
@@ -154,7 +154,11 @@ impl<'collection, 'document_storage, 'analytics_storage>
             None
         };
 
-        let pin_rules = extract_pin_rules(&indexes, &search_params).await;
+        let pin_rules = extract_pin_rules(
+            &*collection.get_pin_rules_reader("search").await,
+            &search_params,
+        )
+        .await;
 
         let groups = if let Some(group_by) = &search_params.group_by {
             let groups = calculate_groups(
@@ -290,16 +294,11 @@ pub fn extract_term_from_search_mode(search_mode: &SearchMode) -> &str {
 }
 
 async fn extract_pin_rules(
-    indexes: &ReadIndexesLockGuard<'_, '_>,
+    rules: &PinRulesReader<DocumentId>,
     search_params: &SearchParams,
 ) -> Vec<Consequence<DocumentId>> {
     let term = extract_term_from_search_mode(&search_params.mode);
-    let mut pins: Vec<_> = Vec::with_capacity(indexes.len());
-    for index in indexes.iter() {
-        let pin_rules = index.get_read_lock_on_pin_rules().await;
-        pins.extend(pin_rules.apply(term));
-    }
-    pins
+    rules.apply(term)
 }
 
 async fn calculate_token_score_for_indexes(

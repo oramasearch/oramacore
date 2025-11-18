@@ -4493,8 +4493,6 @@ dependencies = [
 [[package]]
 name = "oramacore_lib"
 version = "0.1.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c63d8a56f21ff2e30681fa0d90c11391375c094dd579ec47832595a3cfa204a8"
 dependencies = [
  "anyhow",
  "atomic-write-file",

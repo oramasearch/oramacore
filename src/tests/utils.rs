@@ -801,7 +801,7 @@ impl TestIndexClient {
         let rule_id = rule.id.clone();
 
         collection
-            .insert_pin_rule(self.index_id, rule)
+            .insert_merchandising_pin_rule(rule)
             .await
             .context("Failed to insert pin_rule")?;
 
@@ -809,12 +809,11 @@ impl TestIndexClient {
             let reader = s.reader.clone();
             let read_api_key = s.read_api_key;
             let collection_id = s.collection_id;
-            let index_id = s.index_id;
             let r = &rule_id;
             async move {
-                let ids = reader
-                    .list_pin_rule_ids(collection_id, index_id, read_api_key)
-                    .await?;
+                let collection = reader.get_collection(collection_id, read_api_key).await?;
+                let reader = collection.get_pin_rules_reader("test").await;
+                let ids = reader.get_rule_ids();
 
                 if ids.contains(r) {
                     return Ok(());
