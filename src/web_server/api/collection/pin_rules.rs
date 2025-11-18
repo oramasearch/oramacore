@@ -39,7 +39,7 @@ pub fn write_apis(write_side: Arc<WriteSide>) -> Router {
         )
         .route(
             "/v1/collections/{collection_id}/merchandinsing/pin_rules/list",
-            post(list_merchandising_pin_rules_v1),
+            get(list_merchandising_pin_rules_v1),
         )
         .with_state(write_side)
 }
