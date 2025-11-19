@@ -45,6 +45,7 @@ pub use context::WriteSideContext;
 
 use crate::collection_manager::sides::write::document_storage::ZeboDocument;
 use crate::lock::OramaAsyncLock;
+use crate::metrics::CollectionLabels;
 use crate::python::embeddings::Model;
 use crate::python::PythonService;
 use crate::{
@@ -717,7 +718,9 @@ impl WriteSide {
         // we use the original index id
         let target_index_id = index.get_runtime_index_id().unwrap_or(index_id);
 
-        let metric = DOCUMENTS_INSERTION_TIME.create(Empty);
+        let metric = DOCUMENTS_INSERTION_TIME.create(CollectionLabels {
+            collection: collection_id.to_string(),
+        });
 
         debug!("Inserting documents {}", document_count);
         let doc_ids = self
