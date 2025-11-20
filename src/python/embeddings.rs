@@ -73,6 +73,22 @@ impl Model {
     pub fn overlap(&self) -> usize {
         self.sequence_length() * 2 / 100
     }
+
+    /// Returns None if no scaling is needed.
+    /// Some((min, max)) if scaling is needed.
+    pub fn get_scale(&self) -> Option<(f32, f32)> {
+        let is_e5_model = matches!(
+            self,
+            Model::MultilingualE5Small | Model::MultilingualE5Base | Model::MultilingualE5Large
+        );
+
+        if is_e5_model {
+            // E5 models typically produce similarity scores in the range [0.7, 1.0]
+            Some((0.7, 1.0))
+        } else {
+            None
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize)]
