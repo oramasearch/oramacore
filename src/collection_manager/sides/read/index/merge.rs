@@ -596,18 +596,20 @@ pub fn merge_vector_field(
             bail!("Both uncommitted field is None. Never should happen");
         }
         (Some(uncommitted), None) => {
-            let new_field = CommittedVectorField::from_iter(
-                uncommitted.field_path().to_vec().into_boxed_slice(),
-                uncommitted
-                    .iter()
-                    .filter(|(doc_id, _)| !uncommitted_document_deletions.contains(doc_id)),
-                uncommitted.get_model(),
+            let new_field = CommittedVectorField::from_uncommitted(
+                uncommitted,
                 data_dir,
+                uncommitted_document_deletions,
                 *offload_config,
             )?;
             Ok(Some(new_field))
         }
         (Some(uncommitted), Some(committed)) => {
+            if uncommitted.is_empty() && !is_promoted {
+                // Nothing to merge, return None
+                return Ok(None);
+            }
+
             let mut info = committed.get_field_info();
             if uncommitted.is_empty() {
                 if is_promoted {
@@ -659,13 +661,10 @@ pub fn merge_vector_field(
                 "Uncommitted and committed models should be the same",
             );
 
-            let new_field = CommittedVectorField::from_dump_and_iter(
-                info.field_path,
-                info.data_dir,
-                uncommitted.iter(),
-                uncommitted_document_deletions,
-                uncommitted.get_model(),
+            let new_field = committed.add_uncommitted(
+                uncommitted,
                 data_dir,
+                uncommitted_document_deletions,
                 *offload_config,
             )?;
             Ok(Some(new_field))

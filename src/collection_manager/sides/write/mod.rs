@@ -60,7 +60,7 @@ use crate::{
         write::jwt_manager::{JwtConfig, JwtManager},
         DocumentStorageWriteOperation, DocumentToInsert, ReplaceIndexReason, WriteOperation,
     },
-    metrics::{document_insertion::DOCUMENTS_INSERTION_TIME, Empty},
+    metrics::document_insertion::DOCUMENTS_INSERTION_TIME,
     types::{
         ApiKey, CollectionCreated, CollectionId, CreateCollection, CreateIndexRequest,
         DeleteDocuments, DescribeCollectionResponse, Document, DocumentId, DocumentList,
