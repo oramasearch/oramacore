@@ -29,8 +29,6 @@ pub mod collection_manager;
 
 pub mod web_server;
 
-mod capped_heap;
-
 mod metrics;
 
 mod merger;
