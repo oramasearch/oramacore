@@ -1,8 +1,17 @@
-use std::{borrow::Cow, collections::HashMap, time::Instant};
+use std::{
+    borrow::Cow,
+    collections::{HashMap, HashSet},
+    hash::Hash,
+    time::Instant,
+};
 
 use anyhow::{bail, Result};
 use futures::StreamExt;
-use oramacore_lib::pin_rules::{Consequence, PinRulesReader};
+use oramacore_lib::{
+    data_structures::ShouldInclude,
+    filters::{DocId, FilterResult},
+    pin_rules::{Consequence, PinRulesReader},
+};
 
 use crate::{
     collection_manager::sides::read::{
@@ -397,4 +406,44 @@ pub async fn sort_and_truncate(
 ) -> Result<Vec<TokenScore>, ReadError> {
     let context = SortContext::new(indexes, token_scores, search_params, pin_rules);
     context.execute().await
+}
+
+pub struct SearchDocumentContext<'a, DocumentId> {
+    deleted_documents: &'a HashSet<DocumentId>,
+    filtered_doc_ids: Option<FilterResult<DocumentId>>,
+}
+impl SearchDocumentContext<'_, DocumentId> {
+    pub fn new<'a>(
+        deleted_documents: &'a HashSet<DocumentId>,
+        filtered_doc_ids: Option<FilterResult<DocumentId>>,
+    ) -> SearchDocumentContext<'a, DocumentId> {
+        SearchDocumentContext {
+            deleted_documents,
+            filtered_doc_ids,
+        }
+    }
+    pub fn has_filtered(&self) -> bool {
+        !self.deleted_documents.is_empty() || self.filtered_doc_ids.is_some()
+    }
+}
+
+impl<DocumentId: Sync + Send + Hash + Eq + DocId> ShouldInclude<DocumentId>
+    for SearchDocumentContext<'_, DocumentId>
+{
+    fn should_include(&self, doc_id: &DocumentId) -> bool {
+        if self.deleted_documents.contains(doc_id) {
+            return false;
+        }
+        match &self.filtered_doc_ids {
+            Some(filtered_doc_ids) => filtered_doc_ids.contains(doc_id),
+            None => true,
+        }
+    }
+}
+
+#[cfg(test)]
+impl ShouldInclude<DocumentId> for () {
+    fn should_include(&self, _: &DocumentId) -> bool {
+        true
+    }
 }

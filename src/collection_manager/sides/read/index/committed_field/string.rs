@@ -1,14 +1,17 @@
 use std::{
     cell::RefCell,
     collections::{HashMap, HashSet},
-    path::PathBuf,
+    path::{Path, PathBuf},
+    sync::atomic::AtomicBool,
+    time::Duration,
 };
 
-use anyhow::{Context, Result};
-use oramacore_lib::data_structures::fst::FSTIndex;
+use anyhow::{anyhow, Context, Result};
+use invocation_counter::InvocationCounter;
 use oramacore_lib::data_structures::map::Map;
+use oramacore_lib::data_structures::{fst::FSTIndex, ShouldInclude};
 use serde::{Deserialize, Serialize};
-use tracing::{debug, info};
+use tracing::info;
 
 use crate::{
     collection_manager::{
@@ -16,9 +19,11 @@ use crate::{
         global_info::GlobalInfo,
         sides::read::{
             index::{
-                committed_field::offload_utils::{InnerCommittedField, LoadedField},
+                committed_field::offload_utils::{
+                    create_counter, should_offload, update_invocation_counter, Cow,
+                },
                 search_context::FullTextSearchContext,
-                uncommitted_field::{Positions, TotalDocumentsWithTermInField},
+                uncommitted_field::UncommittedStringField,
             },
             OffloadFieldConfig,
         },
@@ -31,406 +36,19 @@ use oramacore_lib::fs::create_if_not_exists;
 
 const EXACT_MATCH_BOOST_MULTIPLIER: f32 = 3.0;
 
-#[derive(Debug)]
-pub struct CommittedStringField {
-    inner: OramaSyncLock<
-        InnerCommittedField<LoadedCommittedStringField, CommittedStringFieldStats, StringFieldInfo>,
-    >,
+enum StringLayout {
+    Fst(Box<(FSTIndex, PostingIdStorage, DocumentLengthsPerDocument)>),
 }
-
-impl CommittedStringField {
-    pub fn try_load(info: StringFieldInfo, offload_config: OffloadFieldConfig) -> Result<Self> {
-        let loaded = LoadedCommittedStringField::try_load(info)?;
-        let inner = InnerCommittedField::new_loaded(loaded, offload_config);
-        let inner = OramaSyncLock::new("string_inner", inner);
-        Ok(Self { inner })
-    }
-
-    pub fn from_iter(
-        field_path: Box<[String]>,
-        uncommitted_iter: impl Iterator<
-            Item = (
-                Vec<u8>,
-                (
-                    TotalDocumentsWithTermInField,
-                    HashMap<DocumentId, (Positions, Positions)>,
-                ),
-            ),
-        >,
-        length_per_documents: HashMap<DocumentId, u32>,
-        data_dir: PathBuf,
-        uncommitted_document_deletions: &HashSet<DocumentId>,
-        offload_config: OffloadFieldConfig,
-    ) -> Result<Self> {
-        let loaded = LoadedCommittedStringField::from_iter(
-            field_path,
-            uncommitted_iter,
-            length_per_documents,
-            data_dir,
-            uncommitted_document_deletions,
-        )?;
-
-        let inner = InnerCommittedField::new_loaded(loaded, offload_config);
-        let inner = OramaSyncLock::new("string_inner", inner);
-        Ok(Self { inner })
-    }
-
-    pub fn from_iter_and_committed(
-        field_path: Box<[String]>,
-        uncommitted_iter: impl Iterator<
-            Item = (
-                Vec<u8>,
-                (
-                    TotalDocumentsWithTermInField,
-                    HashMap<DocumentId, (Positions, Positions)>,
-                ),
-            ),
-        >,
-        committed: &Self,
-        length_per_documents: HashMap<DocumentId, u32>,
-        data_dir: PathBuf,
-        uncommitted_document_deletions: &HashSet<DocumentId>,
-        offload_config: OffloadFieldConfig,
-    ) -> Result<Self> {
-        committed.load(); // enforce loading of the committed field
-        let lock = committed.inner.read("from_iter_and_committed").unwrap();
-        let prev_loaded = match &**lock {
-            InnerCommittedField::Loaded { field, .. } => field,
-            InnerCommittedField::Unloaded { field_info, .. } => {
-                return Err(anyhow::anyhow!(
-                    "Cannot commit to an unloaded committed string field: {field_info:?}"
-                ));
-            }
-        };
-
-        let loaded = LoadedCommittedStringField::from_iter_and_committed(
-            field_path,
-            uncommitted_iter,
-            prev_loaded,
-            length_per_documents,
-            data_dir,
-            uncommitted_document_deletions,
-        )?;
-
-        let inner = InnerCommittedField::new_loaded(loaded, offload_config);
-
-        Ok(Self {
-            inner: OramaSyncLock::new("string_inner", inner),
-        })
-    }
-
-    fn loaded(&self) -> bool {
-        self.inner.read("loaded").unwrap().loaded()
-    }
-
-    fn load(&self) {
-        if self.loaded() {
-            return;
-        }
-
-        let mut inner = self.inner.write("load").unwrap();
-        if let InnerCommittedField::Unloaded {
-            offload_config,
-            field_info,
-            ..
-        } = &**inner
-        {
-            let loaded = LoadedCommittedStringField::try_load(field_info.clone())
-                .expect("Cannot load committed string field");
-            **inner = InnerCommittedField::new_loaded(loaded, *offload_config)
+impl StringLayout {
+    fn key_count(&self) -> usize {
+        match self {
+            StringLayout::Fst(boxed) => boxed.0.len(),
         }
     }
 
-    pub fn unload_if_not_used(&self) {
-        let lock = self.inner.read("unload_if_not_used").unwrap();
-        if lock.should_unload() {
-            drop(lock); // Release the read lock before unloading
-            self.unload();
-        }
-    }
-
-    fn unload(&self) {
-        let mut inner = self.inner.write("unload").unwrap();
-        if let InnerCommittedField::Loaded {
-            field,
-            offload_config,
-            ..
-        } = &**inner
-        {
-            let field_path = field.field_path();
-            debug!("Unloading committed string field {:?}", field_path,);
-            let mut stats = field.stats();
-            stats.loaded = false; // Mark field as unloaded
-            **inner = InnerCommittedField::unloaded(*offload_config, stats, field.info());
-
-            info!("Committed string field {:?} unloaded", field_path,);
-        }
-    }
-
-    pub fn field_path(&self) -> Box<[String]> {
-        let inner = self.inner.read("field_path").unwrap();
-        inner.info().field_path.clone()
-    }
-
-    pub fn global_info(&self) -> GlobalInfo {
-        if !self.loaded() {
-            self.load();
-        }
-
-        let inner = self.inner.read("global_info").unwrap();
-        match &**inner {
-            InnerCommittedField::Loaded { field, .. } => field.global_info(),
-            InnerCommittedField::Unloaded { .. } => GlobalInfo::default(),
-        }
-    }
-
-    pub fn get_field_info(&self) -> StringFieldInfo {
-        self.inner.read("field_info").unwrap().info()
-    }
-
-    pub fn stats(&self) -> CommittedStringFieldStats {
-        let inner = self.inner.read("stats").unwrap();
-        inner.stats()
-    }
-
-    pub fn search(
-        &self,
-        context: &mut FullTextSearchContext<'_, '_>,
-        scorer: &mut BM25Scorer<DocumentId>,
-        tolerance: Option<u8>,
-    ) -> Result<()> {
-        self.load();
-
-        let inner = self.inner.read("search").unwrap();
-
-        if let Some(field) = inner.get_load_unchecked() {
-            field.search(context, scorer, tolerance)
-        } else {
-            Ok(())
-        }
-    }
-}
-
-#[derive(Debug)]
-pub struct LoadedCommittedStringField {
-    field_path: Box<[String]>,
-    index: FSTIndex,
-
-    posting_storage: PostingIdStorage,
-    document_lengths_per_document: DocumentLengthsPerDocument,
-
-    data_dir: PathBuf,
-}
-
-impl LoadedCommittedStringField {
-    pub fn from_iter(
-        field_path: Box<[String]>,
-        uncommitted_iter: impl Iterator<
-            Item = (
-                Vec<u8>,
-                (
-                    TotalDocumentsWithTermInField,
-                    HashMap<DocumentId, (Positions, Positions)>,
-                ),
-            ),
-        >,
-        mut length_per_documents: HashMap<DocumentId, u32>,
-        data_dir: PathBuf,
-        uncommitted_document_deletions: &HashSet<DocumentId>,
-    ) -> Result<Self> {
-        let mut posting_id_generator = 0;
-
-        create_if_not_exists(&data_dir)?;
-
-        let mut delta_committed_storage: HashMap<u64, Vec<(DocumentId, PostingIdPosition)>> =
-            Default::default();
-        let iter = uncommitted_iter.map(|(key, value)| {
-            let new_posting_list_id = posting_id_generator;
-            posting_id_generator += 1;
-
-            delta_committed_storage.insert(
-                new_posting_list_id,
-                value
-                    .1
-                    .into_iter()
-                    .filter(|(doc_id, _)| !uncommitted_document_deletions.contains(doc_id))
-                    .map(|(doc_id, positions)| (doc_id, (positions.0 .0, positions.1 .0)))
-                    .collect(),
-            );
-
-            (key, new_posting_list_id)
-        });
-
-        uncommitted_document_deletions.iter().for_each(|doc_id| {
-            length_per_documents.remove(doc_id);
-        });
-
-        let posting_id_storage_file_path = data_dir.join("posting_id_storage.map");
-        let length_per_documents_file_path = data_dir.join("length_per_documents.map");
-        let fst_file_path = data_dir.join("fst.map");
-        let index = FSTIndex::from_iter(iter, fst_file_path).context("Cannot commit fst")?;
-        let document_lengths_per_document = DocumentLengthsPerDocument::from_map(
-            Map::from_hash_map(length_per_documents, length_per_documents_file_path)
-                .context("Cannot commit document lengths per document storage")?,
-        );
-        let posting_storage = PostingIdStorage::from_map(
-            Map::from_hash_map(delta_committed_storage, posting_id_storage_file_path)
-                .context("Cannot commit posting id storage")?,
-        );
-
-        Ok(Self {
-            field_path,
-            index,
-            posting_storage,
-            document_lengths_per_document,
-            data_dir,
-        })
-    }
-
-    pub fn from_iter_and_committed(
-        field_path: Box<[String]>,
-        uncommitted_iter: impl Iterator<
-            Item = (
-                Vec<u8>,
-                (
-                    TotalDocumentsWithTermInField,
-                    HashMap<DocumentId, (Positions, Positions)>,
-                ),
-            ),
-        >,
-        committed: &Self,
-        length_per_documents: HashMap<DocumentId, u32>,
-        data_dir: PathBuf,
-        uncommitted_document_deletions: &HashSet<DocumentId>,
-    ) -> Result<Self> {
-        create_if_not_exists(&data_dir)
-            .context("Cannot create data directory for committed string field")?;
-
-        let new_posting_storage_file = data_dir.join("posting_id_storage.map");
-        let old_posting_storage_file = committed.posting_storage.get_backed_file();
-
-        if old_posting_storage_file != new_posting_storage_file {
-            std::fs::copy(&old_posting_storage_file, &new_posting_storage_file).with_context(
-                || {
-                    format!(
-                        "Cannot copy posting storage file: old {old_posting_storage_file:?} -> new {new_posting_storage_file:?}"
-                    )
-                },
-            )?;
-        }
-        let posting_storage = PostingIdStorage::load(new_posting_storage_file)
-            .context("Cannot load posting storage")?;
-        let mut posting_id_generator = posting_storage.get_max_posting_id() + 1;
-        let posting_storage = RefCell::new(posting_storage);
-
-        let committed_iter = committed.index.iter();
-        let merged_iterator = MergedIterator::new(
-            uncommitted_iter,
-            committed_iter,
-            |_, (_, positions_per_document_id)| {
-                let new_posting_list_id = posting_id_generator;
-                posting_id_generator += 1;
-
-                let mut lock = posting_storage.borrow_mut();
-                lock.insert(
-                    new_posting_list_id,
-                    positions_per_document_id
-                        .into_iter()
-                        .filter(|(doc_id, _)| !uncommitted_document_deletions.contains(doc_id))
-                        .map(|(doc_id, positions)| (doc_id, (positions.0 .0, positions.1 .0)))
-                        .collect(),
-                );
-
-                new_posting_list_id
-            },
-            |_, (_, positions_per_document_id), committed_posting_id| {
-                let mut lock = posting_storage.borrow_mut();
-                lock.merge(
-                    committed_posting_id,
-                    positions_per_document_id
-                        .into_iter()
-                        .map(|(doc_id, positions)| (doc_id, (positions.0 .0, positions.1 .0))),
-                    uncommitted_document_deletions,
-                );
-
-                committed_posting_id
-            },
-        );
-        let fst_file_path = data_dir.join("fst.map");
-        let index =
-            FSTIndex::from_iter(merged_iterator, fst_file_path).context("Cannot commit fst")?;
-
-        let new_document_lengths_per_document_file = data_dir.join("length_per_documents.map");
-        let old_document_lengths_per_document_file =
-            committed.document_lengths_per_document.get_backed_file();
-        if old_document_lengths_per_document_file != new_document_lengths_per_document_file {
-            std::fs::copy(
-                old_document_lengths_per_document_file,
-                &new_document_lengths_per_document_file,
-            )
-            .context("Cannot copy posting storage file")?;
-        }
-        let mut document_lengths_per_document =
-            DocumentLengthsPerDocument::load(new_document_lengths_per_document_file)
-                .context("Cannot load document lengths per document")?;
-        for (k, v) in length_per_documents {
-            document_lengths_per_document.insert(k, v);
-        }
-
-        let mut posting_storage = posting_storage.into_inner();
-
-        posting_storage.remove_doc_ids(uncommitted_document_deletions);
-        document_lengths_per_document.remove_doc_ids(uncommitted_document_deletions);
-
-        posting_storage.commit()?;
-        document_lengths_per_document.commit()?;
-
-        Ok(Self {
-            field_path,
-            index,
-            posting_storage,
-            document_lengths_per_document,
-            data_dir,
-        })
-    }
-
-    pub fn try_load(info: StringFieldInfo) -> Result<Self> {
-        let index = FSTIndex::load(info.data_dir.join("fst.map"))?;
-        let posting_storage = PostingIdStorage::load(info.data_dir.join("posting_id_storage.map"))?;
-        let document_lengths_per_document =
-            DocumentLengthsPerDocument::load(info.data_dir.join("length_per_documents.map"))?;
-
-        Ok(Self {
-            field_path: info.field_path,
-            index,
-            posting_storage,
-            document_lengths_per_document,
-            data_dir: info.data_dir,
-        })
-    }
-
-    pub fn field_path(&self) -> Box<[String]> {
-        self.field_path.clone()
-    }
-
-    pub fn global_info(&self) -> GlobalInfo {
-        self.document_lengths_per_document.global_info.clone()
-    }
-
-    pub fn search(
-        &self,
-        context: &mut FullTextSearchContext<'_, '_>,
-        scorer: &mut BM25Scorer<DocumentId>,
-        tolerance: Option<u8>,
-    ) -> Result<()> {
-        if context.tokens.is_empty() {
-            return Ok(());
-        }
-
-        if context.tokens.len() == 1 {
-            self.search_without_phrase_match(context, scorer, tolerance)
-        } else {
-            self.search_with_phrase_match(context, scorer, tolerance)
+    fn global_info(&self) -> GlobalInfo {
+        match self {
+            StringLayout::Fst(boxed) => boxed.2.get_global_info().clone(),
         }
     }
 
@@ -444,43 +62,41 @@ impl LoadedCommittedStringField {
         let total_documents_with_field = context.global_info.total_documents as f32;
         let average_field_length = total_field_length / total_documents_with_field;
 
+        let (index, posting_storage, document_lengths_per_document) = match self {
+            StringLayout::Fst(boxed) => (&boxed.0, &boxed.1, &boxed.2),
+        };
+
         for token in context.tokens {
             context.increment_term_count();
 
             let iter: Box<dyn Iterator<Item = (bool, u64)>> = if context.exact_match {
-                if let Some(posting_list_id) = self.index.search_exact(token) {
+                if let Some(posting_list_id) = index.search_exact(token) {
                     Box::new(vec![(true, posting_list_id)].into_iter())
                 } else {
                     Box::new(std::iter::empty())
                 }
             } else {
-                self.index
+                index
                     .search(token, tolerance)
                     .context("Cannot search in index")?
             };
 
             let matches = iter
                 .flat_map(|(is_exact, posting_list_id)| {
-                    self.posting_storage
+                    posting_storage
                         .get_posting(&posting_list_id)
                         .into_iter()
                         .map(move |posting| (is_exact, posting))
                 })
                 .flat_map(|(is_exact, postings)| {
-                    let uncommitted_deleted_documents = context.uncommitted_deleted_documents;
+                    let search_document_context = context.search_document_context;
                     let exact_match = context.exact_match;
-                    let filtered_doc_ids = context.filtered_doc_ids;
 
                     postings
                         .iter()
-                        .filter(move |(doc_id, _)| {
-                            filtered_doc_ids
-                                .is_none_or(|filtered_doc_ids| filtered_doc_ids.contains(doc_id))
-                        })
-                        .filter(|(doc_id, _)| !uncommitted_deleted_documents.contains(doc_id))
+                        .filter(move |(doc_id, _)| search_document_context.should_include(doc_id))
                         .filter_map(move |(doc_id, positions)| {
-                            let field_length =
-                                self.document_lengths_per_document.get_length(doc_id);
+                            let field_length = document_lengths_per_document.get_length(doc_id);
                             let term_occurrence_in_field = if exact_match {
                                 positions.0.len() as u32
                             } else {
@@ -533,6 +149,9 @@ impl LoadedCommittedStringField {
         let total_field_length = context.global_info.total_document_length as f32;
         let total_documents_with_field = context.global_info.total_documents as f32;
         let average_field_length = total_field_length / total_documents_with_field;
+        let (index, posting_storage, document_lengths_per_document) = match self {
+            StringLayout::Fst(boxed) => (&boxed.0, &boxed.1, &boxed.2),
+        };
 
         struct PhraseMatchStorage {
             positions: HashSet<usize>,
@@ -545,40 +164,34 @@ impl LoadedCommittedStringField {
             context.increment_term_count();
 
             let iter: Box<dyn Iterator<Item = (bool, u64)>> = if context.exact_match {
-                if let Some(posting_list_id) = self.index.search_exact(token) {
+                if let Some(posting_list_id) = index.search_exact(token) {
                     Box::new(vec![(true, posting_list_id)].into_iter())
                 } else {
                     Box::new(std::iter::empty())
                 }
             } else {
-                self.index
+                index
                     .search(token, tolerance)
                     .context("Cannot search in index")?
             };
 
             let iter = iter
                 .filter_map(|(is_exact, posting_id)| {
-                    self.posting_storage
+                    posting_storage
                         .get_posting(&posting_id)
                         .map(move |posting| (is_exact, posting))
                 })
                 .flat_map(|(is_exact, postings)| {
                     let total_documents_with_term_in_field = postings.len();
 
-                    let uncommitted_deleted_documents = context.uncommitted_deleted_documents;
+                    let search_document_context = context.search_document_context;
                     let exact_match = context.exact_match;
-                    let filtered_doc_ids = context.filtered_doc_ids;
 
                     postings
                         .iter()
-                        .filter(move |(doc_id, _)| {
-                            filtered_doc_ids
-                                .is_none_or(|filtered_doc_ids| filtered_doc_ids.contains(doc_id))
-                        })
-                        .filter(|(doc_id, _)| !uncommitted_deleted_documents.contains(doc_id))
+                        .filter(move |(doc_id, _)| search_document_context.should_include(doc_id))
                         .filter_map(move |(doc_id, positions)| {
-                            let field_lenght =
-                                self.document_lengths_per_document.get_length(doc_id);
+                            let field_lenght = document_lengths_per_document.get_length(doc_id);
 
                             let positions: Vec<usize> = if exact_match {
                                 positions.0.to_vec()
@@ -699,23 +312,323 @@ impl LoadedCommittedStringField {
     }
 }
 
-impl LoadedField for LoadedCommittedStringField {
-    type Stats = CommittedStringFieldStats;
-    type Info = StringFieldInfo;
+enum StringStatus {
+    Loaded(StringLayout),
+    Unloaded,
+}
 
-    fn stats(&self) -> Self::Stats {
-        let key_count = self.index.len();
-        CommittedStringFieldStats {
-            key_count,
-            global_info: self.global_info(),
-            loaded: true,
+pub struct CommittedStringField {
+    metadata: StringFieldInfo,
+    stats: CommittedStringFieldStats,
+    status: OramaSyncLock<StringStatus>,
+    invocation_counter: InvocationCounter,
+    unload_window: Duration,
+}
+
+impl CommittedStringField {
+    pub fn try_load(metadata: StringFieldInfo, offload_config: OffloadFieldConfig) -> Result<Self> {
+        let layout = load_layout(&metadata.data_dir).context("Cannot load vector layout")?;
+
+        Ok(Self {
+            metadata,
+            stats: CommittedStringFieldStats {
+                key_count: layout.key_count(),
+                global_info: layout.global_info(),
+                loaded: AtomicBool::new(true),
+            },
+            status: OramaSyncLock::new("string_inner", StringStatus::Loaded(layout)),
+            invocation_counter: create_counter(offload_config),
+            unload_window: offload_config.unload_window.into(),
+        })
+    }
+
+    pub fn from_uncommitted(
+        uncommitted: &UncommittedStringField,
+        data_dir: PathBuf,
+        uncommitted_document_deletions: &HashSet<DocumentId>,
+        offload_config: OffloadFieldConfig,
+    ) -> Result<Self> {
+        let mut length_per_documents = uncommitted.field_length_per_doc();
+
+        let mut posting_id_generator = 0;
+
+        create_if_not_exists(&data_dir)?;
+
+        let mut delta_committed_storage: HashMap<u64, Vec<(DocumentId, PostingIdPosition)>> =
+            Default::default();
+        let iter = uncommitted.iter().map(|(key, value)| {
+            let new_posting_list_id = posting_id_generator;
+            posting_id_generator += 1;
+
+            delta_committed_storage.insert(
+                new_posting_list_id,
+                value
+                    .1
+                    .iter()
+                    .filter(|(doc_id, _)| !uncommitted_document_deletions.contains(doc_id))
+                    .map(|(doc_id, positions)| {
+                        (*doc_id, (positions.0 .0.clone(), positions.1 .0.clone()))
+                    })
+                    .collect(),
+            );
+
+            (key, new_posting_list_id)
+        });
+
+        for doc_id in uncommitted_document_deletions {
+            length_per_documents.remove(doc_id);
+        }
+
+        let posting_id_storage_file_path = data_dir.join(POSTING_ID_INDEX_FILE_NAME);
+        let length_per_documents_file_path = data_dir.join(DOCUMENT_LENGTHS_PER_DOCUMENT_FILE_NAME);
+        let fst_file_path = data_dir.join(FST_INDEX_FILE_NAME);
+
+        let index = FSTIndex::from_iter(iter, fst_file_path).context("Cannot commit fst")?;
+        let document_lengths_per_document = DocumentLengthsPerDocument::from_map(
+            Map::from_hash_map(length_per_documents, length_per_documents_file_path)
+                .context("Cannot commit document lengths per document storage")?,
+        );
+        let posting_storage = PostingIdStorage::from_map(
+            Map::from_hash_map(delta_committed_storage, posting_id_storage_file_path)
+                .context("Cannot commit posting id storage")?,
+        );
+
+        Ok(Self {
+            metadata: StringFieldInfo {
+                field_path: uncommitted.field_path().to_vec().into_boxed_slice(),
+                data_dir,
+            },
+            stats: CommittedStringFieldStats {
+                key_count: index.len(),
+                global_info: document_lengths_per_document.get_global_info().clone(),
+                loaded: AtomicBool::new(true),
+            },
+            status: OramaSyncLock::new(
+                "string_inner",
+                StringStatus::Loaded(StringLayout::Fst(Box::new((
+                    index,
+                    posting_storage,
+                    document_lengths_per_document,
+                )))),
+            ),
+            unload_window: offload_config.unload_window.into(),
+            invocation_counter: create_counter(offload_config),
+        })
+    }
+
+    pub fn add_uncommitted(
+        &self,
+        uncommitted: &UncommittedStringField,
+        data_dir: PathBuf,
+        uncommitted_document_deletions: &HashSet<DocumentId>,
+        offload_config: OffloadFieldConfig,
+    ) -> Result<Self> {
+        debug_assert_eq!(uncommitted.field_path(), self.metadata.field_path.as_ref(),);
+
+        let length_per_documents = uncommitted.field_length_per_doc();
+
+        create_if_not_exists(&data_dir)
+            .context("Cannot create data directory for committed string field")?;
+
+        let new_posting_storage_file = data_dir.join(POSTING_ID_INDEX_FILE_NAME);
+
+        let lock = self.status.read("commit").unwrap();
+        let vector_status = &**lock;
+        let current_layout = match vector_status {
+            StringStatus::Loaded(layout) => Cow::Borrowed(layout),
+            StringStatus::Unloaded => Cow::Owned(load_layout(&self.metadata.data_dir)?),
+        };
+
+        let old_posting_storage_file = match &*current_layout {
+            StringLayout::Fst(boxed) => boxed.1.get_backed_file(),
+        };
+        if old_posting_storage_file != new_posting_storage_file {
+            // `std::fs::copy` has a problem when source and destination are the same file.
+            // So we check first if they are different.
+            // Otherwise, the file will be trunked.
+            std::fs::copy(&old_posting_storage_file, &new_posting_storage_file).with_context(
+                || {
+                    format!(
+                        "Cannot copy posting storage file: old {old_posting_storage_file:?} -> new {new_posting_storage_file:?}"
+                    )
+                },
+            )?;
+        }
+        let posting_storage = PostingIdStorage::load(new_posting_storage_file)
+            .context("Cannot load posting storage")?;
+        let mut posting_id_generator = posting_storage.get_max_posting_id() + 1;
+        let posting_storage = RefCell::new(posting_storage);
+
+        let committed_iter = match &*current_layout {
+            StringLayout::Fst(boxed) => boxed.0.iter(),
+        };
+
+        let merged_iterator = MergedIterator::new(
+            uncommitted.iter(),
+            committed_iter,
+            |_, (_, positions_per_document_id)| {
+                let new_posting_list_id = posting_id_generator;
+                posting_id_generator += 1;
+
+                let mut lock = posting_storage.borrow_mut();
+                lock.insert(
+                    new_posting_list_id,
+                    positions_per_document_id
+                        .iter()
+                        .filter(|(doc_id, _)| !uncommitted_document_deletions.contains(doc_id))
+                        .map(|(doc_id, positions)| {
+                            (*doc_id, (positions.0 .0.clone(), positions.1 .0.clone()))
+                        })
+                        .collect(),
+                );
+
+                new_posting_list_id
+            },
+            |_, (_, positions_per_document_id), committed_posting_id| {
+                let mut lock = posting_storage.borrow_mut();
+                lock.merge(
+                    committed_posting_id,
+                    positions_per_document_id.iter().map(|(doc_id, positions)| {
+                        (*doc_id, (positions.0 .0.clone(), positions.1 .0.clone()))
+                    }),
+                    uncommitted_document_deletions,
+                );
+
+                committed_posting_id
+            },
+        );
+        let fst_file_path = data_dir.join("fst.map");
+        let index =
+            FSTIndex::from_iter(merged_iterator, fst_file_path).context("Cannot commit fst")?;
+
+        let new_document_lengths_per_document_file = data_dir.join("length_per_documents.map");
+        let old_document_lengths_per_document_file = match &*current_layout {
+            StringLayout::Fst(boxed) => boxed.2.get_backed_file(),
+        };
+        if old_document_lengths_per_document_file != new_document_lengths_per_document_file {
+            // `std::fs::copy` has a problem when source and destination are the same file.
+            // So we check first if they are different.
+            // Otherwise, the file will be trunked.
+            std::fs::copy(
+                old_document_lengths_per_document_file,
+                &new_document_lengths_per_document_file,
+            )
+            .context("Cannot copy posting storage file")?;
+        }
+        let mut document_lengths_per_document =
+            DocumentLengthsPerDocument::load(new_document_lengths_per_document_file)
+                .context("Cannot load document lengths per document")?;
+        for (k, v) in length_per_documents {
+            document_lengths_per_document.insert(k, v);
+        }
+
+        let mut posting_storage = posting_storage.into_inner();
+
+        posting_storage.remove_doc_ids(uncommitted_document_deletions);
+        document_lengths_per_document.remove_doc_ids(uncommitted_document_deletions);
+
+        posting_storage.commit()?;
+        document_lengths_per_document.commit()?;
+
+        Ok(Self {
+            metadata: StringFieldInfo {
+                field_path: self.metadata.field_path.clone(),
+                data_dir,
+            },
+            stats: CommittedStringFieldStats {
+                key_count: index.len(),
+                global_info: document_lengths_per_document.get_global_info().clone(),
+                loaded: AtomicBool::new(true),
+            },
+            status: OramaSyncLock::new(
+                "string_inner",
+                StringStatus::Loaded(StringLayout::Fst(Box::new((
+                    index,
+                    posting_storage,
+                    document_lengths_per_document,
+                )))),
+            ),
+            unload_window: offload_config.unload_window.into(),
+            invocation_counter: create_counter(offload_config),
+        })
+    }
+
+    pub fn get_field_info(&self) -> StringFieldInfo {
+        self.metadata.clone()
+    }
+
+    pub fn stats(&self) -> &CommittedStringFieldStats {
+        &self.stats
+    }
+
+    fn unload(&self) {
+        let lock = self.status.read("unload_if_not_used").unwrap();
+        // This field is already unloaded. Skip.
+        if let StringStatus::Unloaded = &**lock {
+            return;
+        }
+        drop(lock); // Release the read lock before unloading
+
+        let mut lock = self.status.write("unload").unwrap();
+        // Double check if another thread unloaded the field meanwhile.
+        if let StringStatus::Unloaded = &**lock {
+            return;
+        }
+
+        self.stats
+            .loaded
+            .store(false, std::sync::atomic::Ordering::Release);
+
+        **lock = StringStatus::Unloaded;
+    }
+
+    pub fn unload_if_not_used(&self) {
+        // Some invocations happened recently, do not unload.
+        if should_offload(&self.invocation_counter, self.unload_window) {
+            self.unload();
         }
     }
 
-    fn info(&self) -> Self::Info {
-        StringFieldInfo {
-            field_path: self.field_path.clone(),
-            data_dir: self.data_dir.clone(),
+    pub fn search(
+        &self,
+        context: &mut FullTextSearchContext<'_, '_>,
+        scorer: &mut BM25Scorer<DocumentId>,
+        tolerance: Option<u8>,
+    ) -> Result<()> {
+        update_invocation_counter(&self.invocation_counter);
+        if context.tokens.is_empty() {
+            return Ok(());
+        }
+
+        let lock = self.status.read("search").unwrap();
+        let lock = if let StringStatus::Unloaded = &**lock {
+            drop(lock); // Release the read lock before loading
+
+            let layout = load_layout(&self.metadata.data_dir)?;
+            let mut write_lock = self.status.write("load").unwrap();
+            **write_lock = StringStatus::Loaded(layout);
+            self.stats
+                .loaded
+                .store(true, std::sync::atomic::Ordering::Release);
+            drop(write_lock); // Release the write lock
+
+            self.status.read("search").unwrap()
+        } else {
+            lock
+        };
+        let vector_status = &**lock;
+        let layout = match vector_status {
+            StringStatus::Loaded(layout) => layout,
+            StringStatus::Unloaded => {
+                // This never happens because of the logic above.
+                return Err(anyhow!("Cannot search unloaded vector field"));
+            }
+        };
+
+        if context.tokens.len() == 1 {
+            layout.search_without_phrase_match(context, scorer, tolerance)
+        } else {
+            layout.search_with_phrase_match(context, scorer, tolerance)
         }
     }
 }
@@ -723,64 +636,43 @@ impl LoadedField for LoadedCommittedStringField {
 // (exact positions, stemmed positions)
 type PostingIdPosition = (Vec<usize>, Vec<usize>);
 
-#[derive(Debug)]
-struct PostingIdStorage {
-    // id -> (doc_id, (exact positions, stemmed positions))
-    inner: Map<u64, Vec<(DocumentId, PostingIdPosition)>>,
+#[derive(Serialize, Debug)]
+pub struct CommittedStringFieldStats {
+    pub key_count: usize,
+    pub global_info: GlobalInfo,
+    pub loaded: AtomicBool,
 }
-impl PostingIdStorage {
-    fn from_map(inner: Map<u64, Vec<(DocumentId, PostingIdPosition)>>) -> Self {
-        Self { inner }
-    }
 
-    fn load(file_path: PathBuf) -> Result<Self> {
-        Ok(Self {
-            inner: Map::load(file_path)?,
-        })
-    }
+const FST_INDEX_FILE_NAME: &str = "fst.map";
+const POSTING_ID_INDEX_FILE_NAME: &str = "posting_id_storage.map";
+const DOCUMENT_LENGTHS_PER_DOCUMENT_FILE_NAME: &str = "length_per_documents.map";
 
-    fn commit(&self) -> Result<()> {
-        self.inner.commit()
-    }
+fn load_layout(data_dir: &Path) -> Result<StringLayout> {
+    let index = FSTIndex::load(data_dir.join(FST_INDEX_FILE_NAME))?;
+    let posting_storage = PostingIdStorage::load(data_dir.join(POSTING_ID_INDEX_FILE_NAME))?;
+    let document_lengths_per_document =
+        DocumentLengthsPerDocument::load(data_dir.join(DOCUMENT_LENGTHS_PER_DOCUMENT_FILE_NAME))?;
 
-    fn get_posting(&self, posting_id: &u64) -> Option<&Vec<(DocumentId, PostingIdPosition)>> {
-        self.inner.get(posting_id)
-    }
+    Ok(StringLayout::Fst(Box::new((
+        index,
+        posting_storage,
+        document_lengths_per_document,
+    ))))
+}
 
-    fn get_backed_file(&self) -> PathBuf {
-        self.inner.file_path()
-    }
-
-    fn get_max_posting_id(&self) -> u64 {
-        self.inner.get_max_key().copied().unwrap_or(0)
-    }
-
-    fn insert(&mut self, posting_id: u64, posting: Vec<(DocumentId, PostingIdPosition)>) {
-        self.inner.insert(posting_id, posting);
-    }
-
-    fn remove_doc_ids(&mut self, doc_ids: &HashSet<DocumentId>) {
-        self.inner.remove_inner_keys(doc_ids);
-    }
-
-    fn merge(
-        &mut self,
-        posting_id: u64,
-        posting: impl Iterator<Item = (DocumentId, PostingIdPosition)>,
-        uncommitted_document_deletions: &HashSet<DocumentId>,
-    ) {
-        self.inner
-            .merge(posting_id, posting, uncommitted_document_deletions);
-    }
+#[derive(Debug, Serialize, Deserialize)]
+pub struct StringFilterFieldInfo {
+    pub field_path: Box<[String]>,
+    pub data_dir: PathBuf,
 }
 
 #[derive(Debug)]
-struct DocumentLengthsPerDocument {
+pub struct DocumentLengthsPerDocument {
     inner: Map<DocumentId, u32>,
     global_info: GlobalInfo,
 }
 impl DocumentLengthsPerDocument {
-    fn from_map(inner: Map<DocumentId, u32>) -> Self {
+    pub fn from_map(inner: Map<DocumentId, u32>) -> Self {
         let total_documents = inner.len();
         let total_document_length = inner.values().map(|v| *v as usize).sum();
         Self {
@@ -792,24 +684,28 @@ impl DocumentLengthsPerDocument {
         }
     }
 
-    fn load(file_path: PathBuf) -> Result<Self> {
+    pub fn load(file_path: PathBuf) -> Result<Self> {
         let inner = Map::load(file_path)?;
         Ok(Self::from_map(inner))
     }
 
-    fn commit(&self) -> Result<()> {
+    pub fn get_global_info(&self) -> &GlobalInfo {
+        &self.global_info
+    }
+
+    pub fn commit(&self) -> Result<()> {
         self.inner.commit()
     }
 
-    fn get_length(&self, doc_id: &DocumentId) -> u32 {
+    pub fn get_length(&self, doc_id: &DocumentId) -> u32 {
         self.inner.get(doc_id).copied().unwrap_or(1)
     }
 
-    fn get_backed_file(&self) -> PathBuf {
+    pub fn get_backed_file(&self) -> PathBuf {
         self.inner.file_path()
     }
 
-    fn remove_doc_ids(&mut self, doc_ids: &HashSet<DocumentId>) {
+    pub fn remove_doc_ids(&mut self, doc_ids: &HashSet<DocumentId>) {
         for doc_id in doc_ids {
             self.global_info.total_documents -= 1;
             if let Some(a) = self.inner.remove(doc_id) {
@@ -818,10 +714,61 @@ impl DocumentLengthsPerDocument {
         }
     }
 
-    fn insert(&mut self, doc_id: DocumentId, len: u32) {
+    pub fn insert(&mut self, doc_id: DocumentId, len: u32) {
         self.global_info.total_documents += 1;
         self.global_info.total_document_length += len as usize;
         self.inner.insert(doc_id, len);
+    }
+}
+
+#[derive(Debug)]
+pub struct PostingIdStorage {
+    // id -> (doc_id, (exact positions, stemmed positions))
+    inner: Map<u64, Vec<(DocumentId, PostingIdPosition)>>,
+}
+impl PostingIdStorage {
+    pub fn from_map(inner: Map<u64, Vec<(DocumentId, PostingIdPosition)>>) -> Self {
+        Self { inner }
+    }
+
+    pub fn load(file_path: PathBuf) -> Result<Self> {
+        Ok(Self {
+            inner: Map::load(file_path)?,
+        })
+    }
+
+    pub fn commit(&self) -> Result<()> {
+        self.inner.commit()
+    }
+
+    pub fn get_posting(&self, posting_id: &u64) -> Option<&Vec<(DocumentId, PostingIdPosition)>> {
+        self.inner.get(posting_id)
+    }
+
+    pub fn get_backed_file(&self) -> PathBuf {
+        self.inner.file_path()
+    }
+
+    pub fn get_max_posting_id(&self) -> u64 {
+        self.inner.get_max_key().copied().unwrap_or(0)
+    }
+
+    pub fn insert(&mut self, posting_id: u64, posting: Vec<(DocumentId, PostingIdPosition)>) {
+        self.inner.insert(posting_id, posting);
+    }
+
+    pub fn remove_doc_ids(&mut self, doc_ids: &HashSet<DocumentId>) {
+        self.inner.remove_inner_keys(doc_ids);
+    }
+
+    pub fn merge(
+        &mut self,
+        posting_id: u64,
+        posting: impl Iterator<Item = (DocumentId, PostingIdPosition)>,
+        uncommitted_document_deletions: &HashSet<DocumentId>,
+    ) {
+        self.inner
+            .merge(posting_id, posting, uncommitted_document_deletions);
     }
 }
 
@@ -831,26 +778,24 @@ pub struct StringFieldInfo {
     pub data_dir: PathBuf,
 }
 
-#[derive(Serialize, Debug, Clone)]
-pub struct CommittedStringFieldStats {
-    pub key_count: usize,
-    pub global_info: GlobalInfo,
-    pub loaded: bool,
-}
-
 #[cfg(test)]
 mod tests {
     use crate::{
         collection_manager::sides::{
-            read::index::uncommitted_field::UncommittedStringField, Term, TermStringField,
+            read::{
+                index::uncommitted_field::UncommittedStringField, search::SearchDocumentContext,
+            },
+            Term, TermStringField,
         },
-        tests::utils::generate_new_path,
+        tests::utils::{generate_new_path, init_log},
     };
 
     use super::*;
 
     #[test]
     fn test_offload_string_field() {
+        init_log();
+
         let path = Box::new(["test".to_string()]);
         let mut uncommitted = UncommittedStringField::empty(path);
         uncommitted.insert(
@@ -885,14 +830,14 @@ mod tests {
             )]),
         );
 
+        let deleted_documents: HashSet<DocumentId> = HashSet::new();
         let mut search_context = FullTextSearchContext {
             tokens: &["term1".to_string()],
             exact_match: false,
             boost: 1.0,
             field_id: FieldId(1), // Use test field ID
-            filtered_doc_ids: None,
             global_info: uncommitted.global_info(),
-            uncommitted_deleted_documents: &HashSet::new(),
+            search_document_context: &SearchDocumentContext::new(&deleted_documents, None),
             total_term_count: 0,
         };
         use crate::types::FieldId;
@@ -908,17 +853,12 @@ mod tests {
             1.2, // k parameter
             1.0, // phrase boost
         );
-
         assert_eq!(scorer.get_scores().len(), 2);
-
-        let field_length_per_doc = uncommitted.field_length_per_doc();
 
         let data_dir = generate_new_path();
 
-        let committed = CommittedStringField::from_iter(
-            uncommitted.field_path().to_vec().into_boxed_slice(),
-            uncommitted.iter().map(|(n, v)| (n, v.clone())),
-            field_length_per_doc,
+        let committed = CommittedStringField::from_uncommitted(
+            &uncommitted,
             data_dir.clone(),
             &HashSet::new(),
             crate::collection_manager::sides::read::OffloadFieldConfig {
@@ -945,7 +885,11 @@ mod tests {
         assert_eq!(scorer.get_scores().len(), 2);
 
         committed.unload(); // force unloading
-        assert!(!committed.loaded());
+
+        let status_lock = committed.status.read("test").unwrap();
+        let status = &**status_lock;
+        assert!(matches!(status, StringStatus::Unloaded));
+        drop(status_lock);
 
         let mut scorer: BM25Scorer<DocumentId> = BM25Scorer::plain();
         committed

@@ -1,6 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use anyhow::Result;
+use oramacore_lib::data_structures::ShouldInclude;
 use serde::Serialize;
 use tracing::{debug, warn};
 use xtri::{RadixTree, SearchMode};
@@ -179,12 +180,7 @@ impl UncommittedStringField {
 
             for (_total_documents_with_term_in_field, position_per_document) in matches {
                 for (doc_id, positions) in position_per_document {
-                    if let Some(filtered_doc_ids) = context.filtered_doc_ids {
-                        if !filtered_doc_ids.contains(doc_id) {
-                            continue;
-                        }
-                    }
-                    if context.uncommitted_deleted_documents.contains(doc_id) {
+                    if context.search_document_context.should_exclude(doc_id) {
                         continue;
                     }
 

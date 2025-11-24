@@ -501,19 +501,12 @@ pub fn merge_string_field(
         (None, Some(_)) => {
             bail!("Both uncommitted field is None. Never should happen");
         }
-        (Some(uncommitted), None) => {
-            let length_per_documents = uncommitted.field_length_per_doc();
-            let iter = uncommitted.iter().map(|(n, v)| (n, v.clone()));
-
-            Ok(Some(CommittedStringField::from_iter(
-                uncommitted.field_path().to_vec().into_boxed_slice(),
-                iter,
-                length_per_documents,
-                data_dir,
-                uncommitted_document_deletions,
-                *offload_config,
-            )?))
-        }
+        (Some(uncommitted), None) => Ok(Some(CommittedStringField::from_uncommitted(
+            uncommitted,
+            data_dir,
+            uncommitted_document_deletions,
+            *offload_config,
+        )?)),
         (Some(uncommitted), Some(committed)) => {
             if uncommitted.is_empty() {
                 if is_promoted {
@@ -551,27 +544,15 @@ pub fn merge_string_field(
                 return Ok(None);
             }
 
-            let length_per_documents = uncommitted.field_length_per_doc();
-            let iter = uncommitted.iter().map(|(n, v)| (n, v.clone()));
-
-            // uncommitted and committed field_path has to be the same
-            debug_assert_eq!(
-                uncommitted.field_path(),
-                committed.field_path().as_ref(),
-                "Uncommitted and committed field paths should be the same",
-            );
-
             Ok(Some(
-                CommittedStringField::from_iter_and_committed(
-                    uncommitted.field_path().to_vec().into_boxed_slice(),
-                    iter,
-                    committed,
-                    length_per_documents,
-                    data_dir,
-                    uncommitted_document_deletions,
-                    *offload_config,
-                )
-                .context("Failed to merge string field")?,
+                committed
+                    .add_uncommitted(
+                        uncommitted,
+                        data_dir,
+                        uncommitted_document_deletions,
+                        *offload_config,
+                    )
+                    .context("Failed to merge string field")?,
             ))
         }
     }
@@ -610,56 +591,42 @@ pub fn merge_vector_field(
                 return Ok(None);
             }
 
-            let mut info = committed.get_field_info();
+            let mut info = committed.metadata();
             if uncommitted.is_empty() {
-                if is_promoted {
-                    create_if_not_exists(&data_dir)
-                        .context("Failed to create data directory for vector field")?;
-
-                    debug_assert_ne!(
-                        info.data_dir,
-                        data_dir,
-                        "when promoting, data_dir should be different from the one in the field info"
-                    );
-
-                    create_if_not_exists(&data_dir)
-                        .context("Failed to create data directory for vector field")?;
-
-                    let old_dir = info.data_dir;
-
-                    // Copy the data from the old directory to the new one
-                    let options = CopyOptions::new()
-                        // BAD: this is bad because if a crash happens during the copy,
-                        // the data will be corrupted
-                        // Instead we should... ???? WHAT?
-                        // TODO: check if this is the right way to do it
-                        .overwrite(true);
-                    copy_items(&[old_dir], data_dir.parent().unwrap(), &options)?;
-                    // And move the field to the new directory
-                    info.data_dir = data_dir;
-
-                    return Ok(Some(
-                        CommittedVectorField::try_load(info, *offload_config)
-                            .context("Failed to load committed vector field")?,
-                    ));
+                if !is_promoted {
+                    // Nothing to merge, return None
+                    return Ok(None);
                 }
 
-                return Ok(None);
+                create_if_not_exists(&data_dir)
+                    .context("Failed to create data directory for vector field")?;
+
+                debug_assert_ne!(
+                    info.data_dir, data_dir,
+                    "when promoting, data_dir should be different from the one in the field info"
+                );
+
+                create_if_not_exists(&data_dir)
+                    .context("Failed to create data directory for vector field")?;
+
+                let old_dir = info.data_dir;
+
+                // Copy the data from the old directory to the new one
+                let options = CopyOptions::new()
+                    // BAD: this is bad because if a crash happens during the copy,
+                    // the data will be corrupted
+                    // Instead we should... ???? WHAT?
+                    // TODO: check if this is the right way to do it
+                    .overwrite(true);
+                copy_items(&[old_dir], data_dir.parent().unwrap(), &options)?;
+                // And move the field to the new directory
+                info.data_dir = data_dir;
+
+                return Ok(Some(
+                    CommittedVectorField::try_load(info, *offload_config)
+                        .context("Failed to load committed vector field")?,
+                ));
             }
-
-            // uncommitted and committed field_path has to be the same
-            debug_assert_eq!(
-                uncommitted.field_path(),
-                committed.field_path().as_ref(),
-                "Uncommitted and committed field paths should be the same",
-            );
-
-            // uncommitted and committed model has to be the same
-            debug_assert_eq!(
-                uncommitted.get_model(),
-                info.model,
-                "Uncommitted and committed models should be the same",
-            );
 
             let new_field = committed.add_uncommitted(
                 uncommitted,

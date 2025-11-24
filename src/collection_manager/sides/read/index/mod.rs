@@ -1,8 +1,7 @@
 use chrono::{DateTime, Utc};
 use committed_field::{
-    BoolFieldInfo, CommittedBoolField, CommittedNumberField, CommittedStringField,
-    CommittedStringFilterField, CommittedVectorField, NumberFieldInfo, StringFieldInfo,
-    StringFilterFieldInfo, VectorFieldInfo,
+    BoolFieldInfo, CommittedBoolField, CommittedNumberField, CommittedStringFilterField,
+    NumberFieldInfo, StringFilterFieldInfo, VectorFieldInfo,
 };
 use futures::join;
 use group::Groupable;
@@ -26,11 +25,12 @@ use crate::{
                 context::ReadSideContext,
                 index::{
                     committed_field::{
-                        CommittedDateField, CommittedGeoPointField, DateFieldInfo,
-                        GeoPointFieldInfo,
+                        CommittedDateField, CommittedGeoPointField, CommittedStringField,
+                        CommittedVectorField, DateFieldInfo, GeoPointFieldInfo, StringFieldInfo,
                     },
                     merge::{merge_date_field, merge_geopoint_field},
                 },
+                search::SearchDocumentContext,
                 ReadError,
             },
             write::index::EnumStrategy,
@@ -338,6 +338,9 @@ impl Index {
     }
 
     pub async fn get_all_document_ids(&self) -> Result<Vec<DocumentId>> {
+        let search_document_context =
+            SearchDocumentContext::new(&self.uncommitted_deleted_documents, None);
+
         let properties = Properties::default();
         let properties = self.calculate_string_properties(&properties).await?;
         let output = self
@@ -348,8 +351,7 @@ impl Index {
                 None,
                 properties,
                 Default::default(),
-                None,
-                &Default::default(),
+                &search_document_context,
             )
             .await
             .expect("Failed to get all documents");
@@ -826,7 +828,7 @@ impl Index {
                 MergeResult::Changed(merged) => {
                     #[cfg(debug_assertions)]
                     {
-                        let data_dir = merged.get_field_info().data_dir;
+                        let data_dir = merged.metadata().data_dir;
                         let offset_str = data_dir.components().rev().nth(1).unwrap();
                         assert_eq!(
                             offset_str.as_os_str().to_str().unwrap(),
@@ -882,7 +884,7 @@ impl Index {
             vector_field_ids: committed_fields
                 .vector_fields
                 .iter()
-                .map(|(k, v)| (*k, v.get_field_info()))
+                .map(|(k, v)| (*k, v.metadata()))
                 .collect(),
             // Not used anymore. We calculate it on the fly
             path_to_index_id_map: Vec::new(),
@@ -954,7 +956,7 @@ impl Index {
                 committed_fields
                     .vector_fields
                     .values()
-                    .map(|f| f.get_field_info().data_dir),
+                    .map(|f| f.metadata().data_dir),
             )
             .map(|f| f.parent().unwrap().to_path_buf())
             .collect();
@@ -1313,6 +1315,9 @@ impl Index {
             .await
             .with_context(|| format!("Cannot calculate filtered doc in index {:?}", self.id))?;
 
+        let search_document_context =
+            SearchDocumentContext::new(uncommitted_deleted_documents, filtered_doc_ids);
+
         // Manage the "auto" search mode. OramaCore will automatically determine
         // wether to use full text search, vector search or hybrid search.
         let search_mode: SearchMode = match &search_params.mode {
@@ -1371,8 +1376,7 @@ impl Index {
                         search_mode.tolerance,
                         properties,
                         boost,
-                        filtered_doc_ids.as_ref(),
-                        uncommitted_deleted_documents,
+                        &search_document_context,
                     )
                     .await?,
                 )
@@ -1384,9 +1388,8 @@ impl Index {
                         &search_mode.term,
                         vector_properties,
                         search_mode.similarity,
-                        filtered_doc_ids.as_ref(),
                         search_params.limit,
-                        uncommitted_deleted_documents,
+                        &search_document_context,
                     )
                     .await?,
                 )
@@ -1402,9 +1405,8 @@ impl Index {
                         &search_mode.term,
                         vector_properties,
                         search_mode.similarity,
-                        filtered_doc_ids.as_ref(),
                         search_params.limit,
-                        uncommitted_deleted_documents
+                        &search_document_context,
                     ),
                     self.search_full_text(
                         &search_mode.term,
@@ -1413,8 +1415,7 @@ impl Index {
                         search_mode.tolerance,
                         string_properties,
                         boost,
-                        filtered_doc_ids.as_ref(),
-                        uncommitted_deleted_documents,
+                        &search_document_context,
                     )
                 );
                 let vector = vector?;
@@ -1577,19 +1578,32 @@ impl Index {
             }
         }));
         fields_stats.extend(committed_fields.string_fields.iter().map(|(k, v)| {
-            let path = v.field_path().join(".");
+            let path = v.get_field_info().field_path.join(".");
+            let stats = v.stats();
+            let stats = CommittedStringFieldStats {
+                global_info: stats.global_info.clone(),
+                key_count: stats.key_count,
+                loaded: AtomicBool::new(stats.loaded.load(Ordering::Acquire)),
+            };
             IndexFieldStats {
                 field_id: *k,
                 field_path: path,
-                stats: IndexFieldStatsType::CommittedString(v.stats()),
+                stats: IndexFieldStatsType::CommittedString(stats),
             }
         }));
         fields_stats.extend(committed_fields.vector_fields.iter().map(|(k, v)| {
-            let path = v.field_path().join(".");
+            let path = v.metadata().field_path.join(".");
+            let stats = v.stats();
+            let stats = CommittedVectorFieldStats {
+                dimensions: stats.dimensions,
+                vector_count: stats.vector_count,
+                loaded: AtomicBool::new(stats.loaded.load(Ordering::Acquire)),
+                layout: stats.layout,
+            };
             IndexFieldStats {
                 field_id: *k,
                 field_path: path,
-                stats: IndexFieldStatsType::CommittedVector(v.stats()),
+                stats: IndexFieldStatsType::CommittedVector(stats),
             }
         }));
 
@@ -2325,8 +2339,7 @@ impl Index {
         tolerance: Option<u8>,
         properties: Vec<FieldId>,
         boost: HashMap<FieldId, f32>,
-        filtered_doc_ids: Option<&FilterResult<DocumentId>>,
-        uncommitted_deleted_documents: &HashSet<DocumentId>,
+        search_document_context: &SearchDocumentContext<'_, DocumentId>,
     ) -> Result<HashMap<DocumentId, f32>> {
         let uncommitted_fields = self.uncommitted_fields.read("search_fulltext").await;
         let committed_fields = self.committed_fields.read("search_fulltext").await;
@@ -2374,7 +2387,7 @@ impl Index {
                 // Compute global info only once per field
                 if !field_global_info.contains_key(field_id) {
                     let global_info = if let Some(committed) = committed {
-                        committed.global_info() + field.global_info()
+                        committed.stats().global_info.clone() + field.global_info()
                     } else {
                         field.global_info()
                     };
@@ -2389,10 +2402,9 @@ impl Index {
                     exact_match: exact,
                     boost: 1.0,
                     field_id: *field_id,
-                    filtered_doc_ids: None,
                     global_info: field_global_info[field_id].clone(),
-                    uncommitted_deleted_documents,
                     total_term_count: 1,
+                    search_document_context,
                 };
 
                 field
@@ -2434,10 +2446,9 @@ impl Index {
                     exact_match: exact,
                     boost,
                     field_id: *field_id,
-                    filtered_doc_ids,
                     global_info,
-                    uncommitted_deleted_documents,
                     total_term_count: term_index as u64 + 1,
+                    search_document_context,
                 };
 
                 // Search this field for this specific term (with filters applied)
@@ -2484,9 +2495,8 @@ impl Index {
         term: &str,
         properties: Vec<FieldId>,
         similarity: Similarity,
-        filtered_doc_ids: Option<&FilterResult<DocumentId>>,
         limit: Limit,
-        uncommitted_deleted_documents: &HashSet<DocumentId>,
+        search_document_context: &SearchDocumentContext<'_, DocumentId>,
     ) -> Result<HashMap<DocumentId, f32>> {
         let mut output: HashMap<DocumentId, f32> = HashMap::new();
 
@@ -2514,21 +2524,14 @@ impl Index {
                 .calculate_embeddings(vec![term.to_string()], Intent::Query, model)?;
 
             for target in targets {
-                uncommitted.search(
-                    &target,
-                    similarity.0,
-                    filtered_doc_ids,
-                    &mut output,
-                    uncommitted_deleted_documents,
-                )?;
+                uncommitted.search(&target, similarity.0, search_document_context, &mut output)?;
                 if let Some(committed) = committed {
                     committed.search(
                         &target,
                         similarity.0,
                         limit.0,
-                        filtered_doc_ids,
+                        search_document_context,
                         &mut output,
-                        uncommitted_deleted_documents,
                     )?;
                 }
             }
@@ -2536,21 +2539,6 @@ impl Index {
 
         Ok(output)
     }
-
-    /*
-    pub async fn get_pin_rule_ids(&self) -> Vec<String> {
-        let pin_rules_reader = self.pin_rules_reader.read("get_pin_rule_ids").await;
-        pin_rules_reader.get_rule_ids()
-    }
-
-    pub async fn get_read_lock_on_pin_rules(
-        &self,
-    ) -> OramaAsyncLockReadGuard<'_, PinRulesReader<DocumentId>> {
-        self.pin_rules_reader
-            .read("get_read_lock_on_pin_rules")
-            .await
-    }
-    */
 }
 
 #[derive(Serialize, Debug)]
