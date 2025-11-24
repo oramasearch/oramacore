@@ -10,9 +10,7 @@ use crate::collection_manager::sides::read::collection::ReadIndexesLockGuard;
 use crate::collection_manager::sides::read::sort::sort_iter::MergeSortedIterator;
 use crate::collection_manager::sides::read::ReadError;
 use crate::types::SearchParams;
-use crate::{
-    types::{DocumentId, Number, SortBy, TokenScore},
-};
+use crate::types::{DocumentId, Number, SortBy, TokenScore};
 use oramacore_lib::pin_rules::Consequence;
 
 /// Context structure that encapsulates all parameters needed for sorting operations
