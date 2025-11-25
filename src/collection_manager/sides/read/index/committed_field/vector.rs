@@ -278,8 +278,8 @@ impl CommittedVectorField {
                 model: uncommitted.get_model(),
             },
             stats: CommittedVectorFieldStats {
-                dimensions: uncommitted.dimension,
-                vector_count: uncommitted.len() - uncommitted_document_deletions.len(),
+                dimensions: layout.dim(),
+                vector_count: layout.len(),
                 loaded: AtomicBool::new(true),
                 layout: layout.as_layout_type(),
             },
