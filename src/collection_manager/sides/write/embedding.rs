@@ -114,7 +114,9 @@ where
             })
             .collect::<Vec<_>>();
         if let Err(e) = op_sender.send_batch(ops).await {
-            error!(error = ?e, "Failed to send embedding batch");
+            if cfg!(not(test)) {
+                error!(error = ?e, "Failed to send embedding batch");
+            }
         }
     }
 

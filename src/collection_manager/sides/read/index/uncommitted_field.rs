@@ -13,5 +13,3 @@ mod number;
 mod string;
 mod string_filter;
 mod vector;
-
-pub use string::{Positions, TotalDocumentsWithTermInField};

@@ -23,8 +23,8 @@ use crate::{
     collection_manager::sides::{
         read::{
             analytics::SearchAnalyticEventOrigin, context::ReadSideContext,
-            CommittedDateFieldStats, CommittedGeoPointFieldStats, ReadError,
-            UncommittedDateFieldStats, UncommittedGeoPointFieldStats,
+            CommittedDateFieldStats, CommittedGeoPointFieldStats, CommittedStringFieldStats,
+            ReadError, UncommittedDateFieldStats, UncommittedGeoPointFieldStats,
         },
         write::index::EnumStrategy,
         CollectionWriteOperation, Offset, ReplaceIndexReason,
@@ -38,9 +38,9 @@ use crate::{
 
 use super::{
     index::{Index, IndexStats},
-    CommittedBoolFieldStats, CommittedNumberFieldStats, CommittedStringFieldStats,
-    CommittedStringFilterFieldStats, CommittedVectorFieldStats, DeletionReason, OffloadFieldConfig,
-    ReadSide, UncommittedBoolFieldStats, UncommittedNumberFieldStats, UncommittedStringFieldStats,
+    CommittedBoolFieldStats, CommittedNumberFieldStats, CommittedStringFilterFieldStats,
+    CommittedVectorFieldStats, DeletionReason, OffloadFieldConfig, ReadSide,
+    UncommittedBoolFieldStats, UncommittedNumberFieldStats, UncommittedStringFieldStats,
     UncommittedStringFilterFieldStats, UncommittedVectorFieldStats,
 };
 
@@ -594,14 +594,11 @@ impl CollectionReader {
     ) -> Result<ReadIndexesLockGuard<'collection, 'search>> {
         let lock = self.indexes.read("get_indexes_lock").await;
 
-        let unknown_index = index_ids
-            .iter()
-            .filter(|id| {
-                !lock
-                    .iter()
-                    .any(|index| !index.is_deleted() && index.id() == **id)
-            })
-            .next();
+        let unknown_index = index_ids.iter().find(|id| {
+            !lock
+                .iter()
+                .any(|index| !index.is_deleted() && index.id() == **id)
+        });
         if let Some(unknown_index) = unknown_index {
             bail!("Unknown index: {unknown_index:?}");
         }
@@ -954,19 +951,19 @@ impl CollectionReader {
                         true_count,
                     }) => {
                         if *false_count > 0 || *true_count > 0 {
-                            if let Some(existing_stats) = final_stats.get(&field.field_id) {
-                                if let FilterableField::Bool(bool_stats) = existing_stats {
-                                    final_stats.insert(
-                                        field.field_id,
-                                        FilterableField::Bool(FilterableFieldBool {
-                                            field_path: field.field_path.clone(),
-                                            field_type: "boolean".to_string(),
-                                            count_true: bool_stats.count_true + *true_count,
-                                            count_false: bool_stats.count_false + *false_count,
-                                            count: bool_stats.count + *true_count + *false_count,
-                                        }),
-                                    );
-                                }
+                            if let Some(FilterableField::Bool(bool_stats)) =
+                                final_stats.get(&field.field_id)
+                            {
+                                final_stats.insert(
+                                    field.field_id,
+                                    FilterableField::Bool(FilterableFieldBool {
+                                        field_path: field.field_path.clone(),
+                                        field_type: "boolean".to_string(),
+                                        count_true: bool_stats.count_true + *true_count,
+                                        count_false: bool_stats.count_false + *false_count,
+                                        count: bool_stats.count + *true_count + *false_count,
+                                    }),
+                                );
                             }
                         }
                     }
@@ -986,17 +983,17 @@ impl CollectionReader {
                         count,
                     }) => {
                         if *count > 0 {
-                            if let Some(existing_stats) = final_stats.get(&field.field_id) {
-                                if let FilterableField::GeoPoint(geo_stats) = existing_stats {
-                                    final_stats.insert(
-                                        field.field_id,
-                                        FilterableField::GeoPoint(FilterableFieldGeoPoint {
-                                            field_path: field.field_path.clone(),
-                                            field_type: "geopoint".to_string(),
-                                            count: geo_stats.count + *count,
-                                        }),
-                                    );
-                                }
+                            if let Some(FilterableField::GeoPoint(geo_stats)) =
+                                final_stats.get(&field.field_id)
+                            {
+                                final_stats.insert(
+                                    field.field_id,
+                                    FilterableField::GeoPoint(FilterableFieldGeoPoint {
+                                        field_path: field.field_path.clone(),
+                                        field_type: "geopoint".to_string(),
+                                        count: geo_stats.count + *count,
+                                    }),
+                                );
                             }
                         }
                     }
@@ -1016,34 +1013,34 @@ impl CollectionReader {
                         max,
                         ..
                     }) => {
-                        if let Some(existing_stats) = final_stats.get(&field.field_id) {
-                            if let FilterableField::Date(date_stats) = existing_stats {
-                                let new_min = match (date_stats.min.clone(), min) {
-                                    (Some(existing_min), Some(new_min)) => {
-                                        Some(OramaDate::try_from_i64(existing_min.as_i64().min(new_min.as_i64())).expect("Unable to conver i64 back to date format. This is a bug. Please report at https://github.com/oramasearch/oramacore"))
-                                    }
-                                    (Some(existing_min), None) => Some(existing_min),
-                                    (None, Some(new_min)) => Some(new_min.clone()),
-                                    (None, None) => None,
-                                };
-                                let new_max = match (date_stats.max.clone(), max) {
-                                    (Some(existing_max), Some(new_max)) => {
-                                        Some(OramaDate::try_from_i64(existing_max.as_i64().max(new_max.as_i64())).expect("Unable to conver i64 back to date format. This is a bug. Please report at https://github.com/oramasearch/oramacore"))
-                                    }
-                                    (Some(existing_max), None) => Some(existing_max),
-                                    (None, Some(new_max)) => Some(new_max.clone()),
-                                    (None, None) => None,
-                                };
-                                final_stats.insert(
-                                    field.field_id,
-                                    FilterableField::Date(FilterableFieldDate {
-                                        field_path: field.field_path.clone(),
-                                        field_type: "date".to_string(),
-                                        min: new_min,
-                                        max: new_max,
-                                    }),
-                                );
-                            }
+                        if let Some(FilterableField::Date(date_stats)) =
+                            final_stats.get(&field.field_id)
+                        {
+                            let new_min = match (date_stats.min.clone(), min) {
+                                (Some(existing_min), Some(new_min)) => {
+                                    Some(OramaDate::try_from_i64(existing_min.as_i64().min(new_min.as_i64())).expect("Unable to conver i64 back to date format. This is a bug. Please report at https://github.com/oramasearch/oramacore"))
+                                }
+                                (Some(existing_min), None) => Some(existing_min),
+                                (None, Some(new_min)) => Some(new_min.clone()),
+                                (None, None) => None,
+                            };
+                            let new_max = match (date_stats.max.clone(), max) {
+                                (Some(existing_max), Some(new_max)) => {
+                                    Some(OramaDate::try_from_i64(existing_max.as_i64().max(new_max.as_i64())).expect("Unable to conver i64 back to date format. This is a bug. Please report at https://github.com/oramasearch/oramacore"))
+                                }
+                                (Some(existing_max), None) => Some(existing_max),
+                                (None, Some(new_max)) => Some(new_max.clone()),
+                                (None, None) => None,
+                            };
+                            final_stats.insert(
+                                field.field_id,
+                                FilterableField::Date(FilterableFieldDate {
+                                    field_path: field.field_path.clone(),
+                                    field_type: "date".to_string(),
+                                    min: new_min,
+                                    max: new_max,
+                                }),
+                            );
                         }
                     }
                     IndexFieldStatsType::CommittedNumber(CommittedNumberFieldStats {
@@ -1071,30 +1068,30 @@ impl CollectionReader {
                         max,
                         ..
                     }) => {
-                        if let Some(existing_stats) = final_stats.get(&field.field_id) {
-                            if let FilterableField::Number(number_stats) = existing_stats {
-                                let min_as_f64 = match min {
-                                    Number::I32(i) => *i as f64,
-                                    Number::F32(f) => *f as f64,
-                                };
-                                let max_as_f64 = match max {
-                                    Number::I32(i) => *i as f64,
-                                    Number::F32(f) => *f as f64,
-                                };
+                        if let Some(FilterableField::Number(number_stats)) =
+                            final_stats.get(&field.field_id)
+                        {
+                            let min_as_f64 = match min {
+                                Number::I32(i) => *i as f64,
+                                Number::F32(f) => *f as f64,
+                            };
+                            let max_as_f64 = match max {
+                                Number::I32(i) => *i as f64,
+                                Number::F32(f) => *f as f64,
+                            };
 
-                                let new_min = min_as_f64.min(number_stats.min);
-                                let new_max = max_as_f64.max(number_stats.max);
+                            let new_min = min_as_f64.min(number_stats.min);
+                            let new_max = max_as_f64.max(number_stats.max);
 
-                                final_stats.insert(
-                                    field.field_id,
-                                    FilterableField::Number(FilterableFieldNumber {
-                                        field_path: field.field_path.clone(),
-                                        field_type: "number".to_string(),
-                                        min: new_min,
-                                        max: new_max,
-                                    }),
-                                );
-                            }
+                            final_stats.insert(
+                                field.field_id,
+                                FilterableField::Number(FilterableFieldNumber {
+                                    field_path: field.field_path.clone(),
+                                    field_type: "number".to_string(),
+                                    min: new_min,
+                                    max: new_max,
+                                }),
+                            );
                         }
                     }
                     IndexFieldStatsType::CommittedStringFilter(
@@ -1113,17 +1110,17 @@ impl CollectionReader {
                         UncommittedStringFilterFieldStats { key_count, .. },
                     ) => {
                         if *key_count > 0 {
-                            if let Some(existing_stats) = final_stats.get(&field.field_id) {
-                                if let FilterableField::String(string_stats) = existing_stats {
-                                    final_stats.insert(
-                                        field.field_id,
-                                        FilterableField::String(FilterableFieldString {
-                                            field_path: field.field_path.clone(),
-                                            field_type: "enum".to_string(),
-                                            count: string_stats.count + *key_count,
-                                        }),
-                                    );
-                                }
+                            if let Some(FilterableField::String(string_stats)) =
+                                final_stats.get(&field.field_id)
+                            {
+                                final_stats.insert(
+                                    field.field_id,
+                                    FilterableField::String(FilterableFieldString {
+                                        field_path: field.field_path.clone(),
+                                        field_type: "enum".to_string(),
+                                        count: string_stats.count + *key_count,
+                                    }),
+                                );
                             }
                         }
                     }

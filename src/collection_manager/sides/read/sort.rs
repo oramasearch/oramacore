@@ -1,6 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use anyhow::Result;
+use oramacore_lib::data_structures::capped_heap::CappedHeap;
 use ordered_float::NotNan;
 use tracing::{info, warn};
 
@@ -9,10 +10,7 @@ use crate::collection_manager::sides::read::collection::ReadIndexesLockGuard;
 use crate::collection_manager::sides::read::sort::sort_iter::MergeSortedIterator;
 use crate::collection_manager::sides::read::ReadError;
 use crate::types::SearchParams;
-use crate::{
-    capped_heap::CappedHeap,
-    types::{DocumentId, Number, SortBy, TokenScore},
-};
+use crate::types::{DocumentId, Number, SortBy, TokenScore};
 use oramacore_lib::pin_rules::Consequence;
 
 /// Context structure that encapsulates all parameters needed for sorting operations

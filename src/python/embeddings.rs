@@ -1,6 +1,9 @@
 use pyo3::prelude::*;
 use serde::{Deserialize, Serialize};
-use std::fmt::{Display, Formatter};
+use std::{
+    fmt::{Display, Formatter},
+    str::FromStr,
+};
 
 #[derive(Serialize, Deserialize, Clone, Copy, Hash, PartialEq, Eq, Debug)]
 pub enum Model {
@@ -30,20 +33,6 @@ impl Display for Model {
 }
 
 impl Model {
-    pub fn from_str(model_name: &str) -> Option<Self> {
-        match model_name {
-            "BGESmall" => Some(Model::BGESmall),
-            "BGEBase" => Some(Model::BGEBase),
-            "BGELarge" => Some(Model::BGELarge),
-            "JinaEmbeddingsV2BaseCode" => Some(Model::JinaEmbeddingsV2BaseCode),
-            "MultilingualE5Small" => Some(Model::MultilingualE5Small),
-            "MultilingualE5Base" => Some(Model::MultilingualE5Base),
-            "MultilingualE5Large" => Some(Model::MultilingualE5Large),
-            "MultilingualMiniLML12V2" => Some(Model::MultilingualMiniLML12V2),
-            _ => None,
-        }
-    }
-
     pub fn sequence_length(&self) -> usize {
         match self {
             Model::BGESmall => 512,
@@ -74,19 +63,46 @@ impl Model {
         self.sequence_length() * 2 / 100
     }
 
-    /// Returns None if no scaling is needed.
-    /// Some((min, max)) if scaling is needed.
-    pub fn get_scale(&self) -> Option<(f32, f32)> {
+    // Some models need a rescale because they produce "similar" embeddings.
+    #[inline]
+    pub fn rescale_score(&self, score: f32) -> f32 {
         let is_e5_model = matches!(
             self,
             Model::MultilingualE5Small | Model::MultilingualE5Base | Model::MultilingualE5Large
         );
 
         if is_e5_model {
-            // E5 models typically produce similarity scores in the range [0.7, 1.0]
-            Some((0.7, 1.0))
+            // For instance, E5 models produce similarity scores that rarely go below
+            // 0.7, making the effective range much narrower.
+            // So, cosine similarity scores are usually in a narrow range like [0.7, 1.0],
+            // instead of the full [0.0, 1.0] range.
+            // This rescaling helps normalize the scores to use the full [0.0, 1.0]
+            // range for better search ranking.
+            const MIN: f32 = 0.7;
+            const MAX: f32 = 1.0;
+            const DELTA: f32 = MAX - MIN;
+            let clamped_score = score.clamp(MIN, MAX);
+            (clamped_score - MIN) / DELTA
         } else {
-            None
+            score
+        }
+    }
+}
+
+impl FromStr for Model {
+    type Err = ();
+
+    fn from_str(model_name: &str) -> Result<Self, Self::Err> {
+        match model_name {
+            "BGESmall" => Ok(Model::BGESmall),
+            "BGEBase" => Ok(Model::BGEBase),
+            "BGELarge" => Ok(Model::BGELarge),
+            "JinaEmbeddingsV2BaseCode" => Ok(Model::JinaEmbeddingsV2BaseCode),
+            "MultilingualE5Small" => Ok(Model::MultilingualE5Small),
+            "MultilingualE5Base" => Ok(Model::MultilingualE5Base),
+            "MultilingualE5Large" => Ok(Model::MultilingualE5Large),
+            "MultilingualMiniLML12V2" => Ok(Model::MultilingualMiniLML12V2),
+            _ => Err(()),
         }
     }
 }
@@ -106,12 +122,14 @@ impl Display for Intent {
     }
 }
 
-impl Intent {
-    pub fn from_str(intent_name: &str) -> Option<Self> {
-        match intent_name {
-            "passage" => Some(Intent::Passage),
-            "query" => Some(Intent::Query),
-            _ => None,
+impl FromStr for Intent {
+    type Err = ();
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "passage" => Ok(Intent::Passage),
+            "query" => Ok(Intent::Query),
+            _ => Err(()),
         }
     }
 }
