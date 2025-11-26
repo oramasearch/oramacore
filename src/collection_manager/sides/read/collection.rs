@@ -125,6 +125,10 @@ pub struct CollectionReader {
     created_at: DateTime<Utc>,
     updated_at: OramaAsyncLock<DateTime<Utc>>,
 
+    // Per-collection offset tracking
+    last_processed_offset: OramaAsyncLock<Offset>,
+    last_committed_offset: OramaAsyncLock<Offset>,
+
     document_count_estimation: AtomicU64,
 
     pin_rules_reader: OramaAsyncLock<PinRulesReader<DocumentId>>,
@@ -166,6 +170,16 @@ impl CollectionReader {
             created_at: Utc::now(),
             updated_at: OramaAsyncLock::new("collection_updated_at", Utc::now()),
 
+            // Initialize per-collection offsets to 0
+            last_processed_offset: OramaAsyncLock::new(
+                "collection_last_processed_offset",
+                Offset(0),
+            ),
+            last_committed_offset: OramaAsyncLock::new(
+                "collection_last_committed_offset",
+                Offset(0),
+            ),
+
             document_count_estimation: AtomicU64::new(0),
 
             pin_rules_reader: OramaAsyncLock::new("pin_rules_reader", PinRulesReader::empty()),
@@ -184,7 +198,34 @@ impl CollectionReader {
             .context("Cannot open collection.json")?
             .read_json_data()
             .context("Cannot read collection.json")?;
-        let Dump::V1(dump) = dump;
+
+        // Handle V1 to V2 migration
+        let (dump, last_processed_offset, last_committed_offset) = match dump {
+            Dump::V1(v1) => {
+                info!("Migrating collection {:?} from V1 to V2", v1.id);
+                // Initialize offsets to 0 - global check provides safety
+                (v1, Offset(0), Offset(0))
+            }
+            Dump::V2(v2) => {
+                // Use persisted offset values
+                (
+                    DumpV1 {
+                        id: v2.id,
+                        description: v2.description,
+                        mcp_description: v2.mcp_description,
+                        default_locale: v2.default_locale,
+                        read_api_key: v2.read_api_key,
+                        write_api_key: v2.write_api_key,
+                        index_ids: v2.index_ids,
+                        temp_index_ids: v2.temp_index_ids,
+                        created_at: v2.created_at,
+                        updated_at: v2.updated_at,
+                    },
+                    v2.last_processed_offset,
+                    v2.last_committed_offset,
+                )
+            }
+        };
         debug!("Collection info loaded");
 
         let mut indexes: Vec<Index> = Vec::with_capacity(dump.index_ids.len());
@@ -241,6 +282,16 @@ impl CollectionReader {
 
             created_at: dump.created_at,
             updated_at: OramaAsyncLock::new("collection_updated_at", dump.updated_at),
+
+            // Initialize per-collection offsets from loaded data
+            last_processed_offset: OramaAsyncLock::new(
+                "collection_last_processed_offset",
+                last_processed_offset,
+            ),
+            last_committed_offset: OramaAsyncLock::new(
+                "collection_last_committed_offset",
+                last_committed_offset,
+            ),
 
             document_count_estimation: AtomicU64::new(document_count_estimation),
 
@@ -350,7 +401,16 @@ impl CollectionReader {
             .context("Cannot commit pin rules")?;
         drop(pin_rules_reader);
 
-        let dump = Dump::V1(DumpV1 {
+        // Read current offsets
+        let last_processed = **self.last_processed_offset.read("commit").await;
+
+        // Update committed offset
+        let mut last_committed = self.last_committed_offset.write("commit").await;
+        **last_committed = offset;
+        drop(last_committed);
+
+        // Save DumpV2 with offsets
+        let dump = Dump::V2(DumpV2 {
             id: self.id,
             description: self.description.clone(),
             mcp_description: self.mcp_description.read("commit").await.clone(),
@@ -361,6 +421,9 @@ impl CollectionReader {
             temp_index_ids,
             created_at: self.created_at,
             updated_at: **self.updated_at.read("commit").await,
+            // Per-collection offset tracking
+            last_processed_offset: last_processed,
+            last_committed_offset: offset,
         });
 
         BufferedFile::create_or_overwrite(self.data_dir.join("collection.json"))
@@ -641,7 +704,20 @@ impl CollectionReader {
         IndexReadLock::try_new(indexes_lock, index_id)
     }
 
-    pub async fn update(&self, collection_operation: CollectionWriteOperation) -> Result<()> {
+    pub async fn update(
+        &self,
+        offset: Offset,
+        collection_operation: CollectionWriteOperation,
+    ) -> Result<()> {
+        // Check if operation already applied to THIS collection
+        let last_processed = self.last_processed_offset.read("update").await;
+        if offset <= **last_processed && !last_processed.is_zero() {
+            warn!(collection_id=?self.id, offset=?offset,
+                  "Already applied to this collection");
+            return Ok(());
+        }
+        drop(last_processed);
+
         let mut updated_at_lock = self.updated_at.write("update").await;
         **updated_at_lock = Utc::now();
         drop(updated_at_lock);
@@ -842,6 +918,10 @@ impl CollectionReader {
                 drop(pin_rules_lock);
             }
         }
+
+        // Update offset after successful operation
+        let mut last_processed = self.last_processed_offset.write("update").await;
+        **last_processed = offset;
 
         Ok(())
     }
@@ -1318,9 +1398,28 @@ struct DumpV1 {
     created_at: DateTime<Utc>,
     updated_at: DateTime<Utc>,
 }
+
+#[derive(Debug, Serialize, Deserialize)]
+struct DumpV2 {
+    id: CollectionId,
+    description: Option<String>,
+    mcp_description: Option<String>,
+    default_locale: Locale,
+    read_api_key: ApiKey,
+    write_api_key: Option<ApiKey>,
+    index_ids: Vec<IndexId>,
+    temp_index_ids: Vec<IndexId>,
+    created_at: DateTime<Utc>,
+    updated_at: DateTime<Utc>,
+    // Per-collection offset tracking
+    last_processed_offset: Offset,
+    last_committed_offset: Offset,
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 enum Dump {
     V1(DumpV1),
+    V2(DumpV2),
 }
 
 pub struct ReadIndexesLockGuard<'collection, 'search> {

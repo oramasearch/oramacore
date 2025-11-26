@@ -416,7 +416,8 @@ impl ReadSide {
                     .get_collection(collection_id)
                     .await
                     .ok_or_else(|| anyhow::anyhow!("Collection not found"))?;
-                collection.update(collection_operation).await?;
+                // Pass offset to collection - it handles per-collection tracking internally
+                collection.update(offset, collection_operation).await?;
             }
             WriteOperation::DocumentStorage(op) => {
                 self.document_storage
