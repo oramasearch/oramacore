@@ -4,7 +4,10 @@ use std::{
     io::ErrorKind,
     ops::{Deref, DerefMut},
     path::PathBuf,
-    sync::{atomic::AtomicU64, Arc},
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc,
+    },
 };
 
 use axum::extract::State;
@@ -47,6 +50,9 @@ use super::{
 use crate::types::NLPSearchRequest;
 use oramacore_lib::fs::*;
 use oramacore_lib::nlp::locales::Locale;
+
+// Threshold for triggering per-collection commits
+const COLLECTION_COMMIT_THRESHOLD: u64 = 300;
 
 #[derive(Serialize)]
 pub struct FilterableFieldBool {
@@ -131,6 +137,9 @@ pub struct CollectionReader {
 
     document_count_estimation: AtomicU64,
 
+    // Counter for operations applied since last commit
+    pending_operations: Arc<AtomicU64>,
+
     pin_rules_reader: OramaAsyncLock<PinRulesReader<DocumentId>>,
 }
 
@@ -181,6 +190,9 @@ impl CollectionReader {
             ),
 
             document_count_estimation: AtomicU64::new(0),
+
+            // Initialize pending operations counter to 0
+            pending_operations: Arc::new(AtomicU64::new(0)),
 
             pin_rules_reader: OramaAsyncLock::new("pin_rules_reader", PinRulesReader::empty()),
 
@@ -294,6 +306,9 @@ impl CollectionReader {
             ),
 
             document_count_estimation: AtomicU64::new(document_count_estimation),
+
+            // Always start at 0 after load (all operations before restart are committed)
+            pending_operations: Arc::new(AtomicU64::new(0)),
 
             pin_rules_reader: OramaAsyncLock::new(
                 "pin_rules_reader",
@@ -922,6 +937,21 @@ impl CollectionReader {
         // Update offset after successful operation
         let mut last_processed = self.last_processed_offset.write("update").await;
         **last_processed = offset;
+        drop(last_processed);
+
+        // Commit collection if threshold reached
+        // NB: this commits only this collection
+        let pending = self.pending_operations.fetch_add(1, Ordering::SeqCst) + 1;
+        if pending >= COLLECTION_COMMIT_THRESHOLD {
+            info!(
+                collection_id=?self.id,
+                offset=?offset,
+                pending=pending,
+                "Collection threshold reached, committing"
+            );
+            self.commit(offset).await?;
+            self.pending_operations.store(0, Ordering::SeqCst);
+        }
 
         Ok(())
     }

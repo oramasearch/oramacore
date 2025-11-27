@@ -204,3 +204,48 @@ async fn test_collection_commit_partial_fields() {
 
     drop(test_context);
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_commit_after_collection_operation_limit_reached() {
+    init_log();
+    let test_context = TestContext::new().await;
+
+    let collection_client = test_context.create_collection().await.unwrap();
+
+    let index_client = collection_client.create_index().await.unwrap();
+
+    // Insert 300 documents to trigger the per-collection commit threshold
+    index_client
+        .insert_documents(
+            json!((0..300)
+                .map(|i| {
+                    json!({
+                        "id": i.to_string(),
+                        "text": "Lorem ipsum dolor sit amet, consectetur adipiscing elit.",
+                    })
+                })
+                .collect::<Vec<_>>())
+            .try_into()
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    let stats = collection_client.reader_stats().await.unwrap();
+
+    let at_least_one_committed = stats.indexes_stats.iter().any(|index| {
+        index.fields_stats.iter().any(|f| {
+            matches!(
+                f.stats,
+                IndexFieldStatsType::CommittedBoolean(_)
+                    | IndexFieldStatsType::CommittedNumber(_)
+                    | IndexFieldStatsType::CommittedStringFilter(_)
+                    | IndexFieldStatsType::CommittedString(_)
+                    | IndexFieldStatsType::CommittedVector(_)
+            )
+        })
+    });
+    assert!(at_least_one_committed, "No committed fields found");
+
+    drop(test_context);
+}
