@@ -4,7 +4,12 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    collection_manager::sides::read::index::committed_field::number::get_iter,
+    collection_manager::sides::read::index::{
+        committed_field::number::get_iter,
+        merge::{CommittedField, FieldMetadata},
+        uncommitted_field::UncommittedDateFilterField,
+    },
+    merger::MergedIterator,
     types::{DateFilter, DocumentId, OramaDate},
 };
 use oramacore_lib::fs::{create_if_not_exists, BufferedFile};
@@ -29,48 +34,6 @@ impl CommittedDateField {
         };
 
         s.commit().context("Failed to commit date field")?;
-
-        Ok(s)
-    }
-
-    #[allow(deprecated)]
-    pub fn try_load(info: DateFieldInfo) -> Result<Self> {
-        let data_dir = info.data_dir;
-        // Try to load from the new format first, and track if we need to commit (migrate from old format)
-        let (vec, needs_commit) = match BufferedFile::open(data_dir.join("date_vec.bin"))
-            .and_then(|f| f.read_bincode_data::<Vec<(i64, HashSet<DocumentId>)>>())
-        {
-            Ok(vec) => {
-                // Successfully loaded from new format, no commit needed
-                (vec, false)
-            }
-            Err(_) => {
-                // Failed to load from new format, try to migrate from old format
-                use oramacore_lib::data_structures::ordered_key::OrderedKeyIndex;
-                let inner = OrderedKeyIndex::<i64, DocumentId>::load(data_dir.clone())?;
-
-                let items = inner
-                    .get_items((true, i64::MIN), (true, i64::MAX))
-                    .context("Cannot get items for date field")?;
-
-                let mut vec: Vec<_> = items.map(|item| (item.key, item.values)).collect();
-                // ensure the order is by key. This should not be necessary, but we do it to ensure consistency.
-                vec.sort_by_key(|(key, _)| *key);
-                // Need to commit to save in new format
-                (vec, true)
-            }
-        };
-
-        let s = Self {
-            field_path: info.field_path,
-            vec,
-            data_dir,
-        };
-
-        // Only commit if we migrated from old format
-        if needs_commit {
-            s.commit().context("Failed to commit date field")?;
-        }
 
         Ok(s)
     }
@@ -149,6 +112,118 @@ impl CommittedDateField {
     }
 }
 
+impl CommittedField for CommittedDateField {
+    type FieldMetadata = DateFieldInfo;
+    type Uncommitted = UncommittedDateFilterField;
+
+    fn from_uncommitted(
+        uncommitted: &Self::Uncommitted,
+        data_dir: PathBuf,
+        uncommitted_document_deletions: &HashSet<DocumentId>,
+        offload_config: crate::collection_manager::sides::read::OffloadFieldConfig,
+    ) -> Result<Self> {
+        let iter = uncommitted
+            .iter()
+            // .map(|(n, v)| (SerializableNumber(n), v))
+            .map(|(k, mut d)| {
+                d.retain(|doc_id| !uncommitted_document_deletions.contains(doc_id));
+                (k, d)
+            });
+        CommittedDateField::from_iter(
+            uncommitted.field_path().to_vec().into_boxed_slice(),
+            iter,
+            data_dir,
+        )
+    }
+
+    #[allow(deprecated)]
+    fn try_load(
+        metadata: Self::FieldMetadata,
+        offload_config: crate::collection_manager::sides::read::OffloadFieldConfig,
+    ) -> Result<Self> {
+        let data_dir = metadata.data_dir;
+        // Try to load from the new format first, and track if we need to commit (migrate from old format)
+        let (vec, needs_commit) = match BufferedFile::open(data_dir.join("date_vec.bin"))
+            .and_then(|f| f.read_bincode_data::<Vec<(i64, HashSet<DocumentId>)>>())
+        {
+            Ok(vec) => {
+                // Successfully loaded from new format, no commit needed
+                (vec, false)
+            }
+            Err(_) => {
+                // Failed to load from new format, try to migrate from old format
+                use oramacore_lib::data_structures::ordered_key::OrderedKeyIndex;
+                let inner = OrderedKeyIndex::<i64, DocumentId>::load(data_dir.clone())?;
+
+                let items = inner
+                    .get_items((true, i64::MIN), (true, i64::MAX))
+                    .context("Cannot get items for date field")?;
+
+                let mut vec: Vec<_> = items.map(|item| (item.key, item.values)).collect();
+                // ensure the order is by key. This should not be necessary, but we do it to ensure consistency.
+                vec.sort_by_key(|(key, _)| *key);
+                // Need to commit to save in new format
+                (vec, true)
+            }
+        };
+
+        let s = Self {
+            field_path: metadata.field_path,
+            vec,
+            data_dir,
+        };
+
+        // Only commit if we migrated from old format
+        if needs_commit {
+            s.commit().context("Failed to commit date field")?;
+        }
+
+        Ok(s)
+    }
+
+    fn add_uncommitted(
+        &self,
+        uncommitted: &Self::Uncommitted,
+        data_dir: PathBuf,
+        uncommitted_document_deletions: &HashSet<DocumentId>,
+        offload_config: crate::collection_manager::sides::read::OffloadFieldConfig,
+    ) -> Result<Self> {
+        let uncommitted_iter = uncommitted.iter();
+        let committed_iter = self.iter();
+
+        let iter = MergedIterator::new(
+            committed_iter,
+            uncommitted_iter,
+            |_, v| v,
+            |_, mut v1, v2| {
+                v1.extend(v2);
+                v1
+            },
+        )
+        .map(|(k, mut d)| {
+            d.retain(|doc_id| !uncommitted_document_deletions.contains(doc_id));
+            (k, d)
+        });
+
+        // uncommitted and committed field_path has to be the same
+        debug_assert_eq!(
+            uncommitted.field_path(),
+            self.field_path(),
+            "Uncommitted and committed field paths should be the same",
+        );
+
+        CommittedDateField::from_iter(
+            uncommitted.field_path().to_vec().into_boxed_slice(),
+            iter,
+            data_dir,
+        )
+    }
+
+    fn metadata(&self) -> Self::FieldMetadata {
+        self.get_field_info()
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct DateFieldInfo {
     pub field_path: Box<[String]>,
@@ -159,4 +234,14 @@ pub struct DateFieldInfo {
 pub struct CommittedDateFieldStats {
     pub min: Option<OramaDate>,
     pub max: Option<OramaDate>,
+}
+
+impl FieldMetadata for DateFieldInfo {
+    fn data_dir(&self) -> &PathBuf {
+        &self.data_dir
+    }
+
+    fn set_data_dir(&mut self, data_dir: PathBuf) {
+        self.data_dir = data_dir;
+    }
 }

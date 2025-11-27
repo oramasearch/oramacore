@@ -20,6 +20,7 @@ use crate::{
             committed_field::offload_utils::{
                 create_counter, should_offload, update_invocation_counter, Cow,
             },
+            merge::{CommittedField, FieldMetadata},
             uncommitted_field::UncommittedVectorField,
         },
         search::SearchDocumentContext,
@@ -203,8 +204,11 @@ pub struct CommittedVectorField {
     unload_window: Duration,
 }
 
-impl CommittedVectorField {
-    pub fn try_load(metadata: VectorFieldInfo, offload_config: OffloadFieldConfig) -> Result<Self> {
+impl CommittedField for CommittedVectorField {
+    type FieldMetadata = VectorFieldInfo;
+    type Uncommitted = UncommittedVectorField;
+
+    fn try_load(metadata: VectorFieldInfo, offload_config: OffloadFieldConfig) -> Result<Self> {
         let layout = load_layout(&metadata.data_dir).context("Cannot load vector layout")?;
 
         Ok(Self {
@@ -221,7 +225,7 @@ impl CommittedVectorField {
         })
     }
 
-    pub fn from_uncommitted(
+    fn from_uncommitted(
         uncommitted: &UncommittedVectorField,
         data_dir: PathBuf,
         uncommitted_document_deletions: &HashSet<DocumentId>,
@@ -289,15 +293,11 @@ impl CommittedVectorField {
         })
     }
 
-    pub fn metadata(&self) -> VectorFieldInfo {
+    fn metadata(&self) -> VectorFieldInfo {
         self.metadata.clone()
     }
 
-    pub fn stats(&self) -> &CommittedVectorFieldStats {
-        &self.stats
-    }
-
-    pub fn add_uncommitted(
+    fn add_uncommitted(
         &self,
         uncommitted: &UncommittedVectorField,
         data_dir: PathBuf,
@@ -369,6 +369,12 @@ impl CommittedVectorField {
             invocation_counter: create_counter(offload_config),
             unload_window: offload_config.unload_window.into(),
         })
+    }
+}
+
+impl CommittedVectorField {
+    pub fn stats(&self) -> &CommittedVectorFieldStats {
+        &self.stats
     }
 
     pub fn search(
@@ -469,4 +475,14 @@ pub struct VectorFieldInfo {
     pub field_path: Box<[String]>,
     pub data_dir: PathBuf,
     pub model: Model,
+}
+
+impl FieldMetadata for VectorFieldInfo {
+    fn data_dir(&self) -> &PathBuf {
+        &self.data_dir
+    }
+
+    fn set_data_dir(&mut self, data_dir: PathBuf) {
+        self.data_dir = data_dir;
+    }
 }

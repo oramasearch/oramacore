@@ -2,7 +2,7 @@ use oramacore_lib::bkd::{haversine_distance, BKDTree, Coord, Point};
 use serde::Serialize;
 
 use crate::{
-    collection_manager::sides::write::index::GeoPoint,
+    collection_manager::sides::{read::index::merge::UncommittedField, write::index::GeoPoint},
     types::{DocumentId, GeoSearchFilter},
 };
 
@@ -28,10 +28,6 @@ impl UncommittedGeoPointFilterField {
 
     pub fn len(&self) -> usize {
         self.count
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.len() == 0
     }
 
     pub fn clear(&mut self) {
@@ -92,6 +88,12 @@ impl UncommittedGeoPointFilterField {
 
     pub fn stats(&self) -> UncommittedGeoPointFieldStats {
         UncommittedGeoPointFieldStats { count: self.len() }
+    }
+}
+
+impl UncommittedField for UncommittedGeoPointFilterField {
+    fn is_empty(&self) -> bool {
+        self.len() == 0
     }
 }
 

@@ -2,7 +2,7 @@ use std::collections::HashSet;
 
 use serde::Serialize;
 
-use crate::types::DocumentId;
+use crate::{collection_manager::sides::read::index::merge::UncommittedField, types::DocumentId};
 
 #[derive(Debug)]
 pub struct UncommittedBoolField {
@@ -24,10 +24,6 @@ impl UncommittedBoolField {
 
     pub fn len(&self) -> usize {
         self.inner.0.len() + self.inner.1.len()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.len() == 0
     }
 
     pub fn clear(&mut self) {
@@ -68,6 +64,12 @@ impl UncommittedBoolField {
 
 fn f(d: &DocumentId) -> DocumentId {
     *d
+}
+
+impl UncommittedField for UncommittedBoolField {
+    fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
 }
 
 #[derive(Serialize, Debug)]

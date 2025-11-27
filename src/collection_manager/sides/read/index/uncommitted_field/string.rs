@@ -11,7 +11,8 @@ use crate::{
         bm25::{BM25FFieldParams, BM25Scorer},
         global_info::GlobalInfo,
         sides::{
-            read::index::search_context::FullTextSearchContext, InsertStringTerms, TermStringField,
+            read::index::{merge::UncommittedField, search_context::FullTextSearchContext},
+            InsertStringTerms, TermStringField,
         },
     },
     types::DocumentId,
@@ -94,10 +95,6 @@ impl UncommittedStringField {
 
     pub fn len(&self) -> usize {
         self.document_ids.len()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.len() == 0
     }
 
     pub fn clear(&mut self) {
@@ -251,6 +248,12 @@ impl UncommittedStringField {
             key_count: self.inner.len(),
             global_info: self.global_info(),
         }
+    }
+}
+
+impl UncommittedField for UncommittedStringField {
+    fn is_empty(&self) -> bool {
+        self.len() == 0
     }
 }
 

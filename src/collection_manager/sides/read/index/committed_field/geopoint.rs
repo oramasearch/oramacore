@@ -5,6 +5,9 @@ use oramacore_lib::bkd;
 use oramacore_lib::bkd::{haversine_distance, BKDTree, Coord};
 use serde::{Deserialize, Serialize};
 
+use crate::collection_manager::sides::read::index::merge::{CommittedField, FieldMetadata};
+use crate::collection_manager::sides::read::index::uncommitted_field::UncommittedGeoPointFilterField;
+use crate::collection_manager::sides::read::OffloadFieldConfig;
 use crate::types::{DocumentId, GeoSearchFilter};
 use oramacore_lib::fs::{create_if_not_exists, BufferedFile};
 
@@ -134,6 +137,66 @@ impl CommittedGeoPointField {
     }
 }
 
+impl CommittedField for CommittedGeoPointField {
+    type FieldMetadata = GeoPointFieldInfo;
+    type Uncommitted = UncommittedGeoPointFilterField;
+
+    fn from_uncommitted(
+        uncommitted: &Self::Uncommitted,
+        data_dir: PathBuf,
+        uncommitted_document_deletions: &HashSet<DocumentId>,
+        offload_config: OffloadFieldConfig,
+    ) -> Result<Self> {
+        let mut tree = uncommitted.inner();
+        tree.delete(uncommitted_document_deletions);
+        let committed = CommittedGeoPointField::from_raw(
+            tree,
+            uncommitted.field_path().to_vec().into_boxed_slice(),
+            data_dir,
+        )?;
+        Ok(committed)
+    }
+
+    fn try_load(metadata: Self::FieldMetadata, offload_config: OffloadFieldConfig) -> Result<Self> {
+        let data_dir = metadata.data_dir;
+        let tree: BKDTree<f32, DocumentId> = BufferedFile::open(data_dir.join("geopoint_tree.bin"))
+            .context("Cannot open geopoint file")?
+            .read_bincode_data()
+            .context("Cannot deserialize geopoint file")?;
+
+        let s = Self {
+            data_dir,
+            field_path: metadata.field_path,
+            tree,
+        };
+
+        // Is it really needed?
+        s.commit().context("Failed to commit number field")?;
+
+        Ok(s)
+    }
+
+    fn add_uncommitted(
+        &self,
+        uncommitted: &Self::Uncommitted,
+        data_dir: PathBuf,
+        uncommitted_document_deletions: &HashSet<DocumentId>,
+        offload_config: OffloadFieldConfig,
+    ) -> Result<Self> {
+        let info = self.get_field_info();
+        let mut field = CommittedGeoPointField::try_load(info)
+            .context("Failed to load committed string field")?;
+
+        field.update(uncommitted.iter(), uncommitted_document_deletions, data_dir)?;
+
+        Ok(field)
+    }
+
+    fn metadata(&self) -> Self::FieldMetadata {
+        self.get_field_info()
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct GeoPointFieldInfo {
     pub field_path: Box<[String]>,
@@ -143,4 +206,14 @@ pub struct GeoPointFieldInfo {
 #[derive(Serialize, Debug)]
 pub struct CommittedGeoPointFieldStats {
     pub count: usize,
+}
+
+impl FieldMetadata for GeoPointFieldInfo {
+    fn data_dir(&self) -> &PathBuf {
+        &self.data_dir
+    }
+
+    fn set_data_dir(&mut self, data_dir: PathBuf) {
+        self.data_dir = data_dir;
+    }
 }

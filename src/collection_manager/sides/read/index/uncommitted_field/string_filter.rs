@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use serde::Serialize;
 
-use crate::types::DocumentId;
+use crate::{collection_manager::sides::read::index::merge::UncommittedField, types::DocumentId};
 
 #[derive(Debug)]
 pub struct UncommittedStringFilterField {
@@ -24,10 +24,6 @@ impl UncommittedStringFilterField {
 
     pub fn len(&self) -> usize {
         self.inner.len()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.len() == 0
     }
 
     pub fn clear(&mut self) {
@@ -82,4 +78,10 @@ pub struct UncommittedStringFilterFieldStats {
     pub key_count: usize,
     pub document_count: usize,
     pub keys: Option<Vec<String>>,
+}
+
+impl UncommittedField for UncommittedStringFilterField {
+    fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
 }

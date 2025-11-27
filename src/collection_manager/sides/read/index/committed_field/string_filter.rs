@@ -6,7 +6,14 @@ use std::{
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
-use crate::types::DocumentId;
+use crate::{
+    collection_manager::sides::read::index::{
+        merge::{CommittedField, FieldMetadata},
+        uncommitted_field::UncommittedStringFilterField,
+    },
+    merger::MergedIterator,
+    types::DocumentId,
+};
 use oramacore_lib::fs::{create_if_not_exists, BufferedFile};
 
 #[derive(Debug)]
@@ -43,23 +50,6 @@ impl CommittedStringFilterField {
             field_path,
             inner: inner.data,
             data_dir,
-        })
-    }
-
-    pub fn try_load(info: StringFilterFieldInfo) -> Result<Self> {
-        let data_dir = info.data_dir;
-        let dump_file_path = data_dir.join("data.bin");
-        let inner: StringFilterFieldDump = BufferedFile::open(dump_file_path)
-            .context("Cannot open data.bin")?
-            .read_bincode_data()
-            .context("Cannot read data.bin")?;
-        let inner = match inner {
-            StringFilterFieldDump::V1(inner) => inner.data,
-        };
-        Ok(Self {
-            inner,
-            data_dir,
-            field_path: info.field_path,
         })
     }
 
@@ -114,10 +104,104 @@ impl CommittedStringFilterField {
     }
 }
 
+impl CommittedField for CommittedStringFilterField {
+    type FieldMetadata = StringFilterFieldInfo;
+    type Uncommitted = UncommittedStringFilterField;
+
+    fn from_uncommitted(
+        uncommitted: &Self::Uncommitted,
+        data_dir: PathBuf,
+        uncommitted_document_deletions: &HashSet<DocumentId>,
+        offload_config: crate::collection_manager::sides::read::OffloadFieldConfig,
+    ) -> Result<Self> {
+        let iter = uncommitted.iter().map(|(k, mut d)| {
+            d.retain(|doc_id| !uncommitted_document_deletions.contains(doc_id));
+            (k, d)
+        });
+        CommittedStringFilterField::from_iter(
+            uncommitted.field_path().to_vec().into_boxed_slice(),
+            iter,
+            data_dir,
+        )
+    }
+
+    fn try_load(
+        metadata: Self::FieldMetadata,
+        offload_config: crate::collection_manager::sides::read::OffloadFieldConfig,
+    ) -> Result<Self> {
+        let data_dir = metadata.data_dir;
+        let dump_file_path = data_dir.join("data.bin");
+        let inner: StringFilterFieldDump = BufferedFile::open(dump_file_path)
+            .context("Cannot open data.bin")?
+            .read_bincode_data()
+            .context("Cannot read data.bin")?;
+        let inner = match inner {
+            StringFilterFieldDump::V1(inner) => inner.data,
+        };
+        Ok(Self {
+            inner,
+            data_dir,
+            field_path: metadata.field_path,
+        })
+    }
+
+    fn add_uncommitted(
+        &self,
+        uncommitted: &Self::Uncommitted,
+        data_dir: PathBuf,
+        uncommitted_document_deletions: &HashSet<DocumentId>,
+        offload_config: crate::collection_manager::sides::read::OffloadFieldConfig,
+    ) -> Result<Self> {
+        let uncommitted_iter = uncommitted.iter();
+        let committed_iter = self.iter();
+
+        let iter = MergedIterator::new(
+            committed_iter,
+            uncommitted_iter,
+            |_, v| v,
+            |_, mut v1, v2| {
+                v1.extend(v2);
+                v1
+            },
+        )
+        .map(|(k, mut d)| {
+            d.retain(|doc_id| !uncommitted_document_deletions.contains(doc_id));
+            (k, d)
+        });
+
+        // uncommitted and committed field_path has to be the same
+        debug_assert_eq!(
+            uncommitted.field_path(),
+            self.field_path(),
+            "Uncommitted and committed field paths should be the same",
+        );
+
+        CommittedStringFilterField::from_iter(
+            uncommitted.field_path().to_vec().into_boxed_slice(),
+            iter,
+            data_dir,
+        )
+    }
+
+    fn metadata(&self) -> Self::FieldMetadata {
+        self.get_field_info()
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct StringFilterFieldInfo {
     pub field_path: Box<[String]>,
     pub data_dir: PathBuf,
+}
+
+impl FieldMetadata for StringFilterFieldInfo {
+    fn data_dir(&self) -> &PathBuf {
+        &self.data_dir
+    }
+
+    fn set_data_dir(&mut self, data_dir: PathBuf) {
+        self.data_dir = data_dir;
+    }
 }
 
 #[derive(Serialize, Debug)]

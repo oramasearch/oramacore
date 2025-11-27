@@ -5,7 +5,10 @@ use oramacore_lib::data_structures::ShouldInclude;
 use serde::Serialize;
 
 use crate::{
-    collection_manager::sides::read::search::SearchDocumentContext, python::embeddings::Model,
+    collection_manager::sides::read::{
+        index::merge::UncommittedField, search::SearchDocumentContext,
+    },
+    python::embeddings::Model,
     types::DocumentId,
 };
 
@@ -36,10 +39,6 @@ impl UncommittedVectorField {
 
     pub fn len(&self) -> usize {
         self.data.len()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.len() == 0
     }
 
     pub fn clear(&mut self) {
@@ -119,6 +118,12 @@ impl UncommittedVectorField {
             document_count: self.data.len(),
             vector_count: self.data.iter().map(|(_, v)| v.len()).sum(),
         }
+    }
+}
+
+impl UncommittedField for UncommittedVectorField {
+    fn is_empty(&self) -> bool {
+        self.len() == 0
     }
 }
 

@@ -5,7 +5,10 @@ use std::{
 
 use serde::Serialize;
 
-use crate::types::{DateFilter, DocumentId, OramaDate};
+use crate::{
+    collection_manager::sides::read::index::merge::UncommittedField,
+    types::{DateFilter, DocumentId, OramaDate},
+};
 
 #[derive(Debug)]
 pub struct UncommittedDateFilterField {
@@ -27,10 +30,6 @@ impl UncommittedDateFilterField {
 
     pub fn len(&self) -> usize {
         self.inner.len()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.len() == 0
     }
 
     pub fn clear(&mut self) {
@@ -84,6 +83,12 @@ impl UncommittedDateFilterField {
             max,
             count: self.len(),
         }
+    }
+}
+
+impl UncommittedField for UncommittedDateFilterField {
+    fn is_empty(&self) -> bool {
+        self.len() == 0
     }
 }
 

@@ -5,10 +5,6 @@ use committed_field::{
 };
 use futures::join;
 use group::Groupable;
-use merge::{
-    merge_bool_field, merge_number_field, merge_string_field, merge_string_filter_field,
-    merge_vector_field,
-};
 use oramacore_lib::filters::{FilterResult, PlainFilterResult};
 use path_to_index_id_map::PathToIndexId;
 use search_context::FullTextSearchContext;
@@ -28,7 +24,7 @@ use crate::{
                         CommittedDateField, CommittedGeoPointField, CommittedStringField,
                         CommittedVectorField, DateFieldInfo, GeoPointFieldInfo, StringFieldInfo,
                     },
-                    merge::{merge_date_field, merge_geopoint_field},
+                    merge::{merge_field, CommittedField, UncommittedField},
                 },
                 search::SearchDocumentContext,
                 ReadError,
@@ -224,7 +220,8 @@ impl Index {
                 UncommittedBoolField::empty(info.field_path.clone()),
             );
             debug!("CommittedBoolField::try_load for field_id {:?}", field_id);
-            let field = CommittedBoolField::try_load(info).context("Cannot load bool field")?;
+            let field = CommittedBoolField::try_load(info, offload_config)
+                .context("Cannot load bool field")?;
             debug!("DONE");
             committed_fields.bool_fields.insert(field_id, field);
         }
@@ -238,7 +235,8 @@ impl Index {
                 field_id,
                 UncommittedNumberField::empty(info.field_path.clone()),
             );
-            let field = CommittedNumberField::try_load(info).context("Cannot load number field")?;
+            let field = CommittedNumberField::try_load(info, offload_config)
+                .context("Cannot load number field")?;
             committed_fields.number_fields.insert(field_id, field);
         }
         debug!("Number fields loaded");
@@ -251,7 +249,8 @@ impl Index {
                 field_id,
                 UncommittedDateFilterField::empty(info.field_path.clone()),
             );
-            let field = CommittedDateField::try_load(info).context("Cannot load date field")?;
+            let field = CommittedDateField::try_load(info, offload_config)
+                .context("Cannot load date field")?;
             committed_fields.date_fields.insert(field_id, field);
         }
 
@@ -276,7 +275,7 @@ impl Index {
                 field_id,
                 UncommittedStringFilterField::empty(info.field_path.clone()),
             );
-            let field = CommittedStringFilterField::try_load(info)
+            let field = CommittedStringFilterField::try_load(info, offload_config)
                 .context("Cannot load string filter field")?;
             committed_fields
                 .string_filter_fields
@@ -456,12 +455,13 @@ impl Index {
             let data_dir = data_dir_with_offset.join(field_id.0.to_string());
             let uncommitted = uncommitted_fields.bool_fields.get(&field_id);
             let committed = committed_fields.bool_fields.get(&field_id);
-            if let Some(merged) = merge_bool_field(
+            if let Some(merged) = merge_field(
                 uncommitted,
                 committed,
                 data_dir,
                 &self.uncommitted_deleted_documents,
                 is_promoted,
+                &self.offload_config,
             )
             .context("Cannot merge bool field")?
             {
@@ -489,12 +489,13 @@ impl Index {
             let data_dir = data_dir_with_offset.join(field_id.0.to_string());
             let uncommitted = uncommitted_fields.number_fields.get(&field_id);
             let committed = committed_fields.number_fields.get(&field_id);
-            if let Some(merged) = merge_number_field(
+            if let Some(merged) = merge_field(
                 uncommitted,
                 committed,
                 data_dir,
                 &self.uncommitted_deleted_documents,
                 is_promoted,
+                &self.offload_config,
             )
             .context("Cannot merge number field")?
             {
@@ -522,12 +523,13 @@ impl Index {
             let data_dir = data_dir_with_offset.join(field_id.0.to_string());
             let uncommitted = uncommitted_fields.date_fields.get(&field_id);
             let committed = committed_fields.date_fields.get(&field_id);
-            if let Some(merged) = merge_date_field(
+            if let Some(merged) = merge_field(
                 uncommitted,
                 committed,
                 data_dir,
                 &self.uncommitted_deleted_documents,
                 is_promoted,
+                &self.offload_config,
             )
             .context("Cannot merge date field")?
             {
@@ -555,12 +557,13 @@ impl Index {
             let data_dir = data_dir_with_offset.join(field_id.0.to_string());
             let uncommitted = uncommitted_fields.geopoint_fields.get(&field_id);
             let committed = committed_fields.geopoint_fields.get(&field_id);
-            let output = merge_geopoint_field(
+            let output = merge_field(
                 uncommitted,
                 committed,
                 data_dir,
                 &self.uncommitted_deleted_documents,
                 is_promoted,
+                &self.offload_config,
             )
             .context("Cannot merge geopoint field")?;
 
@@ -589,12 +592,13 @@ impl Index {
             let data_dir = data_dir_with_offset.join(field_id.0.to_string());
             let uncommitted = uncommitted_fields.string_filter_fields.get(&field_id);
             let committed = committed_fields.string_filter_fields.get(&field_id);
-            if let Some(merged) = merge_string_filter_field(
+            if let Some(merged) = merge_field(
                 uncommitted,
                 committed,
                 data_dir,
                 &self.uncommitted_deleted_documents,
                 is_promoted,
+                &self.offload_config,
             )
             .context("Cannot merge string filter field")?
             {
@@ -622,7 +626,7 @@ impl Index {
             let data_dir = data_dir_with_offset.join(field_id.0.to_string());
             let uncommitted = uncommitted_fields.string_fields.get(&field_id);
             let committed = committed_fields.string_fields.get(&field_id);
-            if let Some(merged) = merge_string_field(
+            if let Some(merged) = merge_field(
                 uncommitted,
                 committed,
                 data_dir,
@@ -656,7 +660,7 @@ impl Index {
             let data_dir = data_dir_with_offset.join(field_id.0.to_string());
             let uncommitted = uncommitted_fields.vector_fields.get(&field_id);
             let committed = committed_fields.vector_fields.get(&field_id);
-            if let Some(merged) = merge_vector_field(
+            if let Some(merged) = merge_field(
                 uncommitted,
                 committed,
                 data_dir,
@@ -806,7 +810,7 @@ impl Index {
                 MergeResult::Changed(merged) => {
                     #[cfg(debug_assertions)]
                     {
-                        let data_dir = merged.get_field_info().data_dir;
+                        let data_dir = merged.metadata().data_dir;
                         let offset_str = data_dir.components().rev().nth(1).unwrap();
                         assert_eq!(
                             offset_str.as_os_str().to_str().unwrap(),
@@ -879,7 +883,7 @@ impl Index {
             string_field_ids: committed_fields
                 .string_fields
                 .iter()
-                .map(|(k, v)| (*k, v.get_field_info()))
+                .map(|(k, v)| (*k, v.metadata()))
                 .collect(),
             vector_field_ids: committed_fields
                 .vector_fields
@@ -950,7 +954,7 @@ impl Index {
                 committed_fields
                     .string_fields
                     .values()
-                    .map(|f| f.get_field_info().data_dir),
+                    .map(|f| f.metadata().data_dir),
             )
             .chain(
                 committed_fields
@@ -1578,7 +1582,7 @@ impl Index {
             }
         }));
         fields_stats.extend(committed_fields.string_fields.iter().map(|(k, v)| {
-            let path = v.get_field_info().field_path.join(".");
+            let path = v.metadata().field_path.join(".");
             let stats = v.stats();
             let stats = CommittedStringFieldStats {
                 global_info: stats.global_info.clone(),

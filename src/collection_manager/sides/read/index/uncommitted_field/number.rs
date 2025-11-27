@@ -6,7 +6,10 @@ use std::{
 
 use serde::Serialize;
 
-use crate::types::{DocumentId, Number, NumberFilter};
+use crate::{
+    collection_manager::sides::read::index::merge::UncommittedField,
+    types::{DocumentId, Number, NumberFilter},
+};
 
 #[derive(Debug)]
 pub struct UncommittedNumberField {
@@ -28,10 +31,6 @@ impl UncommittedNumberField {
 
     pub fn len(&self) -> usize {
         self.inner.len()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.len() == 0
     }
 
     pub fn clear(&mut self) {
@@ -126,4 +125,10 @@ pub struct UncommittedNumberFieldStats {
     pub min: Number,
     pub max: Number,
     pub count: usize,
+}
+
+impl UncommittedField for UncommittedNumberField {
+    fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
 }
