@@ -169,6 +169,7 @@ pub struct WriteSide {
 
     jwt_manager: JwtManager,
 
+    #[allow(dead_code)]
     python_service: Arc<PythonService>,
 }
 

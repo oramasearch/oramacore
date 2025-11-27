@@ -142,6 +142,7 @@ pub struct ReadSide {
     stop_sender: tokio::sync::broadcast::Sender<()>,
     stop_done_receiver: OramaAsyncLock<tokio::sync::mpsc::Receiver<()>>,
 
+    #[allow(dead_code)]
     python_service: Arc<PythonService>,
 }
 
