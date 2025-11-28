@@ -846,7 +846,7 @@ impl CollectionReader {
         Ok(())
     }
 
-    pub async fn stats(&self, req: CollectionStatsRequest) -> Result<CollectionStats, ReadError> {
+    pub async fn stats(&self, _req: CollectionStatsRequest) -> Result<CollectionStats, ReadError> {
         let indexes_lock = self.indexes.read("stats").await;
         let mut indexes_stats = Vec::with_capacity(indexes_lock.len());
         let mut embedding_model: Option<String> = None;
@@ -864,7 +864,7 @@ impl CollectionReader {
                 }
             }
 
-            indexes_stats.push(i.stats(false, req.with_keys).await?);
+            indexes_stats.push(i.stats(false).await?);
         }
         drop(indexes_lock);
 
@@ -873,7 +873,7 @@ impl CollectionReader {
             if i.is_deleted() {
                 continue;
             }
-            indexes_stats.push(i.stats(true, req.with_keys).await?);
+            indexes_stats.push(i.stats(true).await?);
         }
 
         let lock = self.hook.read("stats").await;
@@ -1160,7 +1160,8 @@ pub struct Committed {
     pub epoch: u64,
 }
 
-#[derive(Serialize, Debug)]
+use derive_more::From;
+#[derive(Serialize, Debug, From)]
 #[serde(tag = "type")]
 pub enum IndexFieldStatsType {
     #[serde(rename = "uncommitted_bool")]

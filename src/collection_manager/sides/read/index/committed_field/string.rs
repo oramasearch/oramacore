@@ -22,6 +22,7 @@ use crate::{
                 committed_field::offload_utils::{
                     create_counter, should_offload, update_invocation_counter, Cow,
                 },
+                merge::{CommittedField, CommittedFieldMetadata, Field},
                 search_context::FullTextSearchContext,
                 uncommitted_field::UncommittedStringField,
             },
@@ -32,7 +33,6 @@ use crate::{
     merger::MergedIterator,
     types::DocumentId,
 };
-use oramacore_lib::fs::create_if_not_exists;
 
 const EXACT_MATCH_BOOST_MULTIPLIER: f32 = 3.0;
 
@@ -326,7 +326,83 @@ pub struct CommittedStringField {
 }
 
 impl CommittedStringField {
-    pub fn try_load(metadata: StringFieldInfo, offload_config: OffloadFieldConfig) -> Result<Self> {
+    fn unload(&self) {
+        let lock = self.status.read("unload_if_not_used").unwrap();
+        // This field is already unloaded. Skip.
+        if let StringStatus::Unloaded = &**lock {
+            return;
+        }
+        drop(lock); // Release the read lock before unloading
+
+        let mut lock = self.status.write("unload").unwrap();
+        // Double check if another thread unloaded the field meanwhile.
+        if let StringStatus::Unloaded = &**lock {
+            return;
+        }
+
+        self.stats
+            .loaded
+            .store(false, std::sync::atomic::Ordering::Release);
+
+        **lock = StringStatus::Unloaded;
+    }
+
+    pub fn unload_if_not_used(&self) {
+        // Some invocations happened recently, do not unload.
+        if should_offload(&self.invocation_counter, self.unload_window) {
+            self.unload();
+        }
+    }
+
+    pub fn search(
+        &self,
+        context: &mut FullTextSearchContext<'_, '_>,
+        scorer: &mut BM25Scorer<DocumentId>,
+        tolerance: Option<u8>,
+    ) -> Result<()> {
+        update_invocation_counter(&self.invocation_counter);
+        if context.tokens.is_empty() {
+            return Ok(());
+        }
+
+        let lock = self.status.read("search").unwrap();
+        let lock = if let StringStatus::Unloaded = &**lock {
+            drop(lock); // Release the read lock before loading
+
+            let layout = load_layout(&self.metadata.data_dir)?;
+            let mut write_lock = self.status.write("load").unwrap();
+            **write_lock = StringStatus::Loaded(layout);
+            self.stats
+                .loaded
+                .store(true, std::sync::atomic::Ordering::Release);
+            drop(write_lock); // Release the write lock
+
+            self.status.read("search").unwrap()
+        } else {
+            lock
+        };
+        let vector_status = &**lock;
+        let layout = match vector_status {
+            StringStatus::Loaded(layout) => layout,
+            StringStatus::Unloaded => {
+                // This never happens because of the logic above.
+                return Err(anyhow!("Cannot search unloaded vector field"));
+            }
+        };
+
+        if context.tokens.len() == 1 {
+            layout.search_without_phrase_match(context, scorer, tolerance)
+        } else {
+            layout.search_with_phrase_match(context, scorer, tolerance)
+        }
+    }
+}
+
+impl CommittedField for CommittedStringField {
+    type FieldMetadata = StringFieldInfo;
+    type Uncommitted = UncommittedStringField;
+
+    fn try_load(metadata: StringFieldInfo, offload_config: OffloadFieldConfig) -> Result<Self> {
         let layout = load_layout(&metadata.data_dir).context("Cannot load vector layout")?;
 
         Ok(Self {
@@ -342,17 +418,14 @@ impl CommittedStringField {
         })
     }
 
-    pub fn from_uncommitted(
+    fn from_uncommitted(
         uncommitted: &UncommittedStringField,
         data_dir: PathBuf,
         uncommitted_document_deletions: &HashSet<DocumentId>,
         offload_config: OffloadFieldConfig,
     ) -> Result<Self> {
         let mut length_per_documents = uncommitted.field_length_per_doc();
-
         let mut posting_id_generator = 0;
-
-        create_if_not_exists(&data_dir)?;
 
         let mut delta_committed_storage: HashMap<u64, Vec<(DocumentId, PostingIdPosition)>> =
             Default::default();
@@ -416,19 +489,14 @@ impl CommittedStringField {
         })
     }
 
-    pub fn add_uncommitted(
+    fn add_uncommitted(
         &self,
         uncommitted: &UncommittedStringField,
         data_dir: PathBuf,
         uncommitted_document_deletions: &HashSet<DocumentId>,
         offload_config: OffloadFieldConfig,
     ) -> Result<Self> {
-        debug_assert_eq!(uncommitted.field_path(), self.metadata.field_path.as_ref(),);
-
         let length_per_documents = uncommitted.field_length_per_doc();
-
-        create_if_not_exists(&data_dir)
-            .context("Cannot create data directory for committed string field")?;
 
         let new_posting_storage_file = data_dir.join(POSTING_ID_INDEX_FILE_NAME);
 
@@ -553,83 +621,20 @@ impl CommittedStringField {
         })
     }
 
-    pub fn get_field_info(&self) -> StringFieldInfo {
+    fn metadata(&self) -> StringFieldInfo {
         self.metadata.clone()
     }
+}
 
-    pub fn stats(&self) -> &CommittedStringFieldStats {
-        &self.stats
+impl Field for CommittedStringField {
+    type FieldStats = CommittedStringFieldStats;
+
+    fn field_path(&self) -> &Box<[String]> {
+        &self.metadata.field_path
     }
 
-    fn unload(&self) {
-        let lock = self.status.read("unload_if_not_used").unwrap();
-        // This field is already unloaded. Skip.
-        if let StringStatus::Unloaded = &**lock {
-            return;
-        }
-        drop(lock); // Release the read lock before unloading
-
-        let mut lock = self.status.write("unload").unwrap();
-        // Double check if another thread unloaded the field meanwhile.
-        if let StringStatus::Unloaded = &**lock {
-            return;
-        }
-
-        self.stats
-            .loaded
-            .store(false, std::sync::atomic::Ordering::Release);
-
-        **lock = StringStatus::Unloaded;
-    }
-
-    pub fn unload_if_not_used(&self) {
-        // Some invocations happened recently, do not unload.
-        if should_offload(&self.invocation_counter, self.unload_window) {
-            self.unload();
-        }
-    }
-
-    pub fn search(
-        &self,
-        context: &mut FullTextSearchContext<'_, '_>,
-        scorer: &mut BM25Scorer<DocumentId>,
-        tolerance: Option<u8>,
-    ) -> Result<()> {
-        update_invocation_counter(&self.invocation_counter);
-        if context.tokens.is_empty() {
-            return Ok(());
-        }
-
-        let lock = self.status.read("search").unwrap();
-        let lock = if let StringStatus::Unloaded = &**lock {
-            drop(lock); // Release the read lock before loading
-
-            let layout = load_layout(&self.metadata.data_dir)?;
-            let mut write_lock = self.status.write("load").unwrap();
-            **write_lock = StringStatus::Loaded(layout);
-            self.stats
-                .loaded
-                .store(true, std::sync::atomic::Ordering::Release);
-            drop(write_lock); // Release the write lock
-
-            self.status.read("search").unwrap()
-        } else {
-            lock
-        };
-        let vector_status = &**lock;
-        let layout = match vector_status {
-            StringStatus::Loaded(layout) => layout,
-            StringStatus::Unloaded => {
-                // This never happens because of the logic above.
-                return Err(anyhow!("Cannot search unloaded vector field"));
-            }
-        };
-
-        if context.tokens.len() == 1 {
-            layout.search_without_phrase_match(context, scorer, tolerance)
-        } else {
-            layout.search_with_phrase_match(context, scorer, tolerance)
-        }
+    fn stats(&self) -> CommittedStringFieldStats {
+        self.stats.clone()
     }
 }
 
@@ -641,6 +646,16 @@ pub struct CommittedStringFieldStats {
     pub key_count: usize,
     pub global_info: GlobalInfo,
     pub loaded: AtomicBool,
+}
+
+impl Clone for CommittedStringFieldStats {
+    fn clone(&self) -> Self {
+        Self {
+            key_count: self.key_count,
+            global_info: self.global_info.clone(),
+            loaded: AtomicBool::new(self.loaded.load(std::sync::atomic::Ordering::Acquire)),
+        }
+    }
 }
 
 const FST_INDEX_FILE_NAME: &str = "fst.map";
@@ -776,6 +791,19 @@ impl PostingIdStorage {
 pub struct StringFieldInfo {
     pub field_path: Box<[String]>,
     pub data_dir: PathBuf,
+}
+
+impl CommittedFieldMetadata for StringFieldInfo {
+    fn data_dir(&self) -> &PathBuf {
+        &self.data_dir
+    }
+
+    fn set_data_dir(&mut self, data_dir: PathBuf) {
+        self.data_dir = data_dir;
+    }
+    fn field_path(&self) -> &Box<[String]> {
+        &self.field_path
+    }
 }
 
 #[cfg(test)]

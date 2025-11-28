@@ -2,7 +2,10 @@ use std::collections::HashSet;
 
 use serde::Serialize;
 
-use crate::types::DocumentId;
+use crate::{
+    collection_manager::sides::read::index::merge::{Field, UncommittedField},
+    types::DocumentId,
+};
 
 #[derive(Debug)]
 pub struct UncommittedBoolField {
@@ -18,21 +21,8 @@ impl UncommittedBoolField {
         }
     }
 
-    pub fn field_path(&self) -> &[String] {
-        &self.field_path
-    }
-
     pub fn len(&self) -> usize {
         self.inner.0.len() + self.inner.1.len()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.len() == 0
-    }
-
-    pub fn clear(&mut self) {
-        self.inner.0 = HashSet::new();
-        self.inner.1 = HashSet::new();
     }
 
     pub fn insert(&mut self, id: DocumentId, value: bool) {
@@ -40,13 +30,6 @@ impl UncommittedBoolField {
             self.inner.0.insert(id);
         } else {
             self.inner.1.insert(id);
-        }
-    }
-
-    pub fn stats(&self) -> UncommittedBoolFieldStats {
-        UncommittedBoolFieldStats {
-            false_count: self.inner.1.len(),
-            true_count: self.inner.0.len(),
         }
     }
 
@@ -68,6 +51,32 @@ impl UncommittedBoolField {
 
 fn f(d: &DocumentId) -> DocumentId {
     *d
+}
+
+impl UncommittedField for UncommittedBoolField {
+    fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    fn clear(&mut self) {
+        self.inner.0 = HashSet::new();
+        self.inner.1 = HashSet::new();
+    }
+}
+
+impl Field for UncommittedBoolField {
+    type FieldStats = UncommittedBoolFieldStats;
+
+    fn field_path(&self) -> &Box<[String]> {
+        &self.field_path
+    }
+
+    fn stats(&self) -> Self::FieldStats {
+        UncommittedBoolFieldStats {
+            false_count: self.inner.1.len(),
+            true_count: self.inner.0.len(),
+        }
+    }
 }
 
 #[derive(Serialize, Debug)]

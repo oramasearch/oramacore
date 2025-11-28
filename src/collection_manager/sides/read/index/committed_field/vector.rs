@@ -20,6 +20,7 @@ use crate::{
             committed_field::offload_utils::{
                 create_counter, should_offload, update_invocation_counter, Cow,
             },
+            merge::{CommittedField, CommittedFieldMetadata, Field},
             uncommitted_field::UncommittedVectorField,
         },
         search::SearchDocumentContext,
@@ -43,6 +44,17 @@ pub struct CommittedVectorFieldStats {
     pub layout: VectorLayoutType,
 }
 
+impl Clone for CommittedVectorFieldStats {
+    fn clone(&self) -> Self {
+        Self {
+            dimensions: self.dimensions,
+            vector_count: self.vector_count,
+            loaded: AtomicBool::new(self.loaded.load(std::sync::atomic::Ordering::Acquire)),
+            layout: self.layout,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Serialize, Deserialize, Debug)]
 pub enum VectorLayoutType {
     #[serde(rename = "hnsw")]
@@ -61,25 +73,25 @@ impl Display for VectorLayoutType {
 
 enum VectorLayout {
     Hnsw(Box<HNSW2Index<DocumentId>>),
-    Plain(VectorBruteForce<DocumentId>),
+    BruteForce(VectorBruteForce<DocumentId>),
 }
 impl VectorLayout {
     fn as_layout_type(&self) -> VectorLayoutType {
         match self {
             VectorLayout::Hnsw(_) => VectorLayoutType::Hnsw,
-            VectorLayout::Plain(_) => VectorLayoutType::Plain,
+            VectorLayout::BruteForce(_) => VectorLayoutType::Plain,
         }
     }
     fn len(&self) -> usize {
         match self {
             VectorLayout::Hnsw(index) => index.len(),
-            VectorLayout::Plain(index) => index.len(),
+            VectorLayout::BruteForce(index) => index.len(),
         }
     }
     fn dim(&self) -> usize {
         match self {
             VectorLayout::Hnsw(index) => index.dim(),
-            VectorLayout::Plain(index) => index.dim(),
+            VectorLayout::BruteForce(index) => index.dim(),
         }
     }
     fn add(&mut self, vector: &[f32], doc_id: DocumentId) -> Result<()> {
@@ -87,7 +99,7 @@ impl VectorLayout {
             VectorLayout::Hnsw(index) => {
                 index.add(vector, doc_id).context("Cannot add vector")?;
             }
-            VectorLayout::Plain(index) => {
+            VectorLayout::BruteForce(index) => {
                 index.add_owned(vector.to_vec(), doc_id);
             }
         }
@@ -100,7 +112,7 @@ impl VectorLayout {
                     .add_owned(vector, doc_id)
                     .context("Cannot add vector")?;
             }
-            VectorLayout::Plain(index) => {
+            VectorLayout::BruteForce(index) => {
                 index.add_owned(vector, doc_id);
             }
         }
@@ -109,7 +121,7 @@ impl VectorLayout {
     fn get_data(&self) -> Box<dyn Iterator<Item = (DocumentId, &[f32])> + '_> {
         match self {
             VectorLayout::Hnsw(index) => Box::new(index.get_data()),
-            VectorLayout::Plain(index) => Box::new(index.get_data()),
+            VectorLayout::BruteForce(index) => Box::new(index.get_data()),
         }
     }
     fn save(&self, data_dir: &PathBuf) -> Result<()> {
@@ -122,7 +134,7 @@ impl VectorLayout {
                     .write_bincode_data(&index)
                     .context("Cannot write hnsw file")?;
             }
-            Self::Plain(index) => {
+            Self::BruteForce(index) => {
                 let dump_file_path = data_dir.join(BRUTE_FORCE_INDEX_FILE_NAME);
                 BufferedFile::create_or_overwrite(dump_file_path)
                     .context("Cannot create vector file")?
@@ -173,7 +185,7 @@ impl VectorLayout {
                     }
                 }
             }
-            VectorLayout::Plain(index) => {
+            VectorLayout::BruteForce(index) => {
                 let data = index.search(target, limit, similarity, search_document_context);
 
                 for (doc_id, score) in data {
@@ -203,8 +215,11 @@ pub struct CommittedVectorField {
     unload_window: Duration,
 }
 
-impl CommittedVectorField {
-    pub fn try_load(metadata: VectorFieldInfo, offload_config: OffloadFieldConfig) -> Result<Self> {
+impl CommittedField for CommittedVectorField {
+    type FieldMetadata = VectorFieldInfo;
+    type Uncommitted = UncommittedVectorField;
+
+    fn try_load(metadata: VectorFieldInfo, offload_config: OffloadFieldConfig) -> Result<Self> {
         let layout = load_layout(&metadata.data_dir).context("Cannot load vector layout")?;
 
         Ok(Self {
@@ -221,7 +236,7 @@ impl CommittedVectorField {
         })
     }
 
-    pub fn from_uncommitted(
+    fn from_uncommitted(
         uncommitted: &UncommittedVectorField,
         data_dir: PathBuf,
         uncommitted_document_deletions: &HashSet<DocumentId>,
@@ -240,13 +255,12 @@ impl CommittedVectorField {
                     new_index.add_owned(vector, id);
                 }
             }
-            create_if_not_exists(&data_dir).context("Cannot create data directory")?;
             BufferedFile::create_or_overwrite(data_dir.join(BRUTE_FORCE_INDEX_FILE_NAME))
                 .context("Cannot create vector file")?
                 .write_bincode_data(&new_index)
                 .context("Cannot write vector file")?;
 
-            VectorLayout::Plain(new_index)
+            VectorLayout::BruteForce(new_index)
         } else {
             let mut new_index = HNSW2Index::new(uncommitted.dimension);
             for (id, vectors) in iter {
@@ -262,7 +276,6 @@ impl CommittedVectorField {
             }
             new_index.build().context("Cannot build hnsw index")?;
 
-            create_if_not_exists(&data_dir).context("Cannot create data directory")?;
             BufferedFile::create_or_overwrite(data_dir.join(HNSW_INDEX_FILE_NAME))
                 .context("Cannot create hnsw file")?
                 .write_bincode_data(&new_index)
@@ -289,22 +302,13 @@ impl CommittedVectorField {
         })
     }
 
-    pub fn metadata(&self) -> VectorFieldInfo {
-        self.metadata.clone()
-    }
-
-    pub fn stats(&self) -> &CommittedVectorFieldStats {
-        &self.stats
-    }
-
-    pub fn add_uncommitted(
+    fn add_uncommitted(
         &self,
         uncommitted: &UncommittedVectorField,
         data_dir: PathBuf,
         uncommitted_document_deletions: &HashSet<DocumentId>,
         offload_config: OffloadFieldConfig,
     ) -> Result<Self> {
-        debug_assert_eq!(uncommitted.field_path(), self.metadata.field_path.as_ref(),);
         debug_assert_eq!(uncommitted.dimension, self.stats.dimensions,);
         debug_assert_eq!(uncommitted.get_model(), self.metadata.model,);
 
@@ -314,7 +318,7 @@ impl CommittedVectorField {
         let mut new_layout = if total_docs < MIN_HNSW_DOCS {
             let mut brute_force = VectorBruteForce::new(dim);
             brute_force.set_capacity(total_docs);
-            VectorLayout::Plain(brute_force)
+            VectorLayout::BruteForce(brute_force)
         } else {
             let hnsw = HNSW2Index::new(dim);
             VectorLayout::Hnsw(Box::new(hnsw))
@@ -371,6 +375,24 @@ impl CommittedVectorField {
         })
     }
 
+    fn metadata(&self) -> VectorFieldInfo {
+        self.metadata.clone()
+    }
+}
+
+impl Field for CommittedVectorField {
+    type FieldStats = CommittedVectorFieldStats;
+
+    fn field_path(&self) -> &Box<[String]> {
+        &self.metadata.field_path
+    }
+
+    fn stats(&self) -> CommittedVectorFieldStats {
+        self.stats.clone()
+    }
+}
+
+impl CommittedVectorField {
     pub fn search(
         &self,
         target: &[f32],
@@ -460,7 +482,7 @@ fn load_layout(data_dir: &Path) -> Result<VectorLayout> {
             .map_err(|e| anyhow!("Cannot open hnsw file: {e}"))?
             .read_bincode_data()
             .map_err(|e| anyhow!("Cannot read hnsw file: {e}"))?;
-        Ok(VectorLayout::Plain(inner))
+        Ok(VectorLayout::BruteForce(inner))
     }
 }
 
@@ -469,4 +491,17 @@ pub struct VectorFieldInfo {
     pub field_path: Box<[String]>,
     pub data_dir: PathBuf,
     pub model: Model,
+}
+
+impl CommittedFieldMetadata for VectorFieldInfo {
+    fn data_dir(&self) -> &PathBuf {
+        &self.data_dir
+    }
+
+    fn set_data_dir(&mut self, data_dir: PathBuf) {
+        self.data_dir = data_dir;
+    }
+    fn field_path(&self) -> &Box<[String]> {
+        &self.field_path
+    }
 }

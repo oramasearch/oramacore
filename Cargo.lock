@@ -4434,6 +4434,7 @@ dependencies = [
  "dashmap",
  "dateparser",
  "debug_panic",
+ "derive_more",
  "duration-str",
  "duration-string",
  "fake",
@@ -8333,9 +8334,9 @@ dependencies = [
 
 [[package]]
 name = "zebo"
-version = "0.5.0"
+version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4798e1e473d66afadd6c3b18c60179ce9b26deb18a5d1525714aac6c31fb03e2"
+checksum = "580a626190ef268f84270b47a9194ca7e34e1b34f159e859abec38f1a8efe665"
 dependencies = [
  "clap",
  "tracing",

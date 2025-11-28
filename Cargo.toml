@@ -86,7 +86,7 @@ reqwest = { version = "0.12", features = ["json"] }
 fs_extra = "1.3.0"
 rustls = "0.23.26"
 
-zebo = "0.5.0"
+zebo = "0.5.1"
 llm_json = "1.0.2"
 dateparser = "0.2.1"
 clap = { version = "4.5.39", features = ["derive"] }
@@ -99,6 +99,7 @@ pyo3 = { version = "0.27.1", features = ["auto-initialize"]}
 serde-pyobject = "0.7.0"
 pyo3-async-runtimes = { version = "0.27", features = ["tokio-runtime"] }
 include_dir = "0.7"
+derive_more = "2.0.1"
 
 [dev-dependencies]
 # hurl = "6.0.0"

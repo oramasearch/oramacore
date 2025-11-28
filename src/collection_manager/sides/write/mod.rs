@@ -873,7 +873,7 @@ impl WriteSide {
                 trace!("Processing document {}/{}", processed_count, document_count);
             }
 
-            if index_operation_batch.capacity() * 4 / 5 < index_operation_batch.len() {
+            if index_operation_batch.len() > 200 {
                 trace!("Sending operations");
                 self.op_sender
                     .send_batch(index_operation_batch)

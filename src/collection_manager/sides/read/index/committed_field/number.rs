@@ -5,8 +5,15 @@ use anyhow::{Context, Result};
 use oramacore_lib::data_structures::ordered_key::BoundedValue;
 use serde::{Deserialize, Serialize};
 
-use crate::types::{DocumentId, Number, NumberFilter, SerializableNumber};
-use oramacore_lib::fs::{create_if_not_exists, BufferedFile};
+use crate::{
+    collection_manager::sides::read::index::{
+        merge::{CommittedField, CommittedFieldMetadata, Field},
+        uncommitted_field::UncommittedNumberField,
+    },
+    merger::MergedIterator,
+    types::{DocumentId, Number, NumberFilter, SerializableNumber},
+};
+use oramacore_lib::fs::BufferedFile;
 
 #[derive(Debug)]
 pub struct CommittedNumberField {
@@ -16,103 +23,13 @@ pub struct CommittedNumberField {
 }
 
 impl CommittedNumberField {
-    pub fn from_iter<I>(field_path: Box<[String]>, iter: I, data_dir: PathBuf) -> Result<Self>
-    where
-        I: Iterator<Item = (SerializableNumber, HashSet<DocumentId>)>,
-    {
-        let vec: Vec<_> = iter.collect();
-        let s = Self {
-            field_path,
-            vec,
-            data_dir,
-        };
-
-        s.commit().context("Failed to commit number field")?;
-
-        Ok(s)
-    }
-
-    #[allow(deprecated)]
-    pub fn try_load(info: NumberFieldInfo) -> Result<Self> {
-        let data_dir = info.data_dir;
-        // Try to load from the new format first, and track if we need to commit (migrate from old format)
-        let (vec, needs_commit) = match BufferedFile::open(data_dir.join("number_vec.bin"))
-            .and_then(|f| f.read_bincode_data::<Vec<(SerializableNumber, HashSet<DocumentId>)>>())
-        {
-            Ok(vec) => {
-                // Successfully loaded from new format, no commit needed
-                (vec, false)
-            }
-            Err(_) => {
-                // Failed to load from new format, try to migrate from old format
-                use oramacore_lib::data_structures::ordered_key::OrderedKeyIndex;
-                let inner =
-                    OrderedKeyIndex::<SerializableNumber, DocumentId>::load(data_dir.clone())?;
-
-                let items = inner
-                    .get_items(
-                        (true, SerializableNumber::min_value()),
-                        (true, SerializableNumber::max_value()),
-                    )
-                    .context("Cannot get items for number field")?;
-
-                let mut vec: Vec<_> = items.map(|item| (item.key, item.values)).collect();
-                // ensure the order is by key. This should not be necessary, but we do it to ensure consistency.
-                vec.sort_by_key(|(key, _)| key.0);
-                // Need to commit to save in new format
-                (vec, true)
-            }
-        };
-
-        let s = Self {
-            field_path: info.field_path,
-            vec,
-            data_dir,
-        };
-
-        // Only commit if we migrated from old format
-        if needs_commit {
-            s.commit().context("Failed to commit number field")?;
-        }
-
-        Ok(s)
-    }
-
     fn commit(&self) -> Result<()> {
-        // Ensure the data directory exists
-        create_if_not_exists(&self.data_dir).context("Failed to create data directory")?;
-
         BufferedFile::create_or_overwrite(self.data_dir.join("number_vec.bin"))
             .context("Failed to create number_vec.bin")?
             .write_bincode_data(&self.vec)
             .context("Failed to serialize number vec")?;
 
         Ok(())
-    }
-
-    pub fn get_field_info(&self) -> NumberFieldInfo {
-        NumberFieldInfo {
-            field_path: self.field_path.clone(),
-            data_dir: self.data_dir.clone(),
-        }
-    }
-
-    pub fn field_path(&self) -> &[String] {
-        &self.field_path
-    }
-
-    pub fn stats(&self) -> Result<CommittedNumberFieldStats> {
-        let min = self.vec.first().map(|(num, _)| num.0);
-        let max = self.vec.last().map(|(num, _)| num.0);
-
-        let (Some(min), Some(max)) = (min, max) else {
-            return Ok(CommittedNumberFieldStats {
-                min: Number::F32(f32::INFINITY),
-                max: Number::F32(f32::NEG_INFINITY),
-            });
-        };
-
-        Ok(CommittedNumberFieldStats { min, max })
     }
 
     pub fn filter<'s, 'iter>(
@@ -160,6 +77,151 @@ impl CommittedNumberField {
         &self,
     ) -> impl DoubleEndedIterator<Item = (SerializableNumber, HashSet<DocumentId>)> + '_ {
         self.vec.iter().cloned()
+    }
+}
+
+impl CommittedField for CommittedNumberField {
+    type FieldMetadata = NumberFieldInfo;
+    type Uncommitted = UncommittedNumberField;
+
+    fn from_uncommitted(
+        uncommitted: &Self::Uncommitted,
+        data_dir: PathBuf,
+        uncommitted_document_deletions: &HashSet<DocumentId>,
+        _offload_config: crate::collection_manager::sides::read::OffloadFieldConfig,
+    ) -> Result<Self> {
+        let vec: Vec<_> = uncommitted
+            .iter()
+            .map(|(n, v)| (SerializableNumber(n), v))
+            .map(|(k, mut d)| {
+                d.retain(|doc_id| !uncommitted_document_deletions.contains(doc_id));
+                (k, d)
+            })
+            .collect();
+
+        let s = Self {
+            field_path: uncommitted.field_path().to_vec().into_boxed_slice(),
+            vec,
+            data_dir,
+        };
+
+        s.commit().context("Failed to commit number field")?;
+
+        Ok(s)
+    }
+
+    #[allow(deprecated)]
+    fn try_load(
+        metadata: Self::FieldMetadata,
+        _offload_config: crate::collection_manager::sides::read::OffloadFieldConfig,
+    ) -> Result<Self> {
+        let data_dir = metadata.data_dir;
+        // Try to load from the new format first, and track if we need to commit (migrate from old format)
+        let (vec, needs_commit) = match BufferedFile::open(data_dir.join("number_vec.bin"))
+            .and_then(|f| f.read_bincode_data::<Vec<(SerializableNumber, HashSet<DocumentId>)>>())
+        {
+            Ok(vec) => {
+                // Successfully loaded from new format, no commit needed
+                (vec, false)
+            }
+            Err(_) => {
+                // Failed to load from new format, try to migrate from old format
+                use oramacore_lib::data_structures::ordered_key::OrderedKeyIndex;
+                let inner =
+                    OrderedKeyIndex::<SerializableNumber, DocumentId>::load(data_dir.clone())?;
+
+                let items = inner
+                    .get_items(
+                        (true, SerializableNumber::min_value()),
+                        (true, SerializableNumber::max_value()),
+                    )
+                    .context("Cannot get items for number field")?;
+
+                let mut vec: Vec<_> = items.map(|item| (item.key, item.values)).collect();
+                // ensure the order is by key. This should not be necessary, but we do it to ensure consistency.
+                vec.sort_by_key(|(key, _)| key.0);
+                // Need to commit to save in new format
+                (vec, true)
+            }
+        };
+
+        let s = Self {
+            field_path: metadata.field_path,
+            vec,
+            data_dir,
+        };
+
+        // Only commit if we migrated from old format
+        if needs_commit {
+            s.commit().context("Failed to commit number field")?;
+        }
+
+        Ok(s)
+    }
+
+    fn add_uncommitted(
+        &self,
+        uncommitted: &Self::Uncommitted,
+        data_dir: PathBuf,
+        uncommitted_document_deletions: &HashSet<DocumentId>,
+        _offload_config: crate::collection_manager::sides::read::OffloadFieldConfig,
+    ) -> Result<Self> {
+        let uncommitted_iter = uncommitted.iter().map(|(n, v)| (SerializableNumber(n), v));
+        let committed_iter = self.iter();
+
+        let vec: Vec<_> = MergedIterator::new(
+            committed_iter,
+            uncommitted_iter,
+            |_, v| v,
+            |_, mut v1, v2| {
+                v1.extend(v2);
+                v1
+            },
+        )
+        .map(|(k, mut d)| {
+            d.retain(|doc_id| !uncommitted_document_deletions.contains(doc_id));
+            (k, d)
+        })
+        .collect();
+
+        let s = Self {
+            field_path: uncommitted.field_path().to_vec().into_boxed_slice(),
+            vec,
+            data_dir,
+        };
+
+        s.commit().context("Failed to commit number field")?;
+
+        Ok(s)
+    }
+
+    fn metadata(&self) -> Self::FieldMetadata {
+        NumberFieldInfo {
+            field_path: self.field_path.clone(),
+            data_dir: self.data_dir.clone(),
+        }
+    }
+}
+
+impl Field for CommittedNumberField {
+    type FieldStats = CommittedNumberFieldStats;
+
+    fn field_path(&self) -> &Box<[String]> {
+        &self.field_path
+    }
+
+    fn stats(&self) -> CommittedNumberFieldStats {
+        let min = self.vec.first().map(|(num, _)| num.0);
+        let max = self.vec.last().map(|(num, _)| num.0);
+
+        let (Some(min), Some(max)) = (min, max) else {
+            return CommittedNumberFieldStats {
+                min: Number::F32(f32::INFINITY),
+                max: Number::F32(f32::NEG_INFINITY),
+            };
+        };
+
+        CommittedNumberFieldStats { min, max }
     }
 }
 
@@ -231,30 +293,53 @@ pub struct CommittedNumberFieldStats {
     pub max: Number,
 }
 
+impl CommittedFieldMetadata for NumberFieldInfo {
+    fn data_dir(&self) -> &PathBuf {
+        &self.data_dir
+    }
+
+    fn set_data_dir(&mut self, data_dir: PathBuf) {
+        self.data_dir = data_dir;
+    }
+    fn field_path(&self) -> &Box<[String]> {
+        &self.field_path
+    }
+}
+
 #[cfg(test)]
 mod tests_number {
-    use crate::tests::utils::generate_new_path;
+    use std::time::Duration;
+
+    use oramacore_lib::fs::create_if_not_exists;
+
+    use crate::{
+        collection_manager::sides::read::OffloadFieldConfig, tests::utils::generate_new_path,
+    };
 
     use super::*;
 
     #[test]
     fn test_lt_gt() {
         let path = generate_new_path();
-        let iter = vec![
-            (
-                SerializableNumber(Number::F32(1.0)),
-                HashSet::from([DocumentId(1), DocumentId(2)]),
-            ),
-            (
-                SerializableNumber(Number::F32(2.0)),
-                HashSet::from([DocumentId(3), DocumentId(4)]),
-            ),
-        ]
-        .into_iter();
-        let field = CommittedNumberField::from_iter(
+        create_if_not_exists(&path).unwrap();
+
+        let mut uncommitted = UncommittedNumberField::empty(
             vec!["a".to_string(), "b".to_string()].into_boxed_slice(),
-            iter,
+        );
+        uncommitted.insert(DocumentId(1), Number::F32(1.0));
+        uncommitted.insert(DocumentId(2), Number::F32(1.0));
+        uncommitted.insert(DocumentId(3), Number::F32(2.0));
+        uncommitted.insert(DocumentId(4), Number::F32(2.0));
+
+        let field = CommittedNumberField::from_uncommitted(
+            &uncommitted,
             path,
+            &HashSet::new(),
+            OffloadFieldConfig {
+                unload_window: Duration::from_secs(30 * 60).into(),
+                slot_count_exp: 8,
+                slot_size_exp: 4,
+            },
         )
         .unwrap();
 
