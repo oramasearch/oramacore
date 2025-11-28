@@ -222,9 +222,6 @@ impl DocumentStorage {
         doc_ids.retain(|doc_id| !uncommitted_document_deletions.contains(doc_id));
         drop(uncommitted_document_deletions);
 
-        debug!("Get from committed documents");
-        let committed = self.committed.get_documents_by_ids(&doc_ids).await?;
-
         trace!("Get from uncommitted documents");
         let uncommitted = self.uncommitted.read("get_documents_by_ids").await;
         let uncommitted: Vec<_> = doc_ids
@@ -232,6 +229,17 @@ impl DocumentStorage {
             .map(|doc_id| uncommitted.iter().find(|i| i.0 == *doc_id).cloned())
             .collect();
         trace!("Get from uncommitted documents done");
+
+        debug!("Get from committed documents");
+        let doc_ids_to_find_in_committed: Vec<_> = doc_ids.iter().filter(|id| {
+            uncommitted.iter().find(|p| {
+                match p {
+                    Some((uncommitted_id, _)) => *uncommitted_id == **id,
+                    None => false,
+                }
+            }).is_none()
+        }).copied().collect();
+        let committed = self.committed.get_documents_by_ids(&doc_ids_to_find_in_committed).await?;
 
         let mut result = Vec::with_capacity(doc_ids.len());
         for (i, doc_id) in doc_ids.iter().enumerate() {
