@@ -4,15 +4,18 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    collection_manager::sides::read::index::{
-        committed_field::number::get_iter,
-        merge::{CommittedField, CommittedFieldMetadata, Field},
-        uncommitted_field::UncommittedDateFilterField,
+    collection_manager::sides::read::{
+        index::{
+            committed_field::number::get_iter,
+            merge::{CommittedField, CommittedFieldMetadata, Field},
+            uncommitted_field::UncommittedDateFilterField,
+        },
+        OffloadFieldConfig,
     },
     merger::MergedIterator,
     types::{DateFilter, DocumentId, OramaDate},
 };
-use oramacore_lib::fs::{create_if_not_exists, BufferedFile};
+use oramacore_lib::fs::BufferedFile;
 
 #[derive(Debug)]
 pub struct CommittedDateField {
@@ -23,24 +26,17 @@ pub struct CommittedDateField {
 
 impl CommittedDateField {
     fn commit(&self) -> Result<()> {
-        // Ensure the data directory exists
-        create_if_not_exists(&self.data_dir).context("Failed to create data directory")?;
-
         BufferedFile::create_or_overwrite(self.data_dir.join("date_vec.bin"))
             .context("Failed to create date_vec.bin")?
             .write_bincode_data(&self.vec)
             .context("Failed to serialize date vec")?;
-
         Ok(())
     }
 
-    pub fn filter<'s, 'iter>(
-        &'s self,
+    pub fn filter(
+        &self,
         filter_date: &DateFilter,
-    ) -> Result<impl Iterator<Item = DocumentId> + 'iter>
-    where
-        's: 'iter,
-    {
+    ) -> Result<impl Iterator<Item = DocumentId> + '_> {
         Ok(match filter_date {
             DateFilter::Equal(value) => {
                 get_iter(&self.vec, (true, value.as_i64()), (true, value.as_i64()))
@@ -76,7 +72,7 @@ impl CommittedField for CommittedDateField {
         uncommitted: &Self::Uncommitted,
         data_dir: PathBuf,
         uncommitted_document_deletions: &HashSet<DocumentId>,
-        _offload_config: crate::collection_manager::sides::read::OffloadFieldConfig,
+        _offload_config: OffloadFieldConfig,
     ) -> Result<Self> {
         let vec: Vec<_> = uncommitted
             .iter()
@@ -100,7 +96,7 @@ impl CommittedField for CommittedDateField {
     #[allow(deprecated)]
     fn try_load(
         metadata: Self::FieldMetadata,
-        _offload_config: crate::collection_manager::sides::read::OffloadFieldConfig,
+        _offload_config: OffloadFieldConfig,
     ) -> Result<Self> {
         let data_dir = metadata.data_dir;
         // Try to load from the new format first, and track if we need to commit (migrate from old format)
@@ -147,7 +143,7 @@ impl CommittedField for CommittedDateField {
         uncommitted: &Self::Uncommitted,
         data_dir: PathBuf,
         uncommitted_document_deletions: &HashSet<DocumentId>,
-        _offload_config: crate::collection_manager::sides::read::OffloadFieldConfig,
+        _offload_config: OffloadFieldConfig,
     ) -> Result<Self> {
         let uncommitted_iter = uncommitted.iter();
         let committed_iter = self.iter();

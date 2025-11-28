@@ -11,7 +11,7 @@ use crate::collection_manager::sides::read::index::merge::{
 use crate::collection_manager::sides::read::index::uncommitted_field::UncommittedGeoPointFilterField;
 use crate::collection_manager::sides::read::OffloadFieldConfig;
 use crate::types::{DocumentId, GeoSearchFilter};
-use oramacore_lib::fs::{create_if_not_exists, BufferedFile};
+use oramacore_lib::fs::BufferedFile;
 
 #[derive(Debug)]
 pub struct CommittedGeoPointField {
@@ -40,9 +40,6 @@ impl CommittedGeoPointField {
     }
 
     fn commit(&self) -> Result<()> {
-        // Ensure the data directory exists
-        create_if_not_exists(&self.data_dir).context("Failed to create data directory")?;
-
         BufferedFile::create_or_overwrite(self.data_dir.join("geopoint_tree.bin"))
             .context("Cannot open geopoint file")?
             .write_bincode_data(&self.tree)

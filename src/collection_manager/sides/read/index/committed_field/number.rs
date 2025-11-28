@@ -13,7 +13,7 @@ use crate::{
     merger::MergedIterator,
     types::{DocumentId, Number, NumberFilter, SerializableNumber},
 };
-use oramacore_lib::fs::{create_if_not_exists, BufferedFile};
+use oramacore_lib::fs::BufferedFile;
 
 #[derive(Debug)]
 pub struct CommittedNumberField {
@@ -24,9 +24,6 @@ pub struct CommittedNumberField {
 
 impl CommittedNumberField {
     fn commit(&self) -> Result<()> {
-        // Ensure the data directory exists
-        create_if_not_exists(&self.data_dir).context("Failed to create data directory")?;
-
         BufferedFile::create_or_overwrite(self.data_dir.join("number_vec.bin"))
             .context("Failed to create number_vec.bin")?
             .write_bincode_data(&self.vec)

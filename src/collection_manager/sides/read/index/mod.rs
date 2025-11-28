@@ -564,49 +564,6 @@ impl Index {
         let mut uncommitted_fields = self.uncommitted_fields.write("commit").await;
         let mut committed_fields = self.committed_fields.write("commit").await;
 
-        fn overwrite_committed<
-            UF: UncommittedField,
-            CFM: CommittedFieldMetadata,
-            CF: CommittedField<Uncommitted = UF, FieldMetadata = CFM>,
-        >(
-            index_id: IndexId,
-            offset: Offset,
-            merged_bools_result: HashMap<FieldId, MergeResult<CF>>,
-            committed_fields: &mut HashMap<FieldId, CF>,
-            uncommitted_fields: &mut HashMap<FieldId, UF>,
-        ) {
-            for (field_id, merged) in merged_bools_result {
-                match merged {
-                    MergeResult::Changed(merged) => {
-                        #[cfg(debug_assertions)]
-                        {
-                            let metadata = merged.metadata();
-                            let data_dir = metadata.data_dir();
-                            let mut components = data_dir.components().rev();
-                            let offset_str = components.nth(1).unwrap();
-                            assert_eq!(
-                                offset_str.as_os_str().to_str().unwrap(),
-                                &format!("offset-{}", offset.0),
-                                "Field data dir offset mismatch after commit"
-                            );
-                            // Check if promoting to runtime index was done correctly
-                            let index_id_on_fs = components.next().unwrap();
-                            assert_eq!(
-                                index_id_on_fs.as_os_str().to_str().unwrap(),
-                                index_id.as_str(),
-                                "Field index id mismatch after commit"
-                            );
-                            assert!(std::fs::exists(data_dir).unwrap());
-                        }
-                        committed_fields.insert(field_id, merged);
-                    }
-                    MergeResult::Unchanged => {}
-                }
-                if let Some(uncommitted) = uncommitted_fields.get_mut(&field_id) {
-                    uncommitted.clear();
-                }
-            }
-        }
         overwrite_committed(
             self.id,
             offset,
@@ -2559,6 +2516,51 @@ fn merge_type<
     drop(m);
 
     Ok(merged_fields)
+}
+
+#[allow(unused_variables)]
+fn overwrite_committed<
+    UF: UncommittedField,
+    CFM: CommittedFieldMetadata,
+    CF: CommittedField<Uncommitted = UF, FieldMetadata = CFM>,
+>(
+    index_id: IndexId,
+    offset: Offset,
+    merged_bools_result: HashMap<FieldId, MergeResult<CF>>,
+    committed_fields: &mut HashMap<FieldId, CF>,
+    uncommitted_fields: &mut HashMap<FieldId, UF>,
+) {
+    for (field_id, merged) in merged_bools_result {
+        match merged {
+            MergeResult::Changed(merged) => {
+                #[cfg(debug_assertions)]
+                {
+                    let metadata = merged.metadata();
+                    let data_dir = metadata.data_dir();
+                    let mut components = data_dir.components().rev();
+                    let offset_str = components.nth(1).unwrap();
+                    assert_eq!(
+                        offset_str.as_os_str().to_str().unwrap(),
+                        &format!("offset-{}", offset.0),
+                        "Field data dir offset mismatch after commit"
+                    );
+                    // Check if promoting to runtime index was done correctly
+                    let index_id_on_fs = components.next().unwrap();
+                    assert_eq!(
+                        index_id_on_fs.as_os_str().to_str().unwrap(),
+                        index_id.as_str(),
+                        "Field index id mismatch after commit"
+                    );
+                    assert!(std::fs::exists(data_dir).unwrap());
+                }
+                committed_fields.insert(field_id, merged);
+            }
+            MergeResult::Unchanged => {}
+        }
+        if let Some(uncommitted) = uncommitted_fields.get_mut(&field_id) {
+            uncommitted.clear();
+        }
+    }
 }
 
 #[cfg(test)]

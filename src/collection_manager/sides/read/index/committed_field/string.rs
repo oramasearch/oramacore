@@ -33,7 +33,6 @@ use crate::{
     merger::MergedIterator,
     types::DocumentId,
 };
-use oramacore_lib::fs::create_if_not_exists;
 
 const EXACT_MATCH_BOOST_MULTIPLIER: f32 = 3.0;
 
@@ -426,10 +425,7 @@ impl CommittedField for CommittedStringField {
         offload_config: OffloadFieldConfig,
     ) -> Result<Self> {
         let mut length_per_documents = uncommitted.field_length_per_doc();
-
         let mut posting_id_generator = 0;
-
-        create_if_not_exists(&data_dir)?;
 
         let mut delta_committed_storage: HashMap<u64, Vec<(DocumentId, PostingIdPosition)>> =
             Default::default();

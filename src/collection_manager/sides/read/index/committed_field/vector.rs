@@ -255,7 +255,6 @@ impl CommittedField for CommittedVectorField {
                     new_index.add_owned(vector, id);
                 }
             }
-            create_if_not_exists(&data_dir).context("Cannot create data directory")?;
             BufferedFile::create_or_overwrite(data_dir.join(BRUTE_FORCE_INDEX_FILE_NAME))
                 .context("Cannot create vector file")?
                 .write_bincode_data(&new_index)
@@ -277,7 +276,6 @@ impl CommittedField for CommittedVectorField {
             }
             new_index.build().context("Cannot build hnsw index")?;
 
-            create_if_not_exists(&data_dir).context("Cannot create data directory")?;
             BufferedFile::create_or_overwrite(data_dir.join(HNSW_INDEX_FILE_NAME))
                 .context("Cannot create hnsw file")?
                 .write_bincode_data(&new_index)

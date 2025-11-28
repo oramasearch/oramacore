@@ -17,8 +17,7 @@ use crate::{
     },
     types::DocumentId,
 };
-use oramacore_lib::data_structures::ordered_key::BoundedValue;
-use oramacore_lib::fs::create_if_not_exists;
+use oramacore_lib::{data_structures::ordered_key::BoundedValue, fs::BufferedFile};
 
 #[derive(Debug)]
 pub struct CommittedBoolField {
@@ -29,12 +28,11 @@ pub struct CommittedBoolField {
 
 impl CommittedBoolField {
     fn commit(&self) -> Result<()> {
-        // Ensure the data directory exists
-        create_if_not_exists(&self.data_dir).context("Failed to create data directory")?;
-
         let file_path = self.data_dir.join("bool_map.bin");
-        let file = std::fs::File::create(&file_path).context("Failed to create bool_map.bin")?;
-        bincode::serialize_into(file, &self.map).context("Failed to serialize bool map")?;
+        BufferedFile::create_or_overwrite(file_path)
+            .context("Failed to create bool_map.bin")?
+            .write_bincode_data(&self.map)
+            .context("Failed to serialize bool map")?;
 
         Ok(())
     }
@@ -95,9 +93,12 @@ impl CommittedField for CommittedBoolField {
     ) -> Result<Self> {
         let data_dir: PathBuf = metadata.data_dir;
 
-        let map = match std::fs::File::open(data_dir.join("bool_map.bin")) {
-            Ok(file) => bincode::deserialize_from::<_, HashMap<bool, HashSet<DocumentId>>>(file)
-                .context("Failed to deserialize bool_map.bin")?,
+        let (map, needs_commit) = match std::fs::File::open(data_dir.join("bool_map.bin")) {
+            Ok(file) => (
+                bincode::deserialize_from::<_, HashMap<bool, HashSet<DocumentId>>>(file)
+                    .context("Failed to deserialize bool_map.bin")?,
+                false,
+            ),
             Err(_) => {
                 info!("bool_map.bin not found, reconstructing from OrderedKeyIndex");
                 use oramacore_lib::data_structures::ordered_key::OrderedKeyIndex;
@@ -138,7 +139,7 @@ impl CommittedField for CommittedBoolField {
                     }
                 }
 
-                map
+                (map, true)
             }
         };
 
@@ -148,7 +149,9 @@ impl CommittedField for CommittedBoolField {
             data_dir,
         };
 
-        s.commit().context("Failed to commit bool field")?;
+        if needs_commit {
+            s.commit().context("Failed to commit bool field")?;
+        }
 
         Ok(s)
     }
