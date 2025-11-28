@@ -1157,14 +1157,14 @@ impl Index {
                     }),
                     "hybrid" => SearchMode::Hybrid(HybridMode {
                         term: mode_result.term.clone(),
-                        similarity: Similarity(0.7),
+                        similarity: Similarity::default(),
                         threshold: None,
                         exact: false,
                         tolerance: None,
                     }),
                     "vector" => SearchMode::Vector(VectorMode {
                         term: mode_result.term.clone(),
-                        similarity: Similarity(0.7),
+                        similarity: Similarity::default(),
                     }),
                     _ => anyhow::bail!("Invalid search mode"),
                 }
