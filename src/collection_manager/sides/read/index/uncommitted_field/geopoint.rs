@@ -2,7 +2,10 @@ use oramacore_lib::bkd::{haversine_distance, BKDTree, Coord, Point};
 use serde::Serialize;
 
 use crate::{
-    collection_manager::sides::{read::index::merge::UncommittedField, write::index::GeoPoint},
+    collection_manager::sides::{
+        read::index::merge::{Field, UncommittedField},
+        write::index::GeoPoint,
+    },
     types::{DocumentId, GeoSearchFilter},
 };
 
@@ -28,11 +31,6 @@ impl UncommittedGeoPointFilterField {
 
     pub fn len(&self) -> usize {
         self.count
-    }
-
-    pub fn clear(&mut self) {
-        self.inner = BKDTree::new();
-        self.count = 0;
     }
 
     pub fn insert(&mut self, doc_id: DocumentId, value: GeoPoint) {
@@ -85,18 +83,28 @@ impl UncommittedGeoPointFilterField {
             }
         }
     }
-
-    pub fn stats(&self) -> UncommittedGeoPointFieldStats {
-        UncommittedGeoPointFieldStats { count: self.len() }
-    }
 }
 
 impl UncommittedField for UncommittedGeoPointFilterField {
     fn is_empty(&self) -> bool {
         self.len() == 0
     }
+
+    fn clear(&mut self) {
+        self.inner = BKDTree::new();
+        self.count = 0;
+    }
+}
+
+impl Field for UncommittedGeoPointFilterField {
+    type FieldStats = UncommittedGeoPointFieldStats;
+
     fn field_path(&self) -> &Box<[String]> {
         &self.field_path
+    }
+
+    fn stats(&self) -> UncommittedGeoPointFieldStats {
+        UncommittedGeoPointFieldStats { count: self.len() }
     }
 }
 

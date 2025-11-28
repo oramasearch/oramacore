@@ -2,7 +2,10 @@ use std::collections::{HashMap, HashSet};
 
 use serde::Serialize;
 
-use crate::{collection_manager::sides::read::index::merge::UncommittedField, types::DocumentId};
+use crate::{
+    collection_manager::sides::read::index::merge::{Field, UncommittedField},
+    types::DocumentId,
+};
 
 #[derive(Debug)]
 pub struct UncommittedStringFilterField {
@@ -24,10 +27,6 @@ impl UncommittedStringFilterField {
 
     pub fn len(&self) -> usize {
         self.inner.len()
-    }
-
-    pub fn clear(&mut self) {
-        self.inner = Default::default();
     }
 
     pub fn insert(&mut self, doc_id: DocumentId, value: String) {
@@ -56,21 +55,6 @@ impl UncommittedStringFilterField {
             .iter()
             .map(|(k, doc_ids)| (k.clone(), doc_ids.clone()))
     }
-
-    pub fn stats(&self, with_keys: bool) -> UncommittedStringFilterFieldStats {
-        let doc_count = self.inner.values().map(|v| v.len()).sum();
-        let keys = if with_keys {
-            Some(self.inner.keys().cloned().collect())
-        } else {
-            None
-        };
-
-        UncommittedStringFilterFieldStats {
-            key_count: self.inner.len(),
-            document_count: doc_count,
-            keys,
-        }
-    }
 }
 
 #[derive(Serialize, Debug)]
@@ -84,7 +68,27 @@ impl UncommittedField for UncommittedStringFilterField {
     fn is_empty(&self) -> bool {
         self.len() == 0
     }
+
+    fn clear(&mut self) {
+        self.inner = Default::default();
+    }
+}
+
+impl Field for UncommittedStringFilterField {
+    type FieldStats = UncommittedStringFilterFieldStats;
+
     fn field_path(&self) -> &Box<[String]> {
         &self.field_path
+    }
+
+    fn stats(&self) -> UncommittedStringFilterFieldStats {
+        let doc_count = self.inner.values().map(|v| v.len()).sum();
+        let keys = Some(self.inner.keys().cloned().collect());
+
+        UncommittedStringFilterFieldStats {
+            key_count: self.inner.len(),
+            document_count: doc_count,
+            keys,
+        }
     }
 }

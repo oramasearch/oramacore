@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     collection_manager::sides::read::index::{
-        merge::{CommittedField, CommittedFieldMetadata},
+        merge::{CommittedField, CommittedFieldMetadata, Field},
         uncommitted_field::UncommittedNumberField,
     },
     merger::MergedIterator,
@@ -33,20 +33,6 @@ impl CommittedNumberField {
             .context("Failed to serialize number vec")?;
 
         Ok(())
-    }
-
-    pub fn stats(&self) -> Result<CommittedNumberFieldStats> {
-        let min = self.vec.first().map(|(num, _)| num.0);
-        let max = self.vec.last().map(|(num, _)| num.0);
-
-        let (Some(min), Some(max)) = (min, max) else {
-            return Ok(CommittedNumberFieldStats {
-                min: Number::F32(f32::INFINITY),
-                max: Number::F32(f32::NEG_INFINITY),
-            });
-        };
-
-        Ok(CommittedNumberFieldStats { min, max })
     }
 
     pub fn filter<'s, 'iter>(
@@ -217,6 +203,28 @@ impl CommittedField for CommittedNumberField {
             field_path: self.field_path.clone(),
             data_dir: self.data_dir.clone(),
         }
+    }
+}
+
+impl Field for CommittedNumberField {
+    type FieldStats = CommittedNumberFieldStats;
+
+    fn field_path(&self) -> &Box<[String]> {
+        &self.field_path
+    }
+
+    fn stats(&self) -> CommittedNumberFieldStats {
+        let min = self.vec.first().map(|(num, _)| num.0);
+        let max = self.vec.last().map(|(num, _)| num.0);
+
+        let (Some(min), Some(max)) = (min, max) else {
+            return CommittedNumberFieldStats {
+                min: Number::F32(f32::INFINITY),
+                max: Number::F32(f32::NEG_INFINITY),
+            };
+        };
+
+        CommittedNumberFieldStats { min, max }
     }
 }
 

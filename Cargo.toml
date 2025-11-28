@@ -99,6 +99,7 @@ pyo3 = { version = "0.27.1", features = ["auto-initialize"]}
 serde-pyobject = "0.7.0"
 pyo3-async-runtimes = { version = "0.27", features = ["tokio-runtime"] }
 include_dir = "0.7"
+derive_more = "2.0.1"
 
 [dev-dependencies]
 # hurl = "6.0.0"

@@ -7,7 +7,7 @@ use std::{
 use serde::Serialize;
 
 use crate::{
-    collection_manager::sides::read::index::merge::UncommittedField,
+    collection_manager::sides::read::index::merge::{Field, UncommittedField},
     types::{DocumentId, Number, NumberFilter},
 };
 
@@ -33,10 +33,6 @@ impl UncommittedNumberField {
         self.inner.len()
     }
 
-    pub fn clear(&mut self) {
-        self.inner = Default::default();
-    }
-
     pub fn insert(&mut self, doc_id: DocumentId, value: Number) {
         self.inner.entry(value).or_default().insert(doc_id);
     }
@@ -55,32 +51,6 @@ impl UncommittedNumberField {
         self.inner
             .iter()
             .map(|(number, doc_ids)| (*number, doc_ids.clone()))
-    }
-
-    pub fn stats(&self) -> UncommittedNumberFieldStats {
-        if self.inner.is_empty() {
-            return UncommittedNumberFieldStats {
-                min: Number::F32(f32::INFINITY),
-                max: Number::F32(f32::NEG_INFINITY),
-                count: 0,
-            };
-        }
-
-        let (Some((min, _)), Some((max, _))) =
-            (self.inner.first_key_value(), self.inner.last_key_value())
-        else {
-            return UncommittedNumberFieldStats {
-                min: Number::F32(f32::INFINITY),
-                max: Number::F32(f32::NEG_INFINITY),
-                count: 0,
-            };
-        };
-
-        UncommittedNumberFieldStats {
-            min: *min,
-            max: *max,
-            count: self.len(),
-        }
     }
 }
 
@@ -131,7 +101,42 @@ impl UncommittedField for UncommittedNumberField {
     fn is_empty(&self) -> bool {
         self.len() == 0
     }
+
+    fn clear(&mut self) {
+        self.inner = Default::default();
+    }
+}
+
+impl Field for UncommittedNumberField {
+    type FieldStats = UncommittedNumberFieldStats;
+
     fn field_path(&self) -> &Box<[String]> {
         &self.field_path
+    }
+
+    fn stats(&self) -> UncommittedNumberFieldStats {
+        if self.inner.is_empty() {
+            return UncommittedNumberFieldStats {
+                min: Number::F32(f32::INFINITY),
+                max: Number::F32(f32::NEG_INFINITY),
+                count: 0,
+            };
+        }
+
+        let (Some((min, _)), Some((max, _))) =
+            (self.inner.first_key_value(), self.inner.last_key_value())
+        else {
+            return UncommittedNumberFieldStats {
+                min: Number::F32(f32::INFINITY),
+                max: Number::F32(f32::NEG_INFINITY),
+                count: 0,
+            };
+        };
+
+        UncommittedNumberFieldStats {
+            min: *min,
+            max: *max,
+            count: self.len(),
+        }
     }
 }

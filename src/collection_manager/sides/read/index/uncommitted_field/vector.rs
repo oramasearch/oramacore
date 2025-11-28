@@ -6,7 +6,8 @@ use serde::Serialize;
 
 use crate::{
     collection_manager::sides::read::{
-        index::merge::UncommittedField, search::SearchDocumentContext,
+        index::merge::{Field, UncommittedField},
+        search::SearchDocumentContext,
     },
     python::embeddings::Model,
     types::DocumentId,
@@ -33,16 +34,8 @@ impl UncommittedVectorField {
         }
     }
 
-    pub fn field_path(&self) -> &[String] {
-        &self.field_path
-    }
-
     pub fn len(&self) -> usize {
         self.data.len()
-    }
-
-    pub fn clear(&mut self) {
-        self.data = Default::default();
     }
 
     pub fn get_model(&self) -> Model {
@@ -112,21 +105,30 @@ impl UncommittedVectorField {
             .iter()
             .map(|(id, vectors)| (*id, vectors.iter().map(|(_, v)| v.clone()).collect()))
     }
-
-    pub fn stats(&self) -> UncommittedVectorFieldStats {
-        UncommittedVectorFieldStats {
-            document_count: self.data.len(),
-            vector_count: self.data.iter().map(|(_, v)| v.len()).sum(),
-        }
-    }
 }
 
 impl UncommittedField for UncommittedVectorField {
     fn is_empty(&self) -> bool {
         self.len() == 0
     }
+
+    fn clear(&mut self) {
+        self.data = Default::default();
+    }
+}
+
+impl Field for UncommittedVectorField {
+    type FieldStats = UncommittedVectorFieldStats;
+
     fn field_path(&self) -> &Box<[String]> {
         &self.field_path
+    }
+
+    fn stats(&self) -> UncommittedVectorFieldStats {
+        UncommittedVectorFieldStats {
+            document_count: self.data.len(),
+            vector_count: self.data.iter().map(|(_, v)| v.len()).sum(),
+        }
     }
 }
 

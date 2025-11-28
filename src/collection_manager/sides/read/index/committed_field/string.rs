@@ -22,7 +22,7 @@ use crate::{
                 committed_field::offload_utils::{
                     create_counter, should_offload, update_invocation_counter, Cow,
                 },
-                merge::{CommittedField, CommittedFieldMetadata},
+                merge::{CommittedField, CommittedFieldMetadata, Field},
                 search_context::FullTextSearchContext,
                 uncommitted_field::UncommittedStringField,
             },
@@ -327,10 +327,6 @@ pub struct CommittedStringField {
 }
 
 impl CommittedStringField {
-    pub fn stats(&self) -> &CommittedStringFieldStats {
-        &self.stats
-    }
-
     fn unload(&self) {
         let lock = self.status.read("unload_if_not_used").unwrap();
         // This field is already unloaded. Skip.
@@ -504,12 +500,7 @@ impl CommittedField for CommittedStringField {
         uncommitted_document_deletions: &HashSet<DocumentId>,
         offload_config: OffloadFieldConfig,
     ) -> Result<Self> {
-        debug_assert_eq!(uncommitted.field_path(), self.metadata.field_path.as_ref(),);
-
         let length_per_documents = uncommitted.field_length_per_doc();
-
-        create_if_not_exists(&data_dir)
-            .context("Cannot create data directory for committed string field")?;
 
         let new_posting_storage_file = data_dir.join(POSTING_ID_INDEX_FILE_NAME);
 
@@ -639,6 +630,18 @@ impl CommittedField for CommittedStringField {
     }
 }
 
+impl Field for CommittedStringField {
+    type FieldStats = CommittedStringFieldStats;
+
+    fn field_path(&self) -> &Box<[String]> {
+        &self.metadata.field_path
+    }
+
+    fn stats(&self) -> CommittedStringFieldStats {
+        self.stats.clone()
+    }
+}
+
 // (exact positions, stemmed positions)
 type PostingIdPosition = (Vec<usize>, Vec<usize>);
 
@@ -647,6 +650,16 @@ pub struct CommittedStringFieldStats {
     pub key_count: usize,
     pub global_info: GlobalInfo,
     pub loaded: AtomicBool,
+}
+
+impl Clone for CommittedStringFieldStats {
+    fn clone(&self) -> Self {
+        Self {
+            key_count: self.key_count,
+            global_info: self.global_info.clone(),
+            loaded: AtomicBool::new(self.loaded.load(std::sync::atomic::Ordering::Acquire)),
+        }
+    }
 }
 
 const FST_INDEX_FILE_NAME: &str = "fst.map";

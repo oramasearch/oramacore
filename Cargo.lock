@@ -4434,6 +4434,7 @@ dependencies = [
  "dashmap",
  "dateparser",
  "debug_panic",
+ "derive_more",
  "duration-str",
  "duration-string",
  "fake",

@@ -6,7 +6,7 @@ use std::{
 use serde::Serialize;
 
 use crate::{
-    collection_manager::sides::read::index::merge::UncommittedField,
+    collection_manager::sides::read::index::merge::{Field, UncommittedField},
     types::{DateFilter, DocumentId, OramaDate},
 };
 
@@ -32,10 +32,6 @@ impl UncommittedDateFilterField {
         self.inner.len()
     }
 
-    pub fn clear(&mut self) {
-        self.inner = Default::default();
-    }
-
     pub fn insert(&mut self, doc_id: DocumentId, value: i64) {
         self.inner.entry(value).or_default().insert(doc_id);
     }
@@ -55,8 +51,26 @@ impl UncommittedDateFilterField {
             .iter()
             .map(|(number, doc_ids)| (*number, doc_ids.clone()))
     }
+}
 
-    pub fn stats(&self) -> UncommittedDateFieldStats {
+impl UncommittedField for UncommittedDateFilterField {
+    fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    fn clear(&mut self) {
+        self.inner = Default::default();
+    }
+}
+
+impl Field for UncommittedDateFilterField {
+    type FieldStats = UncommittedDateFieldStats;
+
+    fn field_path(&self) -> &Box<[String]> {
+        &self.field_path
+    }
+
+    fn stats(&self) -> UncommittedDateFieldStats {
         if self.inner.is_empty() {
             return UncommittedDateFieldStats {
                 min: None,
@@ -83,15 +97,6 @@ impl UncommittedDateFilterField {
             max,
             count: self.len(),
         }
-    }
-}
-
-impl UncommittedField for UncommittedDateFilterField {
-    fn is_empty(&self) -> bool {
-        self.len() == 0
-    }
-    fn field_path(&self) -> &Box<[String]> {
-        &self.field_path
     }
 }
 

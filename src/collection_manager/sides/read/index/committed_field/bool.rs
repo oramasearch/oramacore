@@ -10,7 +10,7 @@ use tracing::info;
 use crate::{
     collection_manager::sides::read::{
         index::{
-            merge::{CommittedField, CommittedFieldMetadata},
+            merge::{CommittedField, CommittedFieldMetadata, Field},
             uncommitted_field::UncommittedBoolField,
         },
         OffloadFieldConfig,
@@ -37,16 +37,6 @@ impl CommittedBoolField {
         bincode::serialize_into(file, &self.map).context("Failed to serialize bool map")?;
 
         Ok(())
-    }
-
-    pub fn stats(&self) -> Result<CommittedBoolFieldStats> {
-        let false_count = self.map.get(&false).map_or(0, |set| set.len());
-        let true_count = self.map.get(&true).map_or(0, |set| set.len());
-
-        Ok(CommittedBoolFieldStats {
-            false_count,
-            true_count,
-        })
     }
 
     pub fn filter<'s, 'iter>(
@@ -197,6 +187,21 @@ impl CommittedField for CommittedBoolField {
         BoolFieldInfo {
             field_path: self.field_path.clone(),
             data_dir: self.data_dir.clone(),
+        }
+    }
+}
+
+impl Field for CommittedBoolField {
+    type FieldStats = CommittedBoolFieldStats;
+
+    fn field_path(&self) -> &Box<[String]> {
+        &self.field_path
+    }
+
+    fn stats(&self) -> Self::FieldStats {
+        CommittedBoolFieldStats {
+            false_count: self.map.get(&false).map_or(0, |set| set.len()),
+            true_count: self.map.get(&true).map_or(0, |set| set.len()),
         }
     }
 }

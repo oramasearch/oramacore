@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
     collection_manager::sides::read::index::{
         committed_field::number::get_iter,
-        merge::{CommittedField, CommittedFieldMetadata},
+        merge::{CommittedField, CommittedFieldMetadata, Field},
         uncommitted_field::UncommittedDateFilterField,
     },
     merger::MergedIterator,
@@ -32,27 +32,6 @@ impl CommittedDateField {
             .context("Failed to serialize date vec")?;
 
         Ok(())
-    }
-
-    pub fn field_path(&self) -> &[String] {
-        &self.field_path
-    }
-
-    pub fn stats(&self) -> Result<CommittedDateFieldStats> {
-        let min = self.vec.first().map(|(num, _)| *num);
-        let max = self.vec.last().map(|(num, _)| *num);
-
-        let (Some(min), Some(max)) = (min, max) else {
-            return Ok(CommittedDateFieldStats {
-                min: None,
-                max: None,
-            });
-        };
-
-        let min = OramaDate::try_from_i64(min);
-        let max = OramaDate::try_from_i64(max);
-
-        Ok(CommittedDateFieldStats { min, max })
     }
 
     pub fn filter<'s, 'iter>(
@@ -203,6 +182,31 @@ impl CommittedField for CommittedDateField {
             field_path: self.field_path.clone(),
             data_dir: self.data_dir.clone(),
         }
+    }
+}
+
+impl Field for CommittedDateField {
+    type FieldStats = CommittedDateFieldStats;
+
+    fn field_path(&self) -> &Box<[String]> {
+        &self.field_path
+    }
+
+    fn stats(&self) -> CommittedDateFieldStats {
+        let min = self.vec.first().map(|(num, _)| *num);
+        let max = self.vec.last().map(|(num, _)| *num);
+
+        let (Some(min), Some(max)) = (min, max) else {
+            return CommittedDateFieldStats {
+                min: None,
+                max: None,
+            };
+        };
+
+        let min = OramaDate::try_from_i64(min);
+        let max = OramaDate::try_from_i64(max);
+
+        CommittedDateFieldStats { min, max }
     }
 }
 

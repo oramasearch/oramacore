@@ -16,7 +16,7 @@ pub trait CommittedFieldMetadata {
     fn field_path(&self) -> &Box<[String]>;
 }
 
-pub trait CommittedField: Sized {
+pub trait CommittedField: Field + Sized {
     type Uncommitted;
     type FieldMetadata;
 
@@ -39,10 +39,18 @@ pub trait CommittedField: Sized {
 
     fn metadata(&self) -> Self::FieldMetadata;
 }
-pub trait UncommittedField {
+pub trait UncommittedField: Field {
     fn is_empty(&self) -> bool;
 
+    fn clear(&mut self);
+}
+
+pub trait Field {
+    type FieldStats;
+
     fn field_path(&self) -> &Box<[String]>;
+
+    fn stats(&self) -> Self::FieldStats;
 }
 
 pub fn merge_field<
@@ -68,9 +76,6 @@ pub fn merge_field<
             bail!("Both uncommitted field is None. Never should happen");
         }
         (Some(uncommitted), None) => {
-            create_if_not_exists(&data_dir)
-                .context("Failed to create data directory for vector field")?;
-
             let new_field = CommittedField::from_uncommitted(
                 uncommitted,
                 data_dir,
@@ -89,9 +94,6 @@ pub fn merge_field<
                 "Uncommitted and committed field paths should be the same",
             );
 
-            create_if_not_exists(&data_dir)
-                .context("Failed to create data directory for vector field")?;
-
             if uncommitted.is_empty() && !is_promoted {
                 // Nothing to merge, return None
                 return Ok(None);
@@ -109,9 +111,6 @@ pub fn merge_field<
                     &data_dir,
                     "when promoting, data_dir should be different from the one in the field info"
                 );
-
-                create_if_not_exists(&data_dir)
-                    .context("Failed to create data directory for vector field")?;
 
                 let old_dir = info.data_dir().clone();
 

@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
     collection_manager::sides::read::{
         index::{
-            merge::{CommittedField, CommittedFieldMetadata},
+            merge::{CommittedField, CommittedFieldMetadata, Field},
             uncommitted_field::UncommittedStringFilterField,
         },
         OffloadFieldConfig,
@@ -27,22 +27,6 @@ pub struct CommittedStringFilterField {
 }
 
 impl CommittedStringFilterField {
-    pub fn stats(&self, with_keys: bool) -> CommittedStringFilterFieldStats {
-        let doc_count = self.inner.values().map(|v| v.len()).sum();
-
-        let keys = if with_keys {
-            Some(self.inner.keys().cloned().collect())
-        } else {
-            None
-        };
-
-        CommittedStringFilterFieldStats {
-            key_count: self.inner.len(),
-            document_count: doc_count,
-            keys,
-        }
-    }
-
     pub fn filter<'s, 'iter>(&'s self, filter: &str) -> impl Iterator<Item = DocumentId> + 'iter
     where
         's: 'iter,
@@ -176,6 +160,26 @@ impl CommittedField for CommittedStringFilterField {
         StringFilterFieldInfo {
             field_path: self.field_path.clone(),
             data_dir: self.data_dir.clone(),
+        }
+    }
+}
+
+impl Field for CommittedStringFilterField {
+    type FieldStats = CommittedStringFilterFieldStats;
+
+    fn field_path(&self) -> &Box<[String]> {
+        &self.field_path
+    }
+
+    fn stats(&self) -> CommittedStringFilterFieldStats {
+        let doc_count = self.inner.values().map(|v| v.len()).sum();
+
+        let keys = Some(self.inner.keys().cloned().collect());
+
+        CommittedStringFilterFieldStats {
+            key_count: self.inner.len(),
+            document_count: doc_count,
+            keys,
         }
     }
 }

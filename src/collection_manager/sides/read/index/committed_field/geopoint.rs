@@ -6,7 +6,7 @@ use oramacore_lib::bkd::{haversine_distance, BKDTree, Coord};
 use serde::{Deserialize, Serialize};
 
 use crate::collection_manager::sides::read::index::merge::{
-    CommittedField, CommittedFieldMetadata,
+    CommittedField, CommittedFieldMetadata, Field,
 };
 use crate::collection_manager::sides::read::index::uncommitted_field::UncommittedGeoPointFilterField;
 use crate::collection_manager::sides::read::OffloadFieldConfig;
@@ -49,12 +49,6 @@ impl CommittedGeoPointField {
             .context("Cannot deserialize geopoint file")?;
 
         Ok(())
-    }
-
-    pub fn stats(&self) -> Result<CommittedGeoPointFieldStats> {
-        Ok(CommittedGeoPointFieldStats {
-            count: self.tree.len(),
-        })
     }
 
     pub fn filter<'s, 'iter>(
@@ -170,6 +164,20 @@ impl CommittedField for CommittedGeoPointField {
         GeoPointFieldInfo {
             field_path: self.field_path.clone(),
             data_dir: self.data_dir.clone(),
+        }
+    }
+}
+
+impl Field for CommittedGeoPointField {
+    type FieldStats = CommittedGeoPointFieldStats;
+
+    fn field_path(&self) -> &Box<[String]> {
+        &self.field_path
+    }
+
+    fn stats(&self) -> CommittedGeoPointFieldStats {
+        CommittedGeoPointFieldStats {
+            count: self.tree.len(),
         }
     }
 }
