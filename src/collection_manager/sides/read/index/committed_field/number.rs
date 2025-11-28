@@ -310,6 +310,8 @@ impl CommittedFieldMetadata for NumberFieldInfo {
 mod tests_number {
     use std::time::Duration;
 
+    use oramacore_lib::fs::create_if_not_exists;
+
     use crate::{
         collection_manager::sides::read::OffloadFieldConfig, tests::utils::generate_new_path,
     };
@@ -319,6 +321,7 @@ mod tests_number {
     #[test]
     fn test_lt_gt() {
         let path = generate_new_path();
+        create_if_not_exists(&path).unwrap();
 
         let mut uncommitted = UncommittedNumberField::empty(
             vec!["a".to_string(), "b".to_string()].into_boxed_slice(),
