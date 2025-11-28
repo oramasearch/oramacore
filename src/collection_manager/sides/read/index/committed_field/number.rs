@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     collection_manager::sides::read::index::{
-        merge::{CommittedField, FieldMetadata},
+        merge::{CommittedField, CommittedFieldMetadata},
         uncommitted_field::UncommittedNumberField,
     },
     merger::MergedIterator,
@@ -23,22 +23,6 @@ pub struct CommittedNumberField {
 }
 
 impl CommittedNumberField {
-    pub fn from_iter<I>(field_path: Box<[String]>, iter: I, data_dir: PathBuf) -> Result<Self>
-    where
-        I: Iterator<Item = (SerializableNumber, HashSet<DocumentId>)>,
-    {
-        let vec: Vec<_> = iter.collect();
-        let s = Self {
-            field_path,
-            vec,
-            data_dir,
-        };
-
-        s.commit().context("Failed to commit number field")?;
-
-        Ok(s)
-    }
-
     fn commit(&self) -> Result<()> {
         // Ensure the data directory exists
         create_if_not_exists(&self.data_dir).context("Failed to create data directory")?;
@@ -49,17 +33,6 @@ impl CommittedNumberField {
             .context("Failed to serialize number vec")?;
 
         Ok(())
-    }
-
-    pub fn get_field_info(&self) -> NumberFieldInfo {
-        NumberFieldInfo {
-            field_path: self.field_path.clone(),
-            data_dir: self.data_dir.clone(),
-        }
-    }
-
-    pub fn field_path(&self) -> &[String] {
-        &self.field_path
     }
 
     pub fn stats(&self) -> Result<CommittedNumberFieldStats> {
@@ -132,26 +105,32 @@ impl CommittedField for CommittedNumberField {
         uncommitted: &Self::Uncommitted,
         data_dir: PathBuf,
         uncommitted_document_deletions: &HashSet<DocumentId>,
-        offload_config: crate::collection_manager::sides::read::OffloadFieldConfig,
+        _offload_config: crate::collection_manager::sides::read::OffloadFieldConfig,
     ) -> Result<Self> {
-        let iter = uncommitted
+        let vec: Vec<_> = uncommitted
             .iter()
             .map(|(n, v)| (SerializableNumber(n), v))
             .map(|(k, mut d)| {
                 d.retain(|doc_id| !uncommitted_document_deletions.contains(doc_id));
                 (k, d)
-            });
-        CommittedNumberField::from_iter(
-            uncommitted.field_path().to_vec().into_boxed_slice(),
-            iter,
+            })
+            .collect();
+
+        let s = Self {
+            field_path: uncommitted.field_path().to_vec().into_boxed_slice(),
+            vec,
             data_dir,
-        )
+        };
+
+        s.commit().context("Failed to commit number field")?;
+
+        Ok(s)
     }
 
     #[allow(deprecated)]
     fn try_load(
         metadata: Self::FieldMetadata,
-        offload_config: crate::collection_manager::sides::read::OffloadFieldConfig,
+        _offload_config: crate::collection_manager::sides::read::OffloadFieldConfig,
     ) -> Result<Self> {
         let data_dir = metadata.data_dir;
         // Try to load from the new format first, and track if we need to commit (migrate from old format)
@@ -202,12 +181,12 @@ impl CommittedField for CommittedNumberField {
         uncommitted: &Self::Uncommitted,
         data_dir: PathBuf,
         uncommitted_document_deletions: &HashSet<DocumentId>,
-        offload_config: crate::collection_manager::sides::read::OffloadFieldConfig,
+        _offload_config: crate::collection_manager::sides::read::OffloadFieldConfig,
     ) -> Result<Self> {
         let uncommitted_iter = uncommitted.iter().map(|(n, v)| (SerializableNumber(n), v));
         let committed_iter = self.iter();
 
-        let iter = MergedIterator::new(
+        let vec: Vec<_> = MergedIterator::new(
             committed_iter,
             uncommitted_iter,
             |_, v| v,
@@ -219,24 +198,25 @@ impl CommittedField for CommittedNumberField {
         .map(|(k, mut d)| {
             d.retain(|doc_id| !uncommitted_document_deletions.contains(doc_id));
             (k, d)
-        });
+        })
+        .collect();
 
-        // uncommitted and committed field_path has to be the same
-        debug_assert_eq!(
-            uncommitted.field_path(),
-            self.field_path(),
-            "Uncommitted and committed field paths should be the same",
-        );
-
-        CommittedNumberField::from_iter(
-            uncommitted.field_path().to_vec().into_boxed_slice(),
-            iter,
+        let s = Self {
+            field_path: uncommitted.field_path().to_vec().into_boxed_slice(),
+            vec,
             data_dir,
-        )
+        };
+
+        s.commit().context("Failed to commit number field")?;
+
+        Ok(s)
     }
 
     fn metadata(&self) -> Self::FieldMetadata {
-        self.get_field_info()
+        NumberFieldInfo {
+            field_path: self.field_path.clone(),
+            data_dir: self.data_dir.clone(),
+        }
     }
 }
 
@@ -308,7 +288,7 @@ pub struct CommittedNumberFieldStats {
     pub max: Number,
 }
 
-impl FieldMetadata for NumberFieldInfo {
+impl CommittedFieldMetadata for NumberFieldInfo {
     fn data_dir(&self) -> &PathBuf {
         &self.data_dir
     }
@@ -316,32 +296,42 @@ impl FieldMetadata for NumberFieldInfo {
     fn set_data_dir(&mut self, data_dir: PathBuf) {
         self.data_dir = data_dir;
     }
+    fn field_path(&self) -> &Box<[String]> {
+        &self.field_path
+    }
 }
 
 #[cfg(test)]
 mod tests_number {
-    use crate::tests::utils::generate_new_path;
+    use std::time::Duration;
+
+    use crate::{
+        collection_manager::sides::read::OffloadFieldConfig, tests::utils::generate_new_path,
+    };
 
     use super::*;
 
     #[test]
     fn test_lt_gt() {
         let path = generate_new_path();
-        let iter = vec![
-            (
-                SerializableNumber(Number::F32(1.0)),
-                HashSet::from([DocumentId(1), DocumentId(2)]),
-            ),
-            (
-                SerializableNumber(Number::F32(2.0)),
-                HashSet::from([DocumentId(3), DocumentId(4)]),
-            ),
-        ]
-        .into_iter();
-        let field = CommittedNumberField::from_iter(
+
+        let mut uncommitted = UncommittedNumberField::empty(
             vec!["a".to_string(), "b".to_string()].into_boxed_slice(),
-            iter,
+        );
+        uncommitted.insert(DocumentId(1), Number::F32(1.0));
+        uncommitted.insert(DocumentId(2), Number::F32(1.0));
+        uncommitted.insert(DocumentId(3), Number::F32(2.0));
+        uncommitted.insert(DocumentId(4), Number::F32(2.0));
+
+        let field = CommittedNumberField::from_uncommitted(
+            &uncommitted,
             path,
+            &HashSet::new(),
+            OffloadFieldConfig {
+                unload_window: Duration::from_secs(30 * 60).into(),
+                slot_count_exp: 8,
+                slot_size_exp: 4,
+            },
         )
         .unwrap();
 

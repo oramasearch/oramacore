@@ -10,9 +10,10 @@ use oramacore_lib::fs::create_if_not_exists;
 
 use super::super::OffloadFieldConfig;
 
-pub trait FieldMetadata {
+pub trait CommittedFieldMetadata {
     fn data_dir(&self) -> &PathBuf;
     fn set_data_dir(&mut self, data_dir: PathBuf);
+    fn field_path(&self) -> &Box<[String]>;
 }
 
 pub trait CommittedField: Sized {
@@ -40,12 +41,14 @@ pub trait CommittedField: Sized {
 }
 pub trait UncommittedField {
     fn is_empty(&self) -> bool;
+
+    fn field_path(&self) -> &Box<[String]>;
 }
 
 pub fn merge_field<
-    Metadata: FieldMetadata,
+    CommittedMetadata: CommittedFieldMetadata,
     Uncommitted: UncommittedField,
-    Committed: CommittedField<Uncommitted = Uncommitted, FieldMetadata = Metadata>,
+    Committed: CommittedField<Uncommitted = Uncommitted, FieldMetadata = CommittedMetadata>,
 >(
     uncommitted: Option<&Uncommitted>,
     committed: Option<&Committed>,
@@ -65,6 +68,9 @@ pub fn merge_field<
             bail!("Both uncommitted field is None. Never should happen");
         }
         (Some(uncommitted), None) => {
+            create_if_not_exists(&data_dir)
+                .context("Failed to create data directory for vector field")?;
+
             let new_field = CommittedField::from_uncommitted(
                 uncommitted,
                 data_dir,
@@ -74,6 +80,18 @@ pub fn merge_field<
             Ok(Some(new_field))
         }
         (Some(uncommitted), Some(committed)) => {
+            // uncommitted and committed field_path has to be the same
+            let committed_metadata = committed.metadata();
+            let uncommitted_field_path = uncommitted.field_path();
+            debug_assert_eq!(
+                uncommitted_field_path,
+                committed_metadata.field_path(),
+                "Uncommitted and committed field paths should be the same",
+            );
+
+            create_if_not_exists(&data_dir)
+                .context("Failed to create data directory for vector field")?;
+
             if uncommitted.is_empty() && !is_promoted {
                 // Nothing to merge, return None
                 return Ok(None);
@@ -85,9 +103,6 @@ pub fn merge_field<
                     // Nothing to merge, return None
                     return Ok(None);
                 }
-
-                create_if_not_exists(&data_dir)
-                    .context("Failed to create data directory for vector field")?;
 
                 debug_assert_ne!(
                     info.data_dir(),

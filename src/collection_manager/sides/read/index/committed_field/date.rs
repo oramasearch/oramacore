@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
     collection_manager::sides::read::index::{
         committed_field::number::get_iter,
-        merge::{CommittedField, FieldMetadata},
+        merge::{CommittedField, CommittedFieldMetadata},
         uncommitted_field::UncommittedDateFilterField,
     },
     merger::MergedIterator,
@@ -22,22 +22,6 @@ pub struct CommittedDateField {
 }
 
 impl CommittedDateField {
-    pub fn from_iter<I>(field_path: Box<[String]>, iter: I, data_dir: PathBuf) -> Result<Self>
-    where
-        I: Iterator<Item = (i64, HashSet<DocumentId>)>,
-    {
-        let vec: Vec<_> = iter.collect();
-        let s = Self {
-            field_path,
-            vec,
-            data_dir,
-        };
-
-        s.commit().context("Failed to commit date field")?;
-
-        Ok(s)
-    }
-
     fn commit(&self) -> Result<()> {
         // Ensure the data directory exists
         create_if_not_exists(&self.data_dir).context("Failed to create data directory")?;
@@ -48,13 +32,6 @@ impl CommittedDateField {
             .context("Failed to serialize date vec")?;
 
         Ok(())
-    }
-
-    pub fn get_field_info(&self) -> DateFieldInfo {
-        DateFieldInfo {
-            field_path: self.field_path.clone(),
-            data_dir: self.data_dir.clone(),
-        }
     }
 
     pub fn field_path(&self) -> &[String] {
@@ -120,26 +97,31 @@ impl CommittedField for CommittedDateField {
         uncommitted: &Self::Uncommitted,
         data_dir: PathBuf,
         uncommitted_document_deletions: &HashSet<DocumentId>,
-        offload_config: crate::collection_manager::sides::read::OffloadFieldConfig,
+        _offload_config: crate::collection_manager::sides::read::OffloadFieldConfig,
     ) -> Result<Self> {
-        let iter = uncommitted
+        let vec: Vec<_> = uncommitted
             .iter()
             // .map(|(n, v)| (SerializableNumber(n), v))
             .map(|(k, mut d)| {
                 d.retain(|doc_id| !uncommitted_document_deletions.contains(doc_id));
                 (k, d)
-            });
-        CommittedDateField::from_iter(
-            uncommitted.field_path().to_vec().into_boxed_slice(),
-            iter,
+            })
+            .collect();
+
+        let s = Self {
+            field_path: uncommitted.field_path().into(),
+            vec,
             data_dir,
-        )
+        };
+
+        s.commit().context("Failed to commit date field")?;
+        Ok(s)
     }
 
     #[allow(deprecated)]
     fn try_load(
         metadata: Self::FieldMetadata,
-        offload_config: crate::collection_manager::sides::read::OffloadFieldConfig,
+        _offload_config: crate::collection_manager::sides::read::OffloadFieldConfig,
     ) -> Result<Self> {
         let data_dir = metadata.data_dir;
         // Try to load from the new format first, and track if we need to commit (migrate from old format)
@@ -186,12 +168,12 @@ impl CommittedField for CommittedDateField {
         uncommitted: &Self::Uncommitted,
         data_dir: PathBuf,
         uncommitted_document_deletions: &HashSet<DocumentId>,
-        offload_config: crate::collection_manager::sides::read::OffloadFieldConfig,
+        _offload_config: crate::collection_manager::sides::read::OffloadFieldConfig,
     ) -> Result<Self> {
         let uncommitted_iter = uncommitted.iter();
         let committed_iter = self.iter();
 
-        let iter = MergedIterator::new(
+        let vec: Vec<_> = MergedIterator::new(
             committed_iter,
             uncommitted_iter,
             |_, v| v,
@@ -203,24 +185,24 @@ impl CommittedField for CommittedDateField {
         .map(|(k, mut d)| {
             d.retain(|doc_id| !uncommitted_document_deletions.contains(doc_id));
             (k, d)
-        });
+        })
+        .collect();
 
-        // uncommitted and committed field_path has to be the same
-        debug_assert_eq!(
-            uncommitted.field_path(),
-            self.field_path(),
-            "Uncommitted and committed field paths should be the same",
-        );
-
-        CommittedDateField::from_iter(
-            uncommitted.field_path().to_vec().into_boxed_slice(),
-            iter,
+        let s = Self {
+            field_path: uncommitted.field_path().into(),
+            vec,
             data_dir,
-        )
+        };
+
+        s.commit().context("Failed to commit date field")?;
+        Ok(s)
     }
 
     fn metadata(&self) -> Self::FieldMetadata {
-        self.get_field_info()
+        DateFieldInfo {
+            field_path: self.field_path.clone(),
+            data_dir: self.data_dir.clone(),
+        }
     }
 }
 
@@ -236,12 +218,15 @@ pub struct CommittedDateFieldStats {
     pub max: Option<OramaDate>,
 }
 
-impl FieldMetadata for DateFieldInfo {
+impl CommittedFieldMetadata for DateFieldInfo {
     fn data_dir(&self) -> &PathBuf {
         &self.data_dir
     }
 
     fn set_data_dir(&mut self, data_dir: PathBuf) {
         self.data_dir = data_dir;
+    }
+    fn field_path(&self) -> &Box<[String]> {
+        &self.field_path
     }
 }

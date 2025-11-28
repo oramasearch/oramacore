@@ -20,7 +20,7 @@ use crate::{
             committed_field::offload_utils::{
                 create_counter, should_offload, update_invocation_counter, Cow,
             },
-            merge::{CommittedField, FieldMetadata},
+            merge::{CommittedField, CommittedFieldMetadata},
             uncommitted_field::UncommittedVectorField,
         },
         search::SearchDocumentContext,
@@ -477,12 +477,15 @@ pub struct VectorFieldInfo {
     pub model: Model,
 }
 
-impl FieldMetadata for VectorFieldInfo {
+impl CommittedFieldMetadata for VectorFieldInfo {
     fn data_dir(&self) -> &PathBuf {
         &self.data_dir
     }
 
     fn set_data_dir(&mut self, data_dir: PathBuf) {
         self.data_dir = data_dir;
+    }
+    fn field_path(&self) -> &Box<[String]> {
+        &self.field_path
     }
 }

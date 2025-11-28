@@ -262,8 +262,8 @@ impl Index {
                 field_id,
                 UncommittedGeoPointFilterField::empty(info.field_path.clone()),
             );
-            let field =
-                CommittedGeoPointField::try_load(info).context("Cannot load geopoint field")?;
+            let field = CommittedGeoPointField::try_load(info, offload_config)
+                .context("Cannot load geopoint field")?;
             committed_fields.geopoint_fields.insert(field_id, field);
         }
 
@@ -698,7 +698,7 @@ impl Index {
                 MergeResult::Changed(merged) => {
                     #[cfg(debug_assertions)]
                     {
-                        let data_dir = merged.get_field_info().data_dir;
+                        let data_dir = merged.metadata().data_dir;
                         let offset_str = data_dir.components().rev().nth(1).unwrap();
                         assert_eq!(
                             offset_str.as_os_str().to_str().unwrap(),
@@ -720,7 +720,7 @@ impl Index {
                 MergeResult::Changed(merged) => {
                     #[cfg(debug_assertions)]
                     {
-                        let data_dir = merged.get_field_info().data_dir;
+                        let data_dir = merged.metadata().data_dir;
                         let offset_str = data_dir.components().rev().nth(1).unwrap();
                         assert_eq!(
                             offset_str.as_os_str().to_str().unwrap(),
@@ -742,7 +742,7 @@ impl Index {
                 MergeResult::Changed(merged) => {
                     #[cfg(debug_assertions)]
                     {
-                        let data_dir = merged.get_field_info().data_dir;
+                        let data_dir = merged.metadata().data_dir;
                         let offset_str = data_dir.components().rev().nth(1).unwrap();
                         assert_eq!(
                             offset_str.as_os_str().to_str().unwrap(),
@@ -764,7 +764,7 @@ impl Index {
                 MergeResult::Changed(merged) => {
                     #[cfg(debug_assertions)]
                     {
-                        let data_dir = merged.get_field_info().data_dir;
+                        let data_dir = merged.metadata().data_dir;
                         let offset_str = data_dir.components().rev().nth(1).unwrap();
                         assert_eq!(
                             offset_str.as_os_str().to_str().unwrap(),
@@ -786,7 +786,7 @@ impl Index {
                 MergeResult::Changed(merged) => {
                     #[cfg(debug_assertions)]
                     {
-                        let data_dir = merged.get_field_info().data_dir;
+                        let data_dir = merged.metadata().data_dir;
                         let offset_str = data_dir.components().rev().nth(1).unwrap();
                         assert_eq!(
                             offset_str.as_os_str().to_str().unwrap(),
@@ -858,27 +858,27 @@ impl Index {
             bool_field_ids: committed_fields
                 .bool_fields
                 .iter()
-                .map(|(k, v)| (*k, v.get_field_info()))
+                .map(|(k, v)| (*k, v.metadata()))
                 .collect(),
             number_field_ids: committed_fields
                 .number_fields
                 .iter()
-                .map(|(k, v)| (*k, v.get_field_info()))
+                .map(|(k, v)| (*k, v.metadata()))
                 .collect(),
             date_field_ids: committed_fields
                 .date_fields
                 .iter()
-                .map(|(k, v)| (*k, v.get_field_info()))
+                .map(|(k, v)| (*k, v.metadata()))
                 .collect(),
             geopoint_field_ids: committed_fields
                 .geopoint_fields
                 .iter()
-                .map(|(k, v)| (*k, v.get_field_info()))
+                .map(|(k, v)| (*k, v.metadata()))
                 .collect(),
             string_filter_field_ids: committed_fields
                 .string_filter_fields
                 .iter()
-                .map(|(k, v)| (*k, v.get_field_info()))
+                .map(|(k, v)| (*k, v.metadata()))
                 .collect(),
             string_field_ids: committed_fields
                 .string_fields
@@ -925,30 +925,30 @@ impl Index {
         let field_data_dirs: HashSet<_> = committed_fields
             .bool_fields
             .values()
-            .map(|f| f.get_field_info().data_dir)
+            .map(|f| f.metadata().data_dir)
             .chain(
                 committed_fields
                     .number_fields
                     .values()
-                    .map(|f| f.get_field_info().data_dir),
+                    .map(|f| f.metadata().data_dir),
             )
             .chain(
                 committed_fields
                     .string_filter_fields
                     .values()
-                    .map(|f| f.get_field_info().data_dir),
+                    .map(|f| f.metadata().data_dir),
             )
             .chain(
                 committed_fields
                     .date_fields
                     .values()
-                    .map(|f| f.get_field_info().data_dir),
+                    .map(|f| f.metadata().data_dir),
             )
             .chain(
                 committed_fields
                     .geopoint_fields
                     .values()
-                    .map(|f| f.get_field_info().data_dir),
+                    .map(|f| f.metadata().data_dir),
             )
             .chain(
                 committed_fields
@@ -1537,7 +1537,7 @@ impl Index {
         }));
 
         fields_stats.extend(committed_fields.bool_fields.iter().filter_map(|(k, v)| {
-            let path = v.field_path().join(".");
+            let path = v.metadata().field_path.join(".");
             Some(IndexFieldStats {
                 field_id: *k,
                 field_path: path,
@@ -1545,7 +1545,7 @@ impl Index {
             })
         }));
         fields_stats.extend(committed_fields.number_fields.iter().filter_map(|(k, v)| {
-            let path = v.field_path().join(".");
+            let path = v.metadata().field_path.join(".");
             Some(IndexFieldStats {
                 field_id: *k,
                 field_path: path,
@@ -1565,7 +1565,7 @@ impl Index {
                 .geopoint_fields
                 .iter()
                 .filter_map(|(k, v)| {
-                    let path = v.field_path().join(".");
+                    let path = v.metadata().field_path.join(".");
                     Some(IndexFieldStats {
                         field_id: *k,
                         field_path: path,
@@ -1574,7 +1574,7 @@ impl Index {
                 }),
         );
         fields_stats.extend(committed_fields.string_filter_fields.iter().map(|(k, v)| {
-            let path = v.field_path().join(".");
+            let path = v.metadata().field_path.join(".");
             IndexFieldStats {
                 field_id: *k,
                 field_path: path,

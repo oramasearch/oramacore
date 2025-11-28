@@ -7,14 +7,17 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    collection_manager::sides::read::index::{
-        merge::{CommittedField, FieldMetadata},
-        uncommitted_field::UncommittedStringFilterField,
+    collection_manager::sides::read::{
+        index::{
+            merge::{CommittedField, CommittedFieldMetadata},
+            uncommitted_field::UncommittedStringFilterField,
+        },
+        OffloadFieldConfig,
     },
     merger::MergedIterator,
     types::DocumentId,
 };
-use oramacore_lib::fs::{create_if_not_exists, BufferedFile};
+use oramacore_lib::fs::BufferedFile;
 
 #[derive(Debug)]
 pub struct CommittedStringFilterField {
@@ -24,46 +27,6 @@ pub struct CommittedStringFilterField {
 }
 
 impl CommittedStringFilterField {
-    pub fn from_iter<I>(field_path: Box<[String]>, iter: I, data_dir: PathBuf) -> Result<Self>
-    where
-        I: Iterator<Item = (String, HashSet<DocumentId>)>,
-    {
-        create_if_not_exists(&data_dir).context("Cannot create data directory")?;
-
-        let mut inner: HashMap<String, HashSet<DocumentId>> = HashMap::new();
-        for (key, doc_ids) in iter {
-            if let Some(v) = inner.get_mut(&key) {
-                v.extend(doc_ids);
-                continue;
-            }
-            inner.insert(key, doc_ids);
-        }
-
-        let data = StringFilterFieldDump::V1(StringFilterFieldDumpV1 { data: inner });
-        BufferedFile::create_or_overwrite(data_dir.join("data.bin"))
-            .context("Cannot create data.bin")?
-            .write_bincode_data(&data)
-            .context("Cannot write data.bin")?;
-        let StringFilterFieldDump::V1(inner) = data;
-
-        Ok(Self {
-            field_path,
-            inner: inner.data,
-            data_dir,
-        })
-    }
-
-    pub fn field_path(&self) -> &[String] {
-        &self.field_path
-    }
-
-    pub fn get_field_info(&self) -> StringFilterFieldInfo {
-        StringFilterFieldInfo {
-            field_path: self.field_path.clone(),
-            data_dir: self.data_dir.clone(),
-        }
-    }
-
     pub fn stats(&self, with_keys: bool) -> CommittedStringFilterFieldStats {
         let doc_count = self.inner.values().map(|v| v.len()).sum();
 
@@ -112,22 +75,39 @@ impl CommittedField for CommittedStringFilterField {
         uncommitted: &Self::Uncommitted,
         data_dir: PathBuf,
         uncommitted_document_deletions: &HashSet<DocumentId>,
-        offload_config: crate::collection_manager::sides::read::OffloadFieldConfig,
+        _offload_config: OffloadFieldConfig,
     ) -> Result<Self> {
         let iter = uncommitted.iter().map(|(k, mut d)| {
             d.retain(|doc_id| !uncommitted_document_deletions.contains(doc_id));
             (k, d)
         });
-        CommittedStringFilterField::from_iter(
-            uncommitted.field_path().to_vec().into_boxed_slice(),
-            iter,
+
+        let mut inner: HashMap<String, HashSet<DocumentId>> = HashMap::new();
+        for (key, doc_ids) in iter {
+            if let Some(v) = inner.get_mut(&key) {
+                v.extend(doc_ids);
+                continue;
+            }
+            inner.insert(key, doc_ids);
+        }
+
+        let data = StringFilterFieldDump::V1(StringFilterFieldDumpV1 { data: inner });
+        BufferedFile::create_or_overwrite(data_dir.join("data.bin"))
+            .context("Cannot create data.bin")?
+            .write_bincode_data(&data)
+            .context("Cannot write data.bin")?;
+        let StringFilterFieldDump::V1(inner) = data;
+
+        Ok(Self {
+            field_path: uncommitted.field_path().to_vec().into_boxed_slice(),
+            inner: inner.data,
             data_dir,
-        )
+        })
     }
 
     fn try_load(
         metadata: Self::FieldMetadata,
-        offload_config: crate::collection_manager::sides::read::OffloadFieldConfig,
+        _offload_config: OffloadFieldConfig,
     ) -> Result<Self> {
         let data_dir = metadata.data_dir;
         let dump_file_path = data_dir.join("data.bin");
@@ -150,7 +130,7 @@ impl CommittedField for CommittedStringFilterField {
         uncommitted: &Self::Uncommitted,
         data_dir: PathBuf,
         uncommitted_document_deletions: &HashSet<DocumentId>,
-        offload_config: crate::collection_manager::sides::read::OffloadFieldConfig,
+        _offload_config: OffloadFieldConfig,
     ) -> Result<Self> {
         let uncommitted_iter = uncommitted.iter();
         let committed_iter = self.iter();
@@ -169,22 +149,34 @@ impl CommittedField for CommittedStringFilterField {
             (k, d)
         });
 
-        // uncommitted and committed field_path has to be the same
-        debug_assert_eq!(
-            uncommitted.field_path(),
-            self.field_path(),
-            "Uncommitted and committed field paths should be the same",
-        );
+        let mut inner: HashMap<String, HashSet<DocumentId>> = HashMap::new();
+        for (key, doc_ids) in iter {
+            if let Some(v) = inner.get_mut(&key) {
+                v.extend(doc_ids);
+                continue;
+            }
+            inner.insert(key, doc_ids);
+        }
 
-        CommittedStringFilterField::from_iter(
-            uncommitted.field_path().to_vec().into_boxed_slice(),
-            iter,
+        let data = StringFilterFieldDump::V1(StringFilterFieldDumpV1 { data: inner });
+        BufferedFile::create_or_overwrite(data_dir.join("data.bin"))
+            .context("Cannot create data.bin")?
+            .write_bincode_data(&data)
+            .context("Cannot write data.bin")?;
+        let StringFilterFieldDump::V1(inner) = data;
+
+        Ok(Self {
+            field_path: uncommitted.field_path().to_vec().into_boxed_slice(),
+            inner: inner.data,
             data_dir,
-        )
+        })
     }
 
     fn metadata(&self) -> Self::FieldMetadata {
-        self.get_field_info()
+        StringFilterFieldInfo {
+            field_path: self.field_path.clone(),
+            data_dir: self.data_dir.clone(),
+        }
     }
 }
 
@@ -194,13 +186,16 @@ pub struct StringFilterFieldInfo {
     pub data_dir: PathBuf,
 }
 
-impl FieldMetadata for StringFilterFieldInfo {
+impl CommittedFieldMetadata for StringFilterFieldInfo {
     fn data_dir(&self) -> &PathBuf {
         &self.data_dir
     }
 
     fn set_data_dir(&mut self, data_dir: PathBuf) {
         self.data_dir = data_dir;
+    }
+    fn field_path(&self) -> &Box<[String]> {
+        &self.field_path
     }
 }
 

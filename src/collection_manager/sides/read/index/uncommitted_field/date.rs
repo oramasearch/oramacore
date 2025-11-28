@@ -90,6 +90,9 @@ impl UncommittedField for UncommittedDateFilterField {
     fn is_empty(&self) -> bool {
         self.len() == 0
     }
+    fn field_path(&self) -> &Box<[String]> {
+        &self.field_path
+    }
 }
 
 #[inline]
