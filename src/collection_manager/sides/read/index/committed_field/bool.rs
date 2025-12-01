@@ -7,9 +7,17 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use tracing::info;
 
-use crate::types::DocumentId;
-use oramacore_lib::data_structures::ordered_key::BoundedValue;
-use oramacore_lib::fs::create_if_not_exists;
+use crate::{
+    collection_manager::sides::read::{
+        index::{
+            merge::{CommittedField, CommittedFieldMetadata, Field},
+            uncommitted_field::UncommittedBoolField,
+        },
+        OffloadFieldConfig,
+    },
+    types::DocumentId,
+};
+use oramacore_lib::{data_structures::ordered_key::BoundedValue, fs::BufferedFile};
 
 #[derive(Debug)]
 pub struct CommittedBoolField {
@@ -19,49 +27,56 @@ pub struct CommittedBoolField {
 }
 
 impl CommittedBoolField {
-    pub fn from_data(
-        field_path: Box<[String]>,
-        true_docs: HashSet<DocumentId>,
-        false_docs: HashSet<DocumentId>,
+    fn commit(&self) -> Result<()> {
+        let file_path = self.data_dir.join("bool_map.bin");
+        BufferedFile::create_or_overwrite(file_path)
+            .context("Failed to create bool_map.bin")?
+            .write_bincode_data(&self.map)
+            .context("Failed to serialize bool map")?;
+
+        Ok(())
+    }
+
+    pub fn filter<'s, 'iter>(
+        &'s self,
+        value: bool,
+    ) -> Result<impl Iterator<Item = DocumentId> + 'iter>
+    where
+        's: 'iter,
+    {
+        let docs = self.map.get(&value).unwrap();
+
+        Ok(docs.iter().copied())
+    }
+
+    pub fn clone_inner(&self) -> Result<(HashSet<DocumentId>, HashSet<DocumentId>)> {
+        let false_docs: HashSet<_> = self.map.get(&false).unwrap().clone();
+        let true_docs: HashSet<_> = self.map.get(&true).unwrap().clone();
+
+        Ok((true_docs, false_docs))
+    }
+}
+
+impl CommittedField for CommittedBoolField {
+    type FieldMetadata = BoolFieldInfo;
+    type Uncommitted = UncommittedBoolField;
+
+    fn from_uncommitted(
+        uncommitted: &Self::Uncommitted,
         data_dir: PathBuf,
+        uncommitted_document_deletions: &HashSet<DocumentId>,
+        _offload_config: OffloadFieldConfig,
     ) -> Result<Self> {
+        let (mut true_docs, mut false_docs) = uncommitted.clone_inner();
+        true_docs.retain(|doc_id| !uncommitted_document_deletions.contains(doc_id));
+        false_docs.retain(|doc_id| !uncommitted_document_deletions.contains(doc_id));
+
         let mut map = HashMap::with_capacity(2);
         map.insert(false, false_docs);
         map.insert(true, true_docs);
 
         let field = Self {
-            field_path,
-            map,
-            data_dir,
-        };
-
-        field.commit().context("Failed to commit bool field")?;
-
-        Ok(field)
-    }
-
-    pub fn from_iter<I>(field_path: Box<[String]>, iter: I, data_dir: PathBuf) -> Result<Self>
-    where
-        I: Iterator<Item = (BoolWrapper, HashSet<DocumentId>)>,
-    {
-        let mut map = HashMap::with_capacity(2);
-        map.insert(false, HashSet::new());
-        map.insert(true, HashSet::new());
-
-        for (key, values) in iter {
-            match key {
-                BoolWrapper::False => {
-                    map.insert(false, values);
-                }
-                BoolWrapper::True => {
-                    map.insert(true, values);
-                }
-                _ => continue, // Ignore Min and Max
-            }
-        }
-
-        let field = Self {
-            field_path,
+            field_path: uncommitted.field_path().to_vec().into_boxed_slice(),
             map,
             data_dir: data_dir.clone(),
         };
@@ -72,12 +87,18 @@ impl CommittedBoolField {
     }
 
     #[allow(deprecated)]
-    pub fn try_load(info: BoolFieldInfo) -> Result<Self> {
-        let data_dir = info.data_dir;
+    fn try_load(
+        metadata: Self::FieldMetadata,
+        _offload_config: OffloadFieldConfig,
+    ) -> Result<Self> {
+        let data_dir: PathBuf = metadata.data_dir;
 
-        let map = match std::fs::File::open(data_dir.join("bool_map.bin")) {
-            Ok(file) => bincode::deserialize_from::<_, HashMap<bool, HashSet<DocumentId>>>(file)
-                .context("Failed to deserialize bool_map.bin")?,
+        let (map, needs_commit) = match std::fs::File::open(data_dir.join("bool_map.bin")) {
+            Ok(file) => (
+                bincode::deserialize_from::<_, HashMap<bool, HashSet<DocumentId>>>(file)
+                    .context("Failed to deserialize bool_map.bin")?,
+                false,
+            ),
             Err(_) => {
                 info!("bool_map.bin not found, reconstructing from OrderedKeyIndex");
                 use oramacore_lib::data_structures::ordered_key::OrderedKeyIndex;
@@ -118,70 +139,73 @@ impl CommittedBoolField {
                     }
                 }
 
-                map
+                (map, true)
             }
         };
 
         let s = Self {
-            field_path: info.field_path,
+            field_path: metadata.field_path,
             map,
             data_dir,
         };
 
-        s.commit().context("Failed to commit bool field")?;
+        if needs_commit {
+            s.commit().context("Failed to commit bool field")?;
+        }
 
         Ok(s)
     }
 
-    fn commit(&self) -> Result<()> {
-        // Ensure the data directory exists
-        create_if_not_exists(&self.data_dir).context("Failed to create data directory")?;
+    fn add_uncommitted(
+        &self,
+        uncommitted: &Self::Uncommitted,
+        data_dir: PathBuf,
+        uncommitted_document_deletions: &HashSet<DocumentId>,
+        _offload_config: OffloadFieldConfig,
+    ) -> Result<Self> {
+        let (uncommitted_true_docs, uncommitted_false_docs) = uncommitted.clone_inner();
+        let (mut committed_true_docs, mut committed_false_docs) = self.clone_inner()?;
 
-        let file_path = self.data_dir.join("bool_map.bin");
-        let file = std::fs::File::create(&file_path).context("Failed to create bool_map.bin")?;
-        bincode::serialize_into(file, &self.map).context("Failed to serialize bool map")?;
+        committed_true_docs.extend(uncommitted_true_docs);
+        committed_false_docs.extend(uncommitted_false_docs);
+        committed_true_docs.retain(|doc_id| !uncommitted_document_deletions.contains(doc_id));
+        committed_false_docs.retain(|doc_id| !uncommitted_document_deletions.contains(doc_id));
 
-        Ok(())
+        let mut map = HashMap::with_capacity(2);
+        map.insert(false, committed_false_docs);
+        map.insert(true, committed_true_docs);
+
+        let field = Self {
+            field_path: self.field_path.clone(),
+            map,
+            data_dir,
+        };
+
+        field.commit().context("Failed to commit bool field")?;
+
+        Ok(field)
     }
 
-    pub fn get_field_info(&self) -> BoolFieldInfo {
+    fn metadata(&self) -> Self::FieldMetadata {
         BoolFieldInfo {
             field_path: self.field_path.clone(),
             data_dir: self.data_dir.clone(),
         }
     }
+}
 
-    pub fn field_path(&self) -> &[String] {
+impl Field for CommittedBoolField {
+    type FieldStats = CommittedBoolFieldStats;
+
+    fn field_path(&self) -> &Box<[String]> {
         &self.field_path
     }
 
-    pub fn stats(&self) -> Result<CommittedBoolFieldStats> {
-        let false_count = self.map.get(&false).map_or(0, |set| set.len());
-        let true_count = self.map.get(&true).map_or(0, |set| set.len());
-
-        Ok(CommittedBoolFieldStats {
-            false_count,
-            true_count,
-        })
-    }
-
-    pub fn filter<'s, 'iter>(
-        &'s self,
-        value: bool,
-    ) -> Result<impl Iterator<Item = DocumentId> + 'iter>
-    where
-        's: 'iter,
-    {
-        let docs = self.map.get(&value).unwrap();
-
-        Ok(docs.iter().copied())
-    }
-
-    pub fn clone_inner(&self) -> Result<(HashSet<DocumentId>, HashSet<DocumentId>)> {
-        let false_docs: HashSet<_> = self.map.get(&false).unwrap().clone();
-        let true_docs: HashSet<_> = self.map.get(&true).unwrap().clone();
-
-        Ok((true_docs, false_docs))
+    fn stats(&self) -> Self::FieldStats {
+        CommittedBoolFieldStats {
+            false_count: self.map.get(&false).map_or(0, |set| set.len()),
+            true_count: self.map.get(&true).map_or(0, |set| set.len()),
+        }
     }
 }
 
@@ -272,4 +296,18 @@ pub struct BoolFieldInfo {
 pub struct CommittedBoolFieldStats {
     pub false_count: usize,
     pub true_count: usize,
+}
+
+impl CommittedFieldMetadata for BoolFieldInfo {
+    fn data_dir(&self) -> &PathBuf {
+        &self.data_dir
+    }
+
+    fn set_data_dir(&mut self, data_dir: PathBuf) {
+        self.data_dir = data_dir;
+    }
+
+    fn field_path(&self) -> &Box<[String]> {
+        &self.field_path
+    }
 }

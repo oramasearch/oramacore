@@ -29,8 +29,6 @@ pub mod collection_manager;
 
 pub mod web_server;
 
-mod capped_heap;
-
 mod metrics;
 
 mod merger;
@@ -113,7 +111,8 @@ pub async fn start(config: OramacoreConfig) -> Result<()> {
         write_side.commit().await?;
     }
     if let Some(read_side) = read_side {
-        read_side.commit().await?;
+        // Force commit during shutdown to ensure all data is persisted
+        read_side.commit(true).await?;
     }
 
     Ok(())

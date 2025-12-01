@@ -1,6 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use anyhow::Result;
+use oramacore_lib::data_structures::ShouldInclude;
 use serde::Serialize;
 use tracing::{debug, warn};
 use xtri::{RadixTree, SearchMode};
@@ -10,7 +11,11 @@ use crate::{
         bm25::{BM25FFieldParams, BM25Scorer},
         global_info::GlobalInfo,
         sides::{
-            read::index::search_context::FullTextSearchContext, InsertStringTerms, TermStringField,
+            read::index::{
+                merge::{Field, UncommittedField},
+                search_context::FullTextSearchContext,
+            },
+            InsertStringTerms, TermStringField,
         },
     },
     types::DocumentId,
@@ -87,23 +92,8 @@ impl UncommittedStringField {
         }
     }
 
-    pub fn field_path(&self) -> &[String] {
-        &self.field_path
-    }
-
     pub fn len(&self) -> usize {
         self.document_ids.len()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.len() == 0
-    }
-
-    pub fn clear(&mut self) {
-        self.inner.clear();
-        self.document_ids = HashSet::new();
-        self.field_length_per_doc = HashMap::new();
-        self.total_field_length = 0;
     }
 
     pub fn insert(&mut self, document_id: DocumentId, field_length: u16, terms: InsertStringTerms) {
@@ -179,12 +169,7 @@ impl UncommittedStringField {
 
             for (_total_documents_with_term_in_field, position_per_document) in matches {
                 for (doc_id, positions) in position_per_document {
-                    if let Some(filtered_doc_ids) = context.filtered_doc_ids {
-                        if !filtered_doc_ids.contains(doc_id) {
-                            continue;
-                        }
-                    }
-                    if context.uncommitted_deleted_documents.contains(doc_id) {
+                    if context.search_document_context.should_exclude(doc_id) {
                         continue;
                     }
 
@@ -249,8 +234,28 @@ impl UncommittedStringField {
     > + '_ {
         self.inner.search_iter("", SearchMode::Prefix)
     }
+}
 
-    pub fn stats(&self) -> UncommittedStringFieldStats {
+impl UncommittedField for UncommittedStringField {
+    fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    fn clear(&mut self) {
+        self.inner.clear();
+        self.document_ids = HashSet::new();
+        self.field_length_per_doc = HashMap::new();
+        self.total_field_length = 0;
+    }
+}
+impl Field for UncommittedStringField {
+    type FieldStats = UncommittedStringFieldStats;
+
+    fn field_path(&self) -> &Box<[String]> {
+        &self.field_path
+    }
+
+    fn stats(&self) -> UncommittedStringFieldStats {
         UncommittedStringFieldStats {
             key_count: self.inner.len(),
             global_info: self.global_info(),

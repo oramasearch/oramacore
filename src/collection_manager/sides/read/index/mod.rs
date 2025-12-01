@@ -1,15 +1,10 @@
 use chrono::{DateTime, Utc};
 use committed_field::{
-    BoolFieldInfo, CommittedBoolField, CommittedNumberField, CommittedStringField,
-    CommittedStringFilterField, CommittedVectorField, NumberFieldInfo, StringFieldInfo,
-    StringFilterFieldInfo, VectorFieldInfo,
+    BoolFieldInfo, CommittedBoolField, CommittedNumberField, CommittedStringFilterField,
+    NumberFieldInfo, StringFilterFieldInfo, VectorFieldInfo,
 };
 use futures::join;
 use group::Groupable;
-use merge::{
-    merge_bool_field, merge_number_field, merge_string_field, merge_string_filter_field,
-    merge_vector_field,
-};
 use oramacore_lib::filters::{FilterResult, PlainFilterResult};
 use path_to_index_id_map::PathToIndexId;
 use search_context::FullTextSearchContext;
@@ -26,11 +21,15 @@ use crate::{
                 context::ReadSideContext,
                 index::{
                     committed_field::{
-                        CommittedDateField, CommittedGeoPointField, DateFieldInfo,
-                        GeoPointFieldInfo,
+                        CommittedDateField, CommittedGeoPointField, CommittedStringField,
+                        CommittedVectorField, DateFieldInfo, GeoPointFieldInfo, StringFieldInfo,
                     },
-                    merge::{merge_date_field, merge_geopoint_field},
+                    merge::{
+                        merge_field, CommittedField, CommittedFieldMetadata, Field,
+                        UncommittedField,
+                    },
                 },
+                search::SearchDocumentContext,
                 ReadError,
             },
             write::index::EnumStrategy,
@@ -224,7 +223,8 @@ impl Index {
                 UncommittedBoolField::empty(info.field_path.clone()),
             );
             debug!("CommittedBoolField::try_load for field_id {:?}", field_id);
-            let field = CommittedBoolField::try_load(info).context("Cannot load bool field")?;
+            let field = CommittedBoolField::try_load(info, offload_config)
+                .context("Cannot load bool field")?;
             debug!("DONE");
             committed_fields.bool_fields.insert(field_id, field);
         }
@@ -238,7 +238,8 @@ impl Index {
                 field_id,
                 UncommittedNumberField::empty(info.field_path.clone()),
             );
-            let field = CommittedNumberField::try_load(info).context("Cannot load number field")?;
+            let field = CommittedNumberField::try_load(info, offload_config)
+                .context("Cannot load number field")?;
             committed_fields.number_fields.insert(field_id, field);
         }
         debug!("Number fields loaded");
@@ -251,7 +252,8 @@ impl Index {
                 field_id,
                 UncommittedDateFilterField::empty(info.field_path.clone()),
             );
-            let field = CommittedDateField::try_load(info).context("Cannot load date field")?;
+            let field = CommittedDateField::try_load(info, offload_config)
+                .context("Cannot load date field")?;
             committed_fields.date_fields.insert(field_id, field);
         }
 
@@ -263,8 +265,8 @@ impl Index {
                 field_id,
                 UncommittedGeoPointFilterField::empty(info.field_path.clone()),
             );
-            let field =
-                CommittedGeoPointField::try_load(info).context("Cannot load geopoint field")?;
+            let field = CommittedGeoPointField::try_load(info, offload_config)
+                .context("Cannot load geopoint field")?;
             committed_fields.geopoint_fields.insert(field_id, field);
         }
 
@@ -276,7 +278,7 @@ impl Index {
                 field_id,
                 UncommittedStringFilterField::empty(info.field_path.clone()),
             );
-            let field = CommittedStringFilterField::try_load(info)
+            let field = CommittedStringFilterField::try_load(info, offload_config)
                 .context("Cannot load string filter field")?;
             committed_fields
                 .string_filter_fields
@@ -338,6 +340,9 @@ impl Index {
     }
 
     pub async fn get_all_document_ids(&self) -> Result<Vec<DocumentId>> {
+        let search_document_context =
+            SearchDocumentContext::new(&self.uncommitted_deleted_documents, None);
+
         let properties = Properties::default();
         let properties = self.calculate_string_properties(&properties).await?;
         let output = self
@@ -348,8 +353,7 @@ impl Index {
                 None,
                 properties,
                 Default::default(),
-                None,
-                &Default::default(),
+                &search_document_context,
             )
             .await
             .expect("Failed to get all documents");
@@ -432,244 +436,117 @@ impl Index {
 
         let committed_fields = self.committed_fields.read("commit").await;
 
-        enum MergeResult<T> {
-            Changed(T),
-            Unchanged,
-        }
+        let merged_bools = merge_type(
+            &data_dir_with_offset,
+            &uncommitted_fields.bool_fields,
+            &committed_fields.bool_fields,
+            &self.uncommitted_deleted_documents,
+            is_promoted,
+            &self.offload_config,
+            FieldIndexCollectionCommitLabels {
+                collection: collection_id.as_str().to_string(),
+                index: self.id.as_str().to_string(),
+                side: "read",
+                field_type: "bool",
+            },
+        )
+        .context("Cannot merge bool fields")?;
 
-        let m = FIELD_INDEX_COMMIT_CALCULATION_TIME.create(FieldIndexCollectionCommitLabels {
-            collection: collection_id.as_str().to_string(),
-            index: self.id.as_str().to_string(),
-            side: "read",
-            field_type: "bool",
-        });
-        let mut merged_bools = HashMap::new();
-        let bool_indexes: HashSet<_> = uncommitted_fields
-            .bool_fields
-            .keys()
-            .chain(committed_fields.bool_fields.keys())
-            .copied()
-            .collect();
-        for field_id in bool_indexes {
-            let data_dir = data_dir_with_offset.join(field_id.0.to_string());
-            let uncommitted = uncommitted_fields.bool_fields.get(&field_id);
-            let committed = committed_fields.bool_fields.get(&field_id);
-            if let Some(merged) = merge_bool_field(
-                uncommitted,
-                committed,
-                data_dir,
-                &self.uncommitted_deleted_documents,
-                is_promoted,
-            )
-            .context("Cannot merge bool field")?
-            {
-                merged_bools.insert(field_id, MergeResult::Changed(merged));
-            } else {
-                merged_bools.insert(field_id, MergeResult::Unchanged);
-            }
-        }
-        drop(m);
+        let merged_numbers = merge_type(
+            &data_dir_with_offset,
+            &uncommitted_fields.number_fields,
+            &committed_fields.number_fields,
+            &self.uncommitted_deleted_documents,
+            is_promoted,
+            &self.offload_config,
+            FieldIndexCollectionCommitLabels {
+                collection: collection_id.as_str().to_string(),
+                index: self.id.as_str().to_string(),
+                side: "read",
+                field_type: "number",
+            },
+        )
+        .context("Cannot merge number fields")?;
 
-        let m = FIELD_INDEX_COMMIT_CALCULATION_TIME.create(FieldIndexCollectionCommitLabels {
-            collection: collection_id.as_str().to_string(),
-            index: self.id.as_str().to_string(),
-            side: "read",
-            field_type: "number",
-        });
-        let mut merged_numbers = HashMap::new();
-        let number_indexes: HashSet<_> = uncommitted_fields
-            .number_fields
-            .keys()
-            .chain(committed_fields.number_fields.keys())
-            .copied()
-            .collect();
-        for field_id in number_indexes {
-            let data_dir = data_dir_with_offset.join(field_id.0.to_string());
-            let uncommitted = uncommitted_fields.number_fields.get(&field_id);
-            let committed = committed_fields.number_fields.get(&field_id);
-            if let Some(merged) = merge_number_field(
-                uncommitted,
-                committed,
-                data_dir,
-                &self.uncommitted_deleted_documents,
-                is_promoted,
-            )
-            .context("Cannot merge number field")?
-            {
-                merged_numbers.insert(field_id, MergeResult::Changed(merged));
-            } else {
-                merged_numbers.insert(field_id, MergeResult::Unchanged);
-            }
-        }
-        drop(m);
+        let merged_dates = merge_type(
+            &data_dir_with_offset,
+            &uncommitted_fields.date_fields,
+            &committed_fields.date_fields,
+            &self.uncommitted_deleted_documents,
+            is_promoted,
+            &self.offload_config,
+            FieldIndexCollectionCommitLabels {
+                collection: collection_id.as_str().to_string(),
+                index: self.id.as_str().to_string(),
+                side: "read",
+                field_type: "date",
+            },
+        )
+        .context("Cannot merge date fields")?;
 
-        let m = FIELD_INDEX_COMMIT_CALCULATION_TIME.create(FieldIndexCollectionCommitLabels {
-            collection: collection_id.as_str().to_string(),
-            index: self.id.as_str().to_string(),
-            side: "read",
-            field_type: "date",
-        });
-        let mut merged_dates = HashMap::new();
-        let date_indexes: HashSet<_> = uncommitted_fields
-            .date_fields
-            .keys()
-            .chain(committed_fields.date_fields.keys())
-            .copied()
-            .collect();
-        for field_id in date_indexes {
-            let data_dir = data_dir_with_offset.join(field_id.0.to_string());
-            let uncommitted = uncommitted_fields.date_fields.get(&field_id);
-            let committed = committed_fields.date_fields.get(&field_id);
-            if let Some(merged) = merge_date_field(
-                uncommitted,
-                committed,
-                data_dir,
-                &self.uncommitted_deleted_documents,
-                is_promoted,
-            )
-            .context("Cannot merge date field")?
-            {
-                merged_dates.insert(field_id, MergeResult::Changed(merged));
-            } else {
-                merged_dates.insert(field_id, MergeResult::Unchanged);
-            }
-        }
-        drop(m);
+        let merged_geopoints = merge_type(
+            &data_dir_with_offset,
+            &uncommitted_fields.geopoint_fields,
+            &committed_fields.geopoint_fields,
+            &self.uncommitted_deleted_documents,
+            is_promoted,
+            &self.offload_config,
+            FieldIndexCollectionCommitLabels {
+                collection: collection_id.as_str().to_string(),
+                index: self.id.as_str().to_string(),
+                side: "read",
+                field_type: "geopoint",
+            },
+        )
+        .context("Cannot merge geopoint fields")?;
 
-        let m = FIELD_INDEX_COMMIT_CALCULATION_TIME.create(FieldIndexCollectionCommitLabels {
-            collection: collection_id.as_str().to_string(),
-            index: self.id.as_str().to_string(),
-            side: "read",
-            field_type: "geopoint",
-        });
-        let mut merged_geopoints = HashMap::new();
-        let geopoint_indexes: HashSet<_> = uncommitted_fields
-            .geopoint_fields
-            .keys()
-            .chain(committed_fields.geopoint_fields.keys())
-            .copied()
-            .collect();
-        for field_id in geopoint_indexes {
-            let data_dir = data_dir_with_offset.join(field_id.0.to_string());
-            let uncommitted = uncommitted_fields.geopoint_fields.get(&field_id);
-            let committed = committed_fields.geopoint_fields.get(&field_id);
-            let output = merge_geopoint_field(
-                uncommitted,
-                committed,
-                data_dir,
-                &self.uncommitted_deleted_documents,
-                is_promoted,
-            )
-            .context("Cannot merge geopoint field")?;
+        let merged_string_filters = merge_type(
+            &data_dir_with_offset,
+            &uncommitted_fields.string_filter_fields,
+            &committed_fields.string_filter_fields,
+            &self.uncommitted_deleted_documents,
+            is_promoted,
+            &self.offload_config,
+            FieldIndexCollectionCommitLabels {
+                collection: collection_id.as_str().to_string(),
+                index: self.id.as_str().to_string(),
+                side: "read",
+                field_type: "string_filter",
+            },
+        )
+        .context("Cannot merge string filter fields")?;
 
-            if let Some(merged) = output {
-                merged_geopoints.insert(field_id, MergeResult::Changed(merged));
-            } else {
-                merged_geopoints.insert(field_id, MergeResult::Unchanged);
-            }
-        }
-        drop(m);
+        let merged_strings = merge_type(
+            &data_dir_with_offset,
+            &uncommitted_fields.string_fields,
+            &committed_fields.string_fields,
+            &self.uncommitted_deleted_documents,
+            is_promoted,
+            &self.offload_config,
+            FieldIndexCollectionCommitLabels {
+                collection: collection_id.as_str().to_string(),
+                index: self.id.as_str().to_string(),
+                side: "read",
+                field_type: "string",
+            },
+        )
+        .context("Cannot merge string fields")?;
 
-        let m = FIELD_INDEX_COMMIT_CALCULATION_TIME.create(FieldIndexCollectionCommitLabels {
-            collection: collection_id.as_str().to_string(),
-            index: self.id.as_str().to_string(),
-            side: "read",
-            field_type: "string_filter",
-        });
-        let mut merged_string_filters = HashMap::new();
-        let string_filter_indexes: HashSet<_> = uncommitted_fields
-            .string_filter_fields
-            .keys()
-            .chain(committed_fields.string_filter_fields.keys())
-            .copied()
-            .collect();
-        for field_id in string_filter_indexes {
-            let data_dir = data_dir_with_offset.join(field_id.0.to_string());
-            let uncommitted = uncommitted_fields.string_filter_fields.get(&field_id);
-            let committed = committed_fields.string_filter_fields.get(&field_id);
-            if let Some(merged) = merge_string_filter_field(
-                uncommitted,
-                committed,
-                data_dir,
-                &self.uncommitted_deleted_documents,
-                is_promoted,
-            )
-            .context("Cannot merge string filter field")?
-            {
-                merged_string_filters.insert(field_id, MergeResult::Changed(merged));
-            } else {
-                merged_string_filters.insert(field_id, MergeResult::Unchanged);
-            }
-        }
-        drop(m);
-
-        let m = FIELD_INDEX_COMMIT_CALCULATION_TIME.create(FieldIndexCollectionCommitLabels {
-            collection: collection_id.as_str().to_string(),
-            index: self.id.as_str().to_string(),
-            side: "read",
-            field_type: "string",
-        });
-        let mut merged_strings = HashMap::new();
-        let string_indexes: HashSet<_> = uncommitted_fields
-            .string_fields
-            .keys()
-            .chain(committed_fields.string_fields.keys())
-            .copied()
-            .collect();
-        for field_id in string_indexes {
-            let data_dir = data_dir_with_offset.join(field_id.0.to_string());
-            let uncommitted = uncommitted_fields.string_fields.get(&field_id);
-            let committed = committed_fields.string_fields.get(&field_id);
-            if let Some(merged) = merge_string_field(
-                uncommitted,
-                committed,
-                data_dir,
-                &self.uncommitted_deleted_documents,
-                is_promoted,
-                &self.offload_config,
-            )
-            .context("Cannot merge string field")?
-            {
-                merged_strings.insert(field_id, MergeResult::Changed(merged));
-            } else {
-                merged_strings.insert(field_id, MergeResult::Unchanged);
-            }
-        }
-        drop(m);
-
-        let m = FIELD_INDEX_COMMIT_CALCULATION_TIME.create(FieldIndexCollectionCommitLabels {
-            collection: collection_id.as_str().to_string(),
-            index: self.id.as_str().to_string(),
-            side: "read",
-            field_type: "vector",
-        });
-        let mut merged_vectors = HashMap::new();
-        let vector_indexes: HashSet<_> = uncommitted_fields
-            .vector_fields
-            .keys()
-            .chain(committed_fields.vector_fields.keys())
-            .copied()
-            .collect();
-        for field_id in vector_indexes {
-            let data_dir = data_dir_with_offset.join(field_id.0.to_string());
-            let uncommitted = uncommitted_fields.vector_fields.get(&field_id);
-            let committed = committed_fields.vector_fields.get(&field_id);
-            if let Some(merged) = merge_vector_field(
-                uncommitted,
-                committed,
-                data_dir,
-                &self.uncommitted_deleted_documents,
-                is_promoted,
-                &self.offload_config,
-            )
-            .context("Cannot merge vector field")?
-            {
-                merged_vectors.insert(field_id, MergeResult::Changed(merged));
-            } else {
-                merged_vectors.insert(field_id, MergeResult::Unchanged);
-            }
-        }
-        drop(m);
+        let merged_vectors = merge_type(
+            &data_dir_with_offset,
+            &uncommitted_fields.vector_fields,
+            &committed_fields.vector_fields,
+            &self.uncommitted_deleted_documents,
+            is_promoted,
+            &self.offload_config,
+            FieldIndexCollectionCommitLabels {
+                collection: collection_id.as_str().to_string(),
+                index: self.id.as_str().to_string(),
+                side: "read",
+                field_type: "vector",
+            },
+        )
+        .context("Cannot merge vector fields")?;
 
         // Once all changed in merged_* maps are collected,
         // we can proceed to replace the committed fields with the merged ones
@@ -687,162 +564,55 @@ impl Index {
         let mut uncommitted_fields = self.uncommitted_fields.write("commit").await;
         let mut committed_fields = self.committed_fields.write("commit").await;
 
-        for (field_id, merged) in merged_bools {
-            match merged {
-                MergeResult::Changed(merged) => {
-                    #[cfg(debug_assertions)]
-                    {
-                        let data_dir = merged.get_field_info().data_dir;
-                        let offset_str = data_dir.components().rev().nth(1).unwrap();
-                        assert_eq!(
-                            offset_str.as_os_str().to_str().unwrap(),
-                            &format!("offset-{}", offset.0),
-                            "Vector field data dir offset mismatch after commit"
-                        );
-                        assert!(std::fs::exists(data_dir).unwrap());
-                    }
-                    committed_fields.bool_fields.insert(field_id, merged);
-                }
-                MergeResult::Unchanged => {}
-            }
-            if let Some(uncommitted) = uncommitted_fields.bool_fields.get_mut(&field_id) {
-                uncommitted.clear();
-            }
-        }
-        for (field_id, merged) in merged_numbers {
-            match merged {
-                MergeResult::Changed(merged) => {
-                    #[cfg(debug_assertions)]
-                    {
-                        let data_dir = merged.get_field_info().data_dir;
-                        let offset_str = data_dir.components().rev().nth(1).unwrap();
-                        assert_eq!(
-                            offset_str.as_os_str().to_str().unwrap(),
-                            &format!("offset-{}", offset.0),
-                            "Vector field data dir offset mismatch after commit"
-                        );
-                        assert!(std::fs::exists(data_dir).unwrap());
-                    }
-                    committed_fields.number_fields.insert(field_id, merged);
-                }
-                MergeResult::Unchanged => {}
-            }
-            if let Some(uncommitted) = uncommitted_fields.number_fields.get_mut(&field_id) {
-                uncommitted.clear();
-            }
-        }
-        for (field_id, merged) in merged_dates {
-            match merged {
-                MergeResult::Changed(merged) => {
-                    #[cfg(debug_assertions)]
-                    {
-                        let data_dir = merged.get_field_info().data_dir;
-                        let offset_str = data_dir.components().rev().nth(1).unwrap();
-                        assert_eq!(
-                            offset_str.as_os_str().to_str().unwrap(),
-                            &format!("offset-{}", offset.0),
-                            "Vector field data dir offset mismatch after commit"
-                        );
-                        assert!(std::fs::exists(data_dir).unwrap());
-                    }
-                    committed_fields.date_fields.insert(field_id, merged);
-                }
-                MergeResult::Unchanged => {}
-            }
-            if let Some(uncommitted) = uncommitted_fields.date_fields.get_mut(&field_id) {
-                uncommitted.clear();
-            }
-        }
-        for (field_id, merged) in merged_geopoints {
-            match merged {
-                MergeResult::Changed(merged) => {
-                    #[cfg(debug_assertions)]
-                    {
-                        let data_dir = merged.get_field_info().data_dir;
-                        let offset_str = data_dir.components().rev().nth(1).unwrap();
-                        assert_eq!(
-                            offset_str.as_os_str().to_str().unwrap(),
-                            &format!("offset-{}", offset.0),
-                            "Vector field data dir offset mismatch after commit"
-                        );
-                        assert!(std::fs::exists(data_dir).unwrap());
-                    }
-                    committed_fields.geopoint_fields.insert(field_id, merged);
-                }
-                MergeResult::Unchanged => {}
-            }
-            if let Some(uncommitted) = uncommitted_fields.geopoint_fields.get_mut(&field_id) {
-                uncommitted.clear();
-            }
-        }
-        for (field_id, merged) in merged_string_filters {
-            match merged {
-                MergeResult::Changed(merged) => {
-                    #[cfg(debug_assertions)]
-                    {
-                        let data_dir = merged.get_field_info().data_dir;
-                        let offset_str = data_dir.components().rev().nth(1).unwrap();
-                        assert_eq!(
-                            offset_str.as_os_str().to_str().unwrap(),
-                            &format!("offset-{}", offset.0),
-                            "Vector field data dir offset mismatch after commit"
-                        );
-                        assert!(std::fs::exists(data_dir).unwrap());
-                    }
-                    committed_fields
-                        .string_filter_fields
-                        .insert(field_id, merged);
-                }
-                MergeResult::Unchanged => {}
-            }
-            if let Some(uncommitted) = uncommitted_fields.string_filter_fields.get_mut(&field_id) {
-                uncommitted.clear();
-            }
-        }
-        for (field_id, merged) in merged_strings {
-            match merged {
-                MergeResult::Changed(merged) => {
-                    #[cfg(debug_assertions)]
-                    {
-                        let data_dir = merged.get_field_info().data_dir;
-                        let offset_str = data_dir.components().rev().nth(1).unwrap();
-                        assert_eq!(
-                            offset_str.as_os_str().to_str().unwrap(),
-                            &format!("offset-{}", offset.0),
-                            "Vector field data dir offset mismatch after commit"
-                        );
-                        assert!(std::fs::exists(data_dir).unwrap());
-                    }
-                    committed_fields.string_fields.insert(field_id, merged);
-                }
-                MergeResult::Unchanged => {}
-            }
-            if let Some(uncommitted) = uncommitted_fields.string_fields.get_mut(&field_id) {
-                uncommitted.clear();
-            }
-        }
-        for (field_id, merged) in merged_vectors {
-            match merged {
-                MergeResult::Changed(merged) => {
-                    #[cfg(debug_assertions)]
-                    {
-                        let data_dir = merged.get_field_info().data_dir;
-                        let offset_str = data_dir.components().rev().nth(1).unwrap();
-                        assert_eq!(
-                            offset_str.as_os_str().to_str().unwrap(),
-                            &format!("offset-{}", offset.0),
-                            "Vector field data dir offset mismatch after commit"
-                        );
-                        assert!(std::fs::exists(data_dir).unwrap());
-                    }
-                    committed_fields.vector_fields.insert(field_id, merged);
-                }
-                MergeResult::Unchanged => {}
-            }
-            if let Some(uncommitted) = uncommitted_fields.vector_fields.get_mut(&field_id) {
-                uncommitted.clear();
-            }
-        }
+        overwrite_committed(
+            self.id,
+            offset,
+            merged_bools,
+            &mut committed_fields.bool_fields,
+            &mut uncommitted_fields.bool_fields,
+        );
+        overwrite_committed(
+            self.id,
+            offset,
+            merged_numbers,
+            &mut committed_fields.number_fields,
+            &mut uncommitted_fields.number_fields,
+        );
+        overwrite_committed(
+            self.id,
+            offset,
+            merged_dates,
+            &mut committed_fields.date_fields,
+            &mut uncommitted_fields.date_fields,
+        );
+        overwrite_committed(
+            self.id,
+            offset,
+            merged_geopoints,
+            &mut committed_fields.geopoint_fields,
+            &mut uncommitted_fields.geopoint_fields,
+        );
+        overwrite_committed(
+            self.id,
+            offset,
+            merged_string_filters,
+            &mut committed_fields.string_filter_fields,
+            &mut uncommitted_fields.string_filter_fields,
+        );
+        overwrite_committed(
+            self.id,
+            offset,
+            merged_strings,
+            &mut committed_fields.string_fields,
+            &mut uncommitted_fields.string_fields,
+        );
+        overwrite_committed(
+            self.id,
+            offset,
+            merged_vectors,
+            &mut committed_fields.vector_fields,
+            &mut uncommitted_fields.vector_fields,
+        );
 
         let dump = Dump::V1(DumpV1 {
             id: self.id,
@@ -852,37 +622,37 @@ impl Index {
             bool_field_ids: committed_fields
                 .bool_fields
                 .iter()
-                .map(|(k, v)| (*k, v.get_field_info()))
+                .map(|(k, v)| (*k, v.metadata()))
                 .collect(),
             number_field_ids: committed_fields
                 .number_fields
                 .iter()
-                .map(|(k, v)| (*k, v.get_field_info()))
+                .map(|(k, v)| (*k, v.metadata()))
                 .collect(),
             date_field_ids: committed_fields
                 .date_fields
                 .iter()
-                .map(|(k, v)| (*k, v.get_field_info()))
+                .map(|(k, v)| (*k, v.metadata()))
                 .collect(),
             geopoint_field_ids: committed_fields
                 .geopoint_fields
                 .iter()
-                .map(|(k, v)| (*k, v.get_field_info()))
+                .map(|(k, v)| (*k, v.metadata()))
                 .collect(),
             string_filter_field_ids: committed_fields
                 .string_filter_fields
                 .iter()
-                .map(|(k, v)| (*k, v.get_field_info()))
+                .map(|(k, v)| (*k, v.metadata()))
                 .collect(),
             string_field_ids: committed_fields
                 .string_fields
                 .iter()
-                .map(|(k, v)| (*k, v.get_field_info()))
+                .map(|(k, v)| (*k, v.metadata()))
                 .collect(),
             vector_field_ids: committed_fields
                 .vector_fields
                 .iter()
-                .map(|(k, v)| (*k, v.get_field_info()))
+                .map(|(k, v)| (*k, v.metadata()))
                 .collect(),
             // Not used anymore. We calculate it on the fly
             path_to_index_id_map: Vec::new(),
@@ -919,42 +689,42 @@ impl Index {
         let field_data_dirs: HashSet<_> = committed_fields
             .bool_fields
             .values()
-            .map(|f| f.get_field_info().data_dir)
+            .map(|f| f.metadata().data_dir)
             .chain(
                 committed_fields
                     .number_fields
                     .values()
-                    .map(|f| f.get_field_info().data_dir),
+                    .map(|f| f.metadata().data_dir),
             )
             .chain(
                 committed_fields
                     .string_filter_fields
                     .values()
-                    .map(|f| f.get_field_info().data_dir),
+                    .map(|f| f.metadata().data_dir),
             )
             .chain(
                 committed_fields
                     .date_fields
                     .values()
-                    .map(|f| f.get_field_info().data_dir),
+                    .map(|f| f.metadata().data_dir),
             )
             .chain(
                 committed_fields
                     .geopoint_fields
                     .values()
-                    .map(|f| f.get_field_info().data_dir),
+                    .map(|f| f.metadata().data_dir),
             )
             .chain(
                 committed_fields
                     .string_fields
                     .values()
-                    .map(|f| f.get_field_info().data_dir),
+                    .map(|f| f.metadata().data_dir),
             )
             .chain(
                 committed_fields
                     .vector_fields
                     .values()
-                    .map(|f| f.get_field_info().data_dir),
+                    .map(|f| f.metadata().data_dir),
             )
             .map(|f| f.parent().unwrap().to_path_buf())
             .collect();
@@ -1313,6 +1083,9 @@ impl Index {
             .await
             .with_context(|| format!("Cannot calculate filtered doc in index {:?}", self.id))?;
 
+        let search_document_context =
+            SearchDocumentContext::new(uncommitted_deleted_documents, filtered_doc_ids);
+
         // Manage the "auto" search mode. OramaCore will automatically determine
         // wether to use full text search, vector search or hybrid search.
         let search_mode: SearchMode = match &search_params.mode {
@@ -1341,14 +1114,14 @@ impl Index {
                     }),
                     "hybrid" => SearchMode::Hybrid(HybridMode {
                         term: mode_result.term.clone(),
-                        similarity: Similarity(0.7),
+                        similarity: Similarity::default(),
                         threshold: None,
                         exact: false,
                         tolerance: None,
                     }),
                     "vector" => SearchMode::Vector(VectorMode {
                         term: mode_result.term.clone(),
-                        similarity: Similarity(0.7),
+                        similarity: Similarity::default(),
                     }),
                     _ => anyhow::bail!("Invalid search mode"),
                 }
@@ -1371,8 +1144,7 @@ impl Index {
                         search_mode.tolerance,
                         properties,
                         boost,
-                        filtered_doc_ids.as_ref(),
-                        uncommitted_deleted_documents,
+                        &search_document_context,
                     )
                     .await?,
                 )
@@ -1384,9 +1156,8 @@ impl Index {
                         &search_mode.term,
                         vector_properties,
                         search_mode.similarity,
-                        filtered_doc_ids.as_ref(),
                         search_params.limit,
-                        uncommitted_deleted_documents,
+                        &search_document_context,
                     )
                     .await?,
                 )
@@ -1402,9 +1173,8 @@ impl Index {
                         &search_mode.term,
                         vector_properties,
                         search_mode.similarity,
-                        filtered_doc_ids.as_ref(),
                         search_params.limit,
-                        uncommitted_deleted_documents
+                        &search_document_context,
                     ),
                     self.search_full_text(
                         &search_mode.term,
@@ -1413,8 +1183,7 @@ impl Index {
                         search_mode.tolerance,
                         string_properties,
                         boost,
-                        filtered_doc_ids.as_ref(),
-                        uncommitted_deleted_documents,
+                        &search_document_context,
                     )
                 );
                 let vector = vector?;
@@ -1463,135 +1232,35 @@ impl Index {
         Ok(())
     }
 
-    pub async fn stats(&self, is_temp: bool, with_keys: bool) -> Result<IndexStats> {
-        let mut fields_stats = Vec::new();
+    pub async fn stats(&self, is_temp: bool) -> Result<IndexStats> {
+        let mut fields_stats: Vec<IndexFieldStats> = Vec::new();
 
         let uncommitted_fields = self.uncommitted_fields.read("stats").await;
         let committed_fields = self.committed_fields.read("stats").await;
 
-        fields_stats.extend(uncommitted_fields.bool_fields.iter().map(|(k, v)| {
-            let path = v.field_path().join(".");
-            IndexFieldStats {
-                field_id: *k,
-                field_path: path,
-                stats: IndexFieldStatsType::UncommittedBoolean(v.stats()),
-            }
-        }));
-        fields_stats.extend(uncommitted_fields.number_fields.iter().map(|(k, v)| {
-            let path = v.field_path().join(".");
-            IndexFieldStats {
-                field_id: *k,
-                field_path: path,
-                stats: IndexFieldStatsType::UncommittedNumber(v.stats()),
-            }
-        }));
-        fields_stats.extend(uncommitted_fields.date_fields.iter().map(|(k, v)| {
-            let path = v.field_path().join(".");
-            IndexFieldStats {
-                field_id: *k,
-                field_path: path,
-                stats: IndexFieldStatsType::UncommittedDate(v.stats()),
-            }
-        }));
-        fields_stats.extend(uncommitted_fields.geopoint_fields.iter().map(|(k, v)| {
-            let path = v.field_path().join(".");
-            IndexFieldStats {
-                field_id: *k,
-                field_path: path,
-                stats: IndexFieldStatsType::UncommittedGeoPoint(v.stats()),
-            }
-        }));
-        fields_stats.extend(
-            uncommitted_fields
-                .string_filter_fields
-                .iter()
-                .map(|(k, v)| {
-                    let path = v.field_path().join(".");
-                    IndexFieldStats {
-                        field_id: *k,
-                        field_path: path,
-                        stats: IndexFieldStatsType::UncommittedStringFilter(v.stats(with_keys)),
-                    }
-                }),
-        );
-        fields_stats.extend(uncommitted_fields.string_fields.iter().map(|(k, v)| {
-            let path = v.field_path().join(".");
-            IndexFieldStats {
-                field_id: *k,
-                field_path: path,
-                stats: IndexFieldStatsType::UncommittedString(v.stats()),
-            }
-        }));
-        fields_stats.extend(uncommitted_fields.vector_fields.iter().map(|(k, v)| {
-            let path = v.field_path().join(".");
-            IndexFieldStats {
-                field_id: *k,
-                field_path: path,
-                stats: IndexFieldStatsType::UncommittedVector(v.stats()),
-            }
-        }));
+        fn extrapolate_stats<S: Into<IndexFieldStatsType>, F: Field<FieldStats = S>>(
+            fields: &HashMap<FieldId, F>,
+        ) -> impl Iterator<Item = IndexFieldStats> + '_ {
+            fields.iter().map(|(k, v)| (k, v).into())
+        }
 
-        fields_stats.extend(committed_fields.bool_fields.iter().filter_map(|(k, v)| {
-            let path = v.field_path().join(".");
-            Some(IndexFieldStats {
-                field_id: *k,
-                field_path: path,
-                stats: IndexFieldStatsType::CommittedBoolean(v.stats().ok()?),
-            })
-        }));
-        fields_stats.extend(committed_fields.number_fields.iter().filter_map(|(k, v)| {
-            let path = v.field_path().join(".");
-            Some(IndexFieldStats {
-                field_id: *k,
-                field_path: path,
-                stats: IndexFieldStatsType::CommittedNumber(v.stats().ok()?),
-            })
-        }));
-        fields_stats.extend(committed_fields.date_fields.iter().filter_map(|(k, v)| {
-            let path = v.field_path().join(".");
-            Some(IndexFieldStats {
-                field_id: *k,
-                field_path: path,
-                stats: IndexFieldStatsType::CommittedDate(v.stats().ok()?),
-            })
-        }));
-        fields_stats.extend(
-            committed_fields
-                .geopoint_fields
-                .iter()
-                .filter_map(|(k, v)| {
-                    let path = v.field_path().join(".");
-                    Some(IndexFieldStats {
-                        field_id: *k,
-                        field_path: path,
-                        stats: IndexFieldStatsType::CommittedGeoPoint(v.stats().ok()?),
-                    })
-                }),
-        );
-        fields_stats.extend(committed_fields.string_filter_fields.iter().map(|(k, v)| {
-            let path = v.field_path().join(".");
-            IndexFieldStats {
-                field_id: *k,
-                field_path: path,
-                stats: IndexFieldStatsType::CommittedStringFilter(v.stats(with_keys)),
-            }
-        }));
-        fields_stats.extend(committed_fields.string_fields.iter().map(|(k, v)| {
-            let path = v.field_path().join(".");
-            IndexFieldStats {
-                field_id: *k,
-                field_path: path,
-                stats: IndexFieldStatsType::CommittedString(v.stats()),
-            }
-        }));
-        fields_stats.extend(committed_fields.vector_fields.iter().map(|(k, v)| {
-            let path = v.field_path().join(".");
-            IndexFieldStats {
-                field_id: *k,
-                field_path: path,
-                stats: IndexFieldStatsType::CommittedVector(v.stats()),
-            }
-        }));
+        // Uncommitted
+        fields_stats.extend(extrapolate_stats(&uncommitted_fields.bool_fields));
+        fields_stats.extend(extrapolate_stats(&uncommitted_fields.number_fields));
+        fields_stats.extend(extrapolate_stats(&uncommitted_fields.date_fields));
+        fields_stats.extend(extrapolate_stats(&uncommitted_fields.geopoint_fields));
+        fields_stats.extend(extrapolate_stats(&uncommitted_fields.string_filter_fields));
+        fields_stats.extend(extrapolate_stats(&uncommitted_fields.string_fields));
+        fields_stats.extend(extrapolate_stats(&uncommitted_fields.vector_fields));
+
+        // Committed
+        fields_stats.extend(extrapolate_stats(&committed_fields.bool_fields));
+        fields_stats.extend(extrapolate_stats(&committed_fields.number_fields));
+        fields_stats.extend(extrapolate_stats(&committed_fields.date_fields));
+        fields_stats.extend(extrapolate_stats(&committed_fields.geopoint_fields));
+        fields_stats.extend(extrapolate_stats(&committed_fields.string_filter_fields));
+        fields_stats.extend(extrapolate_stats(&committed_fields.string_fields));
+        fields_stats.extend(extrapolate_stats(&committed_fields.vector_fields));
 
         fields_stats.sort_by_key(|e| e.field_id.0);
 
@@ -2325,8 +1994,7 @@ impl Index {
         tolerance: Option<u8>,
         properties: Vec<FieldId>,
         boost: HashMap<FieldId, f32>,
-        filtered_doc_ids: Option<&FilterResult<DocumentId>>,
-        uncommitted_deleted_documents: &HashSet<DocumentId>,
+        search_document_context: &SearchDocumentContext<'_, DocumentId>,
     ) -> Result<HashMap<DocumentId, f32>> {
         let uncommitted_fields = self.uncommitted_fields.read("search_fulltext").await;
         let committed_fields = self.committed_fields.read("search_fulltext").await;
@@ -2374,7 +2042,7 @@ impl Index {
                 // Compute global info only once per field
                 if !field_global_info.contains_key(field_id) {
                     let global_info = if let Some(committed) = committed {
-                        committed.global_info() + field.global_info()
+                        committed.stats().global_info.clone() + field.global_info()
                     } else {
                         field.global_info()
                     };
@@ -2389,10 +2057,9 @@ impl Index {
                     exact_match: exact,
                     boost: 1.0,
                     field_id: *field_id,
-                    filtered_doc_ids: None,
                     global_info: field_global_info[field_id].clone(),
-                    uncommitted_deleted_documents,
                     total_term_count: 1,
+                    search_document_context,
                 };
 
                 field
@@ -2434,10 +2101,9 @@ impl Index {
                     exact_match: exact,
                     boost,
                     field_id: *field_id,
-                    filtered_doc_ids,
                     global_info,
-                    uncommitted_deleted_documents,
                     total_term_count: term_index as u64 + 1,
+                    search_document_context,
                 };
 
                 // Search this field for this specific term (with filters applied)
@@ -2484,9 +2150,8 @@ impl Index {
         term: &str,
         properties: Vec<FieldId>,
         similarity: Similarity,
-        filtered_doc_ids: Option<&FilterResult<DocumentId>>,
         limit: Limit,
-        uncommitted_deleted_documents: &HashSet<DocumentId>,
+        search_document_context: &SearchDocumentContext<'_, DocumentId>,
     ) -> Result<HashMap<DocumentId, f32>> {
         let mut output: HashMap<DocumentId, f32> = HashMap::new();
 
@@ -2514,21 +2179,14 @@ impl Index {
                 .calculate_embeddings(vec![term.to_string()], Intent::Query, model)?;
 
             for target in targets {
-                uncommitted.search(
-                    &target,
-                    similarity.0,
-                    filtered_doc_ids,
-                    &mut output,
-                    uncommitted_deleted_documents,
-                )?;
+                uncommitted.search(&target, similarity.0, search_document_context, &mut output)?;
                 if let Some(committed) = committed {
                     committed.search(
                         &target,
                         similarity.0,
                         limit.0,
-                        filtered_doc_ids,
+                        search_document_context,
                         &mut output,
-                        uncommitted_deleted_documents,
                     )?;
                 }
             }
@@ -2536,21 +2194,6 @@ impl Index {
 
         Ok(output)
     }
-
-    /*
-    pub async fn get_pin_rule_ids(&self) -> Vec<String> {
-        let pin_rules_reader = self.pin_rules_reader.read("get_pin_rule_ids").await;
-        pin_rules_reader.get_rule_ids()
-    }
-
-    pub async fn get_read_lock_on_pin_rules(
-        &self,
-    ) -> OramaAsyncLockReadGuard<'_, PinRulesReader<DocumentId>> {
-        self.pin_rules_reader
-            .read("get_read_lock_on_pin_rules")
-            .await
-    }
-    */
 }
 
 #[derive(Serialize, Debug)]
@@ -2806,6 +2449,116 @@ impl<T: Ord + Clone> Iterator for SortIterator<'_, '_, T> {
                     }
                 }
             },
+        }
+    }
+}
+
+impl<S: Into<IndexFieldStatsType>, F: Field<FieldStats = S>> From<(&FieldId, &F)>
+    for IndexFieldStats
+{
+    fn from((k, v): (&FieldId, &F)) -> Self {
+        let stats = v.stats();
+        let field_path = v.field_path().join(".");
+        IndexFieldStats {
+            field_id: *k,
+            field_path,
+            stats: stats.into(),
+        }
+    }
+}
+
+enum MergeResult<T> {
+    Changed(T),
+    Unchanged,
+}
+
+fn merge_type<
+    UF: UncommittedField,
+    CFM: CommittedFieldMetadata,
+    CF: CommittedField<Uncommitted = UF, FieldMetadata = CFM>,
+>(
+    data_dir_with_offset: &PathBuf,
+    uncommitted_fields: &HashMap<FieldId, UF>,
+    committed_fields: &HashMap<FieldId, CF>,
+    uncommitted_deleted_documents: &HashSet<DocumentId>,
+    is_promoted: bool,
+    offload_config: &OffloadFieldConfig,
+    telemetry_labels: FieldIndexCollectionCommitLabels,
+) -> Result<HashMap<FieldId, MergeResult<CF>>> {
+    let m = FIELD_INDEX_COMMIT_CALCULATION_TIME.create(telemetry_labels);
+
+    let mut merged_fields = HashMap::new();
+    let field_ids: HashSet<_> = uncommitted_fields
+        .keys()
+        .chain(committed_fields.keys())
+        .copied()
+        .collect();
+    for field_id in field_ids {
+        let data_dir = data_dir_with_offset.join(field_id.0.to_string());
+        let uncommitted = uncommitted_fields.get(&field_id);
+        let committed = committed_fields.get(&field_id);
+        if let Some(merged_field) = merge_field(
+            uncommitted,
+            committed,
+            data_dir,
+            uncommitted_deleted_documents,
+            is_promoted,
+            offload_config,
+        )
+        .context("Cannot merge field")?
+        {
+            merged_fields.insert(field_id, MergeResult::Changed(merged_field));
+        } else {
+            merged_fields.insert(field_id, MergeResult::Unchanged);
+        }
+    }
+
+    drop(m);
+
+    Ok(merged_fields)
+}
+
+#[allow(unused_variables)]
+fn overwrite_committed<
+    UF: UncommittedField,
+    CFM: CommittedFieldMetadata,
+    CF: CommittedField<Uncommitted = UF, FieldMetadata = CFM>,
+>(
+    index_id: IndexId,
+    offset: Offset,
+    merged_bools_result: HashMap<FieldId, MergeResult<CF>>,
+    committed_fields: &mut HashMap<FieldId, CF>,
+    uncommitted_fields: &mut HashMap<FieldId, UF>,
+) {
+    for (field_id, merged) in merged_bools_result {
+        match merged {
+            MergeResult::Changed(merged) => {
+                #[cfg(debug_assertions)]
+                {
+                    let metadata = merged.metadata();
+                    let data_dir = metadata.data_dir();
+                    let mut components = data_dir.components().rev();
+                    let offset_str = components.nth(1).unwrap();
+                    assert_eq!(
+                        offset_str.as_os_str().to_str().unwrap(),
+                        &format!("offset-{}", offset.0),
+                        "Field data dir offset mismatch after commit"
+                    );
+                    // Check if promoting to runtime index was done correctly
+                    let index_id_on_fs = components.next().unwrap();
+                    assert_eq!(
+                        index_id_on_fs.as_os_str().to_str().unwrap(),
+                        index_id.as_str(),
+                        "Field index id mismatch after commit"
+                    );
+                    assert!(std::fs::exists(data_dir).unwrap());
+                }
+                committed_fields.insert(field_id, merged);
+            }
+            MergeResult::Unchanged => {}
+        }
+        if let Some(uncommitted) = uncommitted_fields.get_mut(&field_id) {
+            uncommitted.clear();
         }
     }
 }

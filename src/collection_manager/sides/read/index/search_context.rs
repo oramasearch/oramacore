@@ -1,9 +1,5 @@
-use std::collections::HashSet;
-
-use oramacore_lib::filters::FilterResult;
-
 use crate::{
-    collection_manager::global_info::GlobalInfo,
+    collection_manager::{global_info::GlobalInfo, sides::read::search::SearchDocumentContext},
     types::{DocumentId, FieldId},
 };
 
@@ -12,9 +8,8 @@ pub struct FullTextSearchContext<'run, 'index> {
     pub exact_match: bool,
     pub boost: f32,
     pub field_id: FieldId,
-    pub filtered_doc_ids: Option<&'run FilterResult<DocumentId>>,
+    pub search_document_context: &'run SearchDocumentContext<'index, DocumentId>,
     pub global_info: GlobalInfo,
-    pub uncommitted_deleted_documents: &'index HashSet<DocumentId>,
 
     pub total_term_count: u64,
 }

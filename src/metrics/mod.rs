@@ -119,7 +119,7 @@ pub mod ai {
 }
 
 pub mod document_insertion {
-    use super::{Empty, FieldCalculationLabels};
+    use super::{CollectionLabels, FieldCalculationLabels};
     use crate::create_time_histogram;
     create_time_histogram!(
         FIELD_CALCULATION_TIME,
@@ -129,7 +129,7 @@ pub mod document_insertion {
     create_time_histogram!(
         DOCUMENTS_INSERTION_TIME,
         "writer_doc_calculation_time_sec",
-        Empty
+        CollectionLabels
     );
 }
 

@@ -419,7 +419,6 @@ async fn test_pin_rules_before_insert_simple() {
     drop(test_context);
 }
 
-/*
 #[tokio::test(flavor = "multi_thread")]
 async fn test_pin_rules_after_insert_with_sort() {
     init_log();
@@ -597,4 +596,3 @@ async fn test_pin_rules_promote_non_matching_documents() {
 
     drop(test_context);
 }
-*/

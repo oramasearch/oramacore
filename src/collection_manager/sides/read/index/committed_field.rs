@@ -1,4 +1,4 @@
-pub use bool::{BoolFieldInfo, BoolWrapper, CommittedBoolField, CommittedBoolFieldStats};
+pub use bool::{BoolFieldInfo, CommittedBoolField, CommittedBoolFieldStats};
 pub use date::{CommittedDateField, CommittedDateFieldStats, DateFieldInfo};
 pub use geopoint::{CommittedGeoPointField, CommittedGeoPointFieldStats, GeoPointFieldInfo};
 pub use number::{CommittedNumberField, CommittedNumberFieldStats, NumberFieldInfo};

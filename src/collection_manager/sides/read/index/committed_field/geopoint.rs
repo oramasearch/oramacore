@@ -5,8 +5,13 @@ use oramacore_lib::bkd;
 use oramacore_lib::bkd::{haversine_distance, BKDTree, Coord};
 use serde::{Deserialize, Serialize};
 
+use crate::collection_manager::sides::read::index::merge::{
+    CommittedField, CommittedFieldMetadata, Field,
+};
+use crate::collection_manager::sides::read::index::uncommitted_field::UncommittedGeoPointFilterField;
+use crate::collection_manager::sides::read::OffloadFieldConfig;
 use crate::types::{DocumentId, GeoSearchFilter};
-use oramacore_lib::fs::{create_if_not_exists, BufferedFile};
+use oramacore_lib::fs::BufferedFile;
 
 #[derive(Debug)]
 pub struct CommittedGeoPointField {
@@ -16,42 +21,7 @@ pub struct CommittedGeoPointField {
 }
 
 impl CommittedGeoPointField {
-    pub fn from_raw(
-        tree: BKDTree<f32, DocumentId>,
-        field_path: Box<[String]>,
-        data_dir: PathBuf,
-    ) -> Result<Self> {
-        let s = Self {
-            field_path,
-            tree,
-            data_dir,
-        };
-
-        s.commit().context("Failed to commit number field")?;
-
-        Ok(s)
-    }
-
-    pub fn try_load(info: GeoPointFieldInfo) -> Result<Self> {
-        let data_dir = info.data_dir;
-        let tree: BKDTree<f32, DocumentId> = BufferedFile::open(data_dir.join("geopoint_tree.bin"))
-            .context("Cannot open geopoint file")?
-            .read_bincode_data()
-            .context("Cannot deserialize geopoint file")?;
-
-        let s = Self {
-            data_dir,
-            field_path: info.field_path,
-            tree,
-        };
-
-        // Is it really needed?
-        s.commit().context("Failed to commit number field")?;
-
-        Ok(s)
-    }
-
-    pub fn update<'s, 'iter, 'to_delete>(
+    fn update<'s, 'iter, 'to_delete>(
         &'s mut self,
         iter: impl Iterator<Item = &'iter bkd::Point<f32, DocumentId>> + 'iter,
         to_delete: &'to_delete HashSet<DocumentId>,
@@ -70,32 +40,12 @@ impl CommittedGeoPointField {
     }
 
     fn commit(&self) -> Result<()> {
-        // Ensure the data directory exists
-        create_if_not_exists(&self.data_dir).context("Failed to create data directory")?;
-
         BufferedFile::create_or_overwrite(self.data_dir.join("geopoint_tree.bin"))
             .context("Cannot open geopoint file")?
             .write_bincode_data(&self.tree)
             .context("Cannot deserialize geopoint file")?;
 
         Ok(())
-    }
-
-    pub fn get_field_info(&self) -> GeoPointFieldInfo {
-        GeoPointFieldInfo {
-            field_path: self.field_path.clone(),
-            data_dir: self.data_dir.clone(),
-        }
-    }
-
-    pub fn field_path(&self) -> &[String] {
-        &self.field_path
-    }
-
-    pub fn stats(&self) -> Result<CommittedGeoPointFieldStats> {
-        Ok(CommittedGeoPointFieldStats {
-            count: self.tree.len(),
-        })
     }
 
     pub fn filter<'s, 'iter>(
@@ -134,6 +84,101 @@ impl CommittedGeoPointField {
     }
 }
 
+impl CommittedField for CommittedGeoPointField {
+    type FieldMetadata = GeoPointFieldInfo;
+    type Uncommitted = UncommittedGeoPointFilterField;
+
+    fn from_uncommitted(
+        uncommitted: &Self::Uncommitted,
+        data_dir: PathBuf,
+        uncommitted_document_deletions: &HashSet<DocumentId>,
+        _offload_config: OffloadFieldConfig,
+    ) -> Result<Self> {
+        let mut tree = uncommitted.inner();
+        tree.delete(uncommitted_document_deletions);
+
+        let s = Self {
+            field_path: uncommitted.field_path().into(),
+            tree,
+            data_dir,
+        };
+
+        s.commit().context("Failed to commit number field")?;
+
+        Ok(s)
+    }
+
+    fn try_load(
+        metadata: Self::FieldMetadata,
+        _offload_config: OffloadFieldConfig,
+    ) -> Result<Self> {
+        let data_dir = metadata.data_dir;
+        let tree: BKDTree<f32, DocumentId> = BufferedFile::open(data_dir.join("geopoint_tree.bin"))
+            .context("Cannot open geopoint file")?
+            .read_bincode_data()
+            .context("Cannot deserialize geopoint file")?;
+
+        let s = Self {
+            data_dir,
+            field_path: metadata.field_path,
+            tree,
+        };
+
+        // Is it really needed?
+        s.commit().context("Failed to commit number field")?;
+
+        Ok(s)
+    }
+
+    fn add_uncommitted(
+        &self,
+        uncommitted: &Self::Uncommitted,
+        data_dir: PathBuf,
+        uncommitted_document_deletions: &HashSet<DocumentId>,
+        _offload_config: OffloadFieldConfig,
+    ) -> Result<Self> {
+        let info = self.metadata();
+
+        let old_data_dir = info.data_dir;
+        let tree: BKDTree<f32, DocumentId> =
+            BufferedFile::open(old_data_dir.join("geopoint_tree.bin"))
+                .context("Cannot open geopoint file")?
+                .read_bincode_data()
+                .context("Cannot deserialize geopoint file")?;
+
+        let mut field = Self {
+            data_dir: data_dir.clone(),
+            field_path: info.field_path,
+            tree,
+        };
+
+        field.update(uncommitted.iter(), uncommitted_document_deletions, data_dir)?;
+
+        Ok(field)
+    }
+
+    fn metadata(&self) -> Self::FieldMetadata {
+        GeoPointFieldInfo {
+            field_path: self.field_path.clone(),
+            data_dir: self.data_dir.clone(),
+        }
+    }
+}
+
+impl Field for CommittedGeoPointField {
+    type FieldStats = CommittedGeoPointFieldStats;
+
+    fn field_path(&self) -> &Box<[String]> {
+        &self.field_path
+    }
+
+    fn stats(&self) -> CommittedGeoPointFieldStats {
+        CommittedGeoPointFieldStats {
+            count: self.tree.len(),
+        }
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct GeoPointFieldInfo {
     pub field_path: Box<[String]>,
@@ -143,4 +188,17 @@ pub struct GeoPointFieldInfo {
 #[derive(Serialize, Debug)]
 pub struct CommittedGeoPointFieldStats {
     pub count: usize,
+}
+
+impl CommittedFieldMetadata for GeoPointFieldInfo {
+    fn data_dir(&self) -> &PathBuf {
+        &self.data_dir
+    }
+
+    fn set_data_dir(&mut self, data_dir: PathBuf) {
+        self.data_dir = data_dir;
+    }
+    fn field_path(&self) -> &Box<[String]> {
+        &self.field_path
+    }
 }

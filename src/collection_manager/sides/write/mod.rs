@@ -45,6 +45,7 @@ pub use context::WriteSideContext;
 
 use crate::collection_manager::sides::write::document_storage::ZeboDocument;
 use crate::lock::OramaAsyncLock;
+use crate::metrics::CollectionLabels;
 use crate::python::embeddings::Model;
 use crate::python::PythonService;
 use crate::{
@@ -59,7 +60,7 @@ use crate::{
         write::jwt_manager::{JwtConfig, JwtManager},
         DocumentStorageWriteOperation, DocumentToInsert, ReplaceIndexReason, WriteOperation,
     },
-    metrics::{document_insertion::DOCUMENTS_INSERTION_TIME, Empty},
+    metrics::document_insertion::DOCUMENTS_INSERTION_TIME,
     types::{
         ApiKey, CollectionCreated, CollectionId, CreateCollection, CreateIndexRequest,
         DeleteDocuments, DescribeCollectionResponse, Document, DocumentId, DocumentList,
@@ -168,6 +169,7 @@ pub struct WriteSide {
 
     jwt_manager: JwtManager,
 
+    #[allow(dead_code)]
     python_service: Arc<PythonService>,
 }
 
@@ -717,7 +719,9 @@ impl WriteSide {
         // we use the original index id
         let target_index_id = index.get_runtime_index_id().unwrap_or(index_id);
 
-        let metric = DOCUMENTS_INSERTION_TIME.create(Empty);
+        let metric = DOCUMENTS_INSERTION_TIME.create(CollectionLabels {
+            collection: collection_id.to_string(),
+        });
 
         debug!("Inserting documents {}", document_count);
         let doc_ids = self
@@ -870,7 +874,7 @@ impl WriteSide {
                 trace!("Processing document {}/{}", processed_count, document_count);
             }
 
-            if index_operation_batch.capacity() * 4 / 5 < index_operation_batch.len() {
+            if index_operation_batch.len() > 200 {
                 trace!("Sending operations");
                 self.op_sender
                     .send_batch(index_operation_batch)

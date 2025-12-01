@@ -17,7 +17,10 @@ use oramacore::{
     ai::{AIServiceConfig, AIServiceLLMConfig},
     build_orama,
     collection_manager::sides::{
-        read::{IndexesConfig, OffloadFieldConfig, ReadSide, ReadSideConfig, SearchRequest},
+        read::{
+            CollectionCommitConfig, IndexesConfig, OffloadFieldConfig, ReadSide, ReadSideConfig,
+            SearchRequest,
+        },
         write::{CollectionsWriterConfig, TempIndexCleanupConfig, WriteSide, WriteSideConfig},
         InputSideChannelType, OutputSideChannelType,
     },
@@ -100,6 +103,7 @@ pub fn create_oramacore_config() -> OramacoreConfig {
                     slot_count_exp: 8,
                     slot_size_exp: 4,
                 },
+                collection_commit: CollectionCommitConfig::default(),
             },
             analytics: None,
         },
@@ -215,7 +219,7 @@ impl TestContext {
 
     pub async fn commit_all(&self) -> Result<()> {
         self.writer.commit().await?;
-        self.reader.commit().await?;
+        self.reader.commit(true).await?;
         Ok(())
     }
 

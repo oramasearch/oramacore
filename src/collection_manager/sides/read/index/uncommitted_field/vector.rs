@@ -1,10 +1,17 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use anyhow::{bail, Result};
-use oramacore_lib::filters::FilterResult;
+use oramacore_lib::data_structures::ShouldInclude;
 use serde::Serialize;
 
-use crate::{python::embeddings::Model, types::DocumentId};
+use crate::{
+    collection_manager::sides::read::{
+        index::merge::{Field, UncommittedField},
+        search::SearchDocumentContext,
+    },
+    python::embeddings::Model,
+    types::DocumentId,
+};
 
 type VectorWithMagnetude = (f32, Vec<f32>);
 
@@ -27,20 +34,8 @@ impl UncommittedVectorField {
         }
     }
 
-    pub fn field_path(&self) -> &[String] {
-        &self.field_path
-    }
-
     pub fn len(&self) -> usize {
         self.data.len()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.len() == 0
-    }
-
-    pub fn clear(&mut self) {
-        self.data = Default::default();
     }
 
     pub fn get_model(&self) -> Model {
@@ -58,15 +53,11 @@ impl UncommittedVectorField {
         &self,
         target: &[f32],
         similarity: f32,
-        filtered_doc_ids: Option<&FilterResult<DocumentId>>,
+        search_document_context: &SearchDocumentContext<'_, DocumentId>,
         output: &mut HashMap<DocumentId, f32>,
-        uncommitted_deleted_documents: &HashSet<DocumentId>,
     ) -> Result<()> {
         for (id, vectors) in &self.data {
-            if filtered_doc_ids.is_some_and(|ids| !ids.contains(id)) {
-                continue;
-            }
-            if uncommitted_deleted_documents.contains(id) {
+            if search_document_context.should_exclude(id) {
                 continue;
             }
 
@@ -114,8 +105,26 @@ impl UncommittedVectorField {
             .iter()
             .map(|(id, vectors)| (*id, vectors.iter().map(|(_, v)| v.clone()).collect()))
     }
+}
 
-    pub fn stats(&self) -> UncommittedVectorFieldStats {
+impl UncommittedField for UncommittedVectorField {
+    fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    fn clear(&mut self) {
+        self.data = Default::default();
+    }
+}
+
+impl Field for UncommittedVectorField {
+    type FieldStats = UncommittedVectorFieldStats;
+
+    fn field_path(&self) -> &Box<[String]> {
+        &self.field_path
+    }
+
+    fn stats(&self) -> UncommittedVectorFieldStats {
         UncommittedVectorFieldStats {
             document_count: self.data.len(),
             vector_count: self.data.iter().map(|(_, v)| v.len()).sum(),
@@ -174,6 +183,8 @@ pub struct UncommittedVectorFieldStats {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashSet;
+
     use super::*;
 
     #[test]
@@ -197,7 +208,12 @@ mod tests {
         // With similarity
         let mut output = HashMap::new();
         index
-            .search(&target, 0.6, None, &mut output, &Default::default())
+            .search(
+                &target,
+                0.6,
+                &SearchDocumentContext::new(&Default::default(), None),
+                &mut output,
+            )
             .unwrap();
         assert_eq!(
             HashSet::from([DocumentId(0), DocumentId(1)]),
@@ -207,7 +223,12 @@ mod tests {
         // With similarity to 0
         let mut output = HashMap::new();
         index
-            .search(&target, 0.0, None, &mut output, &Default::default())
+            .search(
+                &target,
+                0.0,
+                &SearchDocumentContext::new(&Default::default(), None),
+                &mut output,
+            )
             .unwrap();
         assert_eq!(
             HashSet::from([DocumentId(0), DocumentId(1), DocumentId(2)]),

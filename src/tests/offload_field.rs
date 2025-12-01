@@ -96,7 +96,9 @@ async fn test_offload_string_field() {
         panic!("Expected committed string field stats");
     };
     assert!(
-        string_field_stats.loaded,
+        string_field_stats
+            .loaded
+            .load(std::sync::atomic::Ordering::Acquire),
         "Field should be loaded after commit and search"
     );
     assert!(
@@ -129,7 +131,10 @@ async fn test_offload_string_field() {
                 return Err(anyhow::anyhow!("Expected committed string field stats"));
             };
 
-            if string_field_stats.loaded {
+            if string_field_stats
+                .loaded
+                .load(std::sync::atomic::Ordering::Acquire)
+            {
                 return Err(anyhow::anyhow!("Field still loaded, waiting for unload"));
             }
 
@@ -159,6 +164,8 @@ async fn test_offload_string_field() {
         format!("{}:{}", index_client.index_id, "2")
     );
 
+    println!("Search after reload successful\n\n\n\n\n\n {search_result:#?}");
+
     // Check field stats after search - field should be loaded again
     let stats = collection_client.reader_stats().await.unwrap();
     let IndexFieldStatsType::CommittedString(string_field_stats) =
@@ -167,8 +174,11 @@ async fn test_offload_string_field() {
     else {
         panic!("Expected committed string field stats");
     };
+    println!("Field stats after reload: stats={string_field_stats:#?}",);
     assert!(
-        string_field_stats.loaded,
+        string_field_stats
+            .loaded
+            .load(std::sync::atomic::Ordering::Acquire),
         "Field should be loaded again after search"
     );
 
@@ -334,7 +344,9 @@ async fn test_offload_vector_field() {
         panic!("Expected committed vector field stats");
     };
     assert!(
-        vector_field_stats.loaded,
+        vector_field_stats
+            .loaded
+            .load(std::sync::atomic::Ordering::Acquire),
         "Field should be loaded after commit and search"
     );
     assert!(
@@ -371,7 +383,10 @@ async fn test_offload_vector_field() {
                 return Err(anyhow::anyhow!("Expected committed vector field stats"));
             };
 
-            if vector_field_stats.loaded {
+            if vector_field_stats
+                .loaded
+                .load(std::sync::atomic::Ordering::Acquire)
+            {
                 return Err(anyhow::anyhow!("Field still loaded, waiting for unload"));
             }
 
@@ -415,7 +430,9 @@ async fn test_offload_vector_field() {
         panic!("Expected committed vector field stats");
     };
     assert!(
-        vector_field_stats.loaded,
+        vector_field_stats
+            .loaded
+            .load(std::sync::atomic::Ordering::Acquire),
         "Field should be loaded again after search"
     );
 

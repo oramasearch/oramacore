@@ -1,8 +1,17 @@
-use std::{borrow::Cow, collections::HashMap, time::Instant};
+use std::{
+    borrow::Cow,
+    collections::{HashMap, HashSet},
+    hash::Hash,
+    time::Instant,
+};
 
 use anyhow::{bail, Result};
 use futures::StreamExt;
-use oramacore_lib::pin_rules::{Consequence, PinRulesReader};
+use oramacore_lib::{
+    data_structures::ShouldInclude,
+    filters::{DocId, FilterResult},
+    pin_rules::{Consequence, PinRulesReader},
+};
 
 use crate::{
     collection_manager::sides::read::{
@@ -101,11 +110,10 @@ impl<'collection, 'document_storage, 'analytics_storage>
         // This allows us to avoid reallocation of the result map
         // TODO: we can use an Area allocator to reuse the memory between searches
         let document_count_estimation = collection.get_document_count_estimation();
-        let mut token_scores: HashMap<DocumentId, f32> =
-            HashMap::with_capacity((document_count_estimation / 3) as usize);
-
         let indexes = collection.get_indexes_lock(&index_ids).await?;
-        calculate_token_score_for_indexes(&indexes, &search_params, &mut token_scores).await?;
+        let token_scores =
+            calculate_token_score_for_indexes(&indexes, &search_params, document_count_estimation)
+                .await?;
 
         let facets = if has_facets {
             // Orama provides a UI component that shows the search results
@@ -127,9 +135,6 @@ impl<'collection, 'document_storage, 'analytics_storage>
                 if search_params.where_filter.is_empty() {
                     Cow::Borrowed(&token_scores)
                 } else {
-                    let mut token_scores: HashMap<DocumentId, f32> =
-                        HashMap::with_capacity((document_count_estimation / 3) as usize);
-
                     let mut search_params_without_filters = search_params.clone();
                     search_params_without_filters.where_filter = WhereFilter {
                         filter_on_fields: vec![],
@@ -137,10 +142,10 @@ impl<'collection, 'document_storage, 'analytics_storage>
                         not: None,
                         or: None,
                     };
-                    calculate_token_score_for_indexes(
+                    let token_scores = calculate_token_score_for_indexes(
                         &indexes,
                         &search_params_without_filters,
-                        &mut token_scores,
+                        document_count_estimation,
                     )
                     .await?;
 
@@ -304,11 +309,14 @@ async fn extract_pin_rules(
 async fn calculate_token_score_for_indexes(
     indexes: &ReadIndexesLockGuard<'_, '_>,
     search_params: &SearchParams,
-    token_scores: &mut HashMap<DocumentId, f32>,
-) -> Result<(), ReadError> {
+    document_count_estimation: u64,
+) -> Result<HashMap<DocumentId, f32>, ReadError> {
+    let mut token_scores: HashMap<DocumentId, f32> =
+        HashMap::with_capacity((document_count_estimation / 3) as usize);
+
     for index in indexes.iter() {
         index
-            .calculate_token_score(search_params, token_scores)
+            .calculate_token_score(search_params, &mut token_scores)
             .await?;
     }
 
@@ -330,7 +338,7 @@ async fn calculate_token_score_for_indexes(
         }
     }
 
-    Ok(())
+    Ok(token_scores)
 }
 
 async fn calculate_facets(
@@ -397,4 +405,44 @@ pub async fn sort_and_truncate(
 ) -> Result<Vec<TokenScore>, ReadError> {
     let context = SortContext::new(indexes, token_scores, search_params, pin_rules);
     context.execute().await
+}
+
+pub struct SearchDocumentContext<'a, DocumentId> {
+    deleted_documents: &'a HashSet<DocumentId>,
+    filtered_doc_ids: Option<FilterResult<DocumentId>>,
+}
+impl SearchDocumentContext<'_, DocumentId> {
+    pub fn new<'a>(
+        deleted_documents: &'a HashSet<DocumentId>,
+        filtered_doc_ids: Option<FilterResult<DocumentId>>,
+    ) -> SearchDocumentContext<'a, DocumentId> {
+        SearchDocumentContext {
+            deleted_documents,
+            filtered_doc_ids,
+        }
+    }
+    pub fn has_filtered(&self) -> bool {
+        !self.deleted_documents.is_empty() || self.filtered_doc_ids.is_some()
+    }
+}
+
+impl<DocumentId: Sync + Send + Hash + Eq + DocId> ShouldInclude<DocumentId>
+    for SearchDocumentContext<'_, DocumentId>
+{
+    fn should_include(&self, doc_id: &DocumentId) -> bool {
+        if self.deleted_documents.contains(doc_id) {
+            return false;
+        }
+        match &self.filtered_doc_ids {
+            Some(filtered_doc_ids) => filtered_doc_ids.contains(doc_id),
+            None => true,
+        }
+    }
+}
+
+#[cfg(test)]
+impl ShouldInclude<DocumentId> for () {
+    fn should_include(&self, _: &DocumentId) -> bool {
+        true
+    }
 }
