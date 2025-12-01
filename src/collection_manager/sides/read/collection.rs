@@ -131,9 +131,8 @@ pub struct CollectionReader {
     created_at: DateTime<Utc>,
     updated_at: OramaAsyncLock<DateTime<Utc>>,
 
-    // Per-collection offset tracking
-    last_processed_offset: OramaAsyncLock<Offset>,
-    last_committed_offset: OramaAsyncLock<Offset>,
+    // Per-collection offset tracking - single unified offset
+    offset: OramaAsyncLock<Offset>,
 
     document_count_estimation: AtomicU64,
 
@@ -179,15 +178,8 @@ impl CollectionReader {
             created_at: Utc::now(),
             updated_at: OramaAsyncLock::new("collection_updated_at", Utc::now()),
 
-            // Initialize per-collection offsets to 0
-            last_processed_offset: OramaAsyncLock::new(
-                "collection_last_processed_offset",
-                Offset(0),
-            ),
-            last_committed_offset: OramaAsyncLock::new(
-                "collection_last_committed_offset",
-                Offset(0),
-            ),
+            // Initialize per-collection offset to 0
+            offset: OramaAsyncLock::new("collection_offset", Offset(0)),
 
             document_count_estimation: AtomicU64::new(0),
 
@@ -212,14 +204,14 @@ impl CollectionReader {
             .context("Cannot read collection.json")?;
 
         // Handle V1 to V2 migration
-        let (dump, last_processed_offset, last_committed_offset) = match dump {
+        let (dump, offset) = match dump {
             Dump::V1(v1) => {
                 info!("Migrating collection {:?} from V1 to V2", v1.id);
-                // Initialize offsets to 0 - global check provides safety
-                (v1, Offset(0), Offset(0))
+                // Initialize offset to 0 - global check provides safety
+                (v1, Offset(0))
             }
             Dump::V2(v2) => {
-                // Use persisted offset values
+                // Use persisted offset value
                 (
                     DumpV1 {
                         id: v2.id,
@@ -233,8 +225,7 @@ impl CollectionReader {
                         created_at: v2.created_at,
                         updated_at: v2.updated_at,
                     },
-                    v2.last_processed_offset,
-                    v2.last_committed_offset,
+                    v2.offset,
                 )
             }
         };
@@ -295,15 +286,8 @@ impl CollectionReader {
             created_at: dump.created_at,
             updated_at: OramaAsyncLock::new("collection_updated_at", dump.updated_at),
 
-            // Initialize per-collection offsets from loaded data
-            last_processed_offset: OramaAsyncLock::new(
-                "collection_last_processed_offset",
-                last_processed_offset,
-            ),
-            last_committed_offset: OramaAsyncLock::new(
-                "collection_last_committed_offset",
-                last_committed_offset,
-            ),
+            // Initialize per-collection offset from loaded data
+            offset: OramaAsyncLock::new("collection_offset", offset),
 
             document_count_estimation: AtomicU64::new(document_count_estimation),
 
@@ -321,7 +305,7 @@ impl CollectionReader {
         Ok(s)
     }
 
-    pub async fn commit(&self, offset: Offset) -> Result<()> {
+    pub async fn commit(&self) -> Result<()> {
         // During the commit we have:
         // 1. indexes till alive
         // 2. indexes deleted by the user
@@ -336,6 +320,9 @@ impl CollectionReader {
         // NB: For deleted index, the documents are removed
         //     because the writer sends an appropriate command for that.
         //     Hence, we don't need to do anything here.
+
+        // Read current offset - this is what we actually processed
+        let offset = **self.offset.read("commit").await;
 
         let indexes_lock = self.indexes.read("commit").await;
         let mut index_ids = Vec::with_capacity(indexes_lock.len());
@@ -416,15 +403,7 @@ impl CollectionReader {
             .context("Cannot commit pin rules")?;
         drop(pin_rules_reader);
 
-        // Read current offsets
-        let last_processed = **self.last_processed_offset.read("commit").await;
-
-        // Update committed offset
-        let mut last_committed = self.last_committed_offset.write("commit").await;
-        **last_committed = offset;
-        drop(last_committed);
-
-        // Save DumpV2 with offsets
+        // Save DumpV2 with single offset
         let dump = Dump::V2(DumpV2 {
             id: self.id,
             description: self.description.clone(),
@@ -436,9 +415,8 @@ impl CollectionReader {
             temp_index_ids,
             created_at: self.created_at,
             updated_at: **self.updated_at.read("commit").await,
-            // Per-collection offset tracking
-            last_processed_offset: last_processed,
-            last_committed_offset: offset,
+            // Per-collection offset tracking - single unified offset
+            offset,
         });
 
         BufferedFile::create_or_overwrite(self.data_dir.join("collection.json"))
@@ -725,13 +703,13 @@ impl CollectionReader {
         collection_operation: CollectionWriteOperation,
     ) -> Result<()> {
         // Check if operation already applied to THIS collection
-        let last_processed = self.last_processed_offset.read("update").await;
-        if offset <= **last_processed && !last_processed.is_zero() {
+        let current = self.offset.read("update").await;
+        if offset <= **current && !current.is_zero() {
             warn!(collection_id=?self.id, offset=?offset,
                   "Already applied to this collection");
             return Ok(());
         }
-        drop(last_processed);
+        drop(current);
 
         let mut updated_at_lock = self.updated_at.write("update").await;
         **updated_at_lock = Utc::now();
@@ -935,9 +913,9 @@ impl CollectionReader {
         }
 
         // Update offset after successful operation
-        let mut last_processed = self.last_processed_offset.write("update").await;
-        **last_processed = offset;
-        drop(last_processed);
+        let mut current = self.offset.write("update").await;
+        **current = offset;
+        drop(current);
 
         // Commit collection if threshold reached
         // NB: this commits only this collection
@@ -949,7 +927,7 @@ impl CollectionReader {
                 pending=pending,
                 "Collection threshold reached, committing"
             );
-            self.commit(offset).await?;
+            self.commit().await?;
             self.pending_operations.store(0, Ordering::SeqCst);
         }
 
@@ -1441,9 +1419,8 @@ struct DumpV2 {
     temp_index_ids: Vec<IndexId>,
     created_at: DateTime<Utc>,
     updated_at: DateTime<Utc>,
-    // Per-collection offset tracking
-    last_processed_offset: Offset,
-    last_committed_offset: Offset,
+    // Per-collection offset tracking - single unified offset
+    offset: Offset,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

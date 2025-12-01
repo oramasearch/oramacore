@@ -4,7 +4,7 @@ use std::{
 };
 
 use crate::{
-    collection_manager::sides::{read::context::ReadSideContext, Offset},
+    collection_manager::sides::read::context::ReadSideContext,
     lock::{OramaAsyncLock, OramaAsyncLockReadGuard},
     types::{ApiKey, CollectionId},
 };
@@ -127,8 +127,8 @@ impl CollectionsReader {
         CollectionReadLock::try_new(collections_lock, last_reindexed_collections_lock, id)
     }
 
-    #[instrument(skip(self, offset))]
-    pub async fn commit(&self, offset: Offset) -> Result<()> {
+    #[instrument(skip(self))]
+    pub async fn commit(&self) -> Result<()> {
         let data_dir = &self.indexes_config.data_dir;
         let collections_dir = data_dir.join("collections");
 
@@ -152,7 +152,7 @@ impl CollectionsReader {
                     format!("Cannot create directory for collection '{}'", id.as_str())
                 })?;
 
-            match collection.commit(offset).await {
+            match collection.commit().await {
                 Ok(_) => {}
                 Err(error) => {
                     error!(error = ?error, collection_id=?id, "Cannot commit collection {:?}: {:?}", id, error);

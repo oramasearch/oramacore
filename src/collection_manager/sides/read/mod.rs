@@ -294,7 +294,7 @@ impl ReadSide {
         let offset = **live_offset;
         drop(live_offset);
 
-        self.collections.commit(offset).await?;
+        self.collections.commit().await?;
         self.document_storage
             .commit()
             .await
