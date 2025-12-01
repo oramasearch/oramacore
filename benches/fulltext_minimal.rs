@@ -16,7 +16,10 @@ use oramacore::{
     ai::{AIServiceConfig, AIServiceLLMConfig},
     build_orama,
     collection_manager::sides::{
-        read::{IndexesConfig, OffloadFieldConfig, ReadSide, ReadSideConfig, SearchRequest},
+        read::{
+            CollectionCommitConfig, IndexesConfig, OffloadFieldConfig, ReadSide, ReadSideConfig,
+            SearchRequest,
+        },
         write::{CollectionsWriterConfig, TempIndexCleanupConfig, WriteSide, WriteSideConfig},
         InputSideChannelType, OutputSideChannelType,
     },
@@ -87,6 +90,7 @@ pub fn create_minimal_config() -> OramacoreConfig {
                     slot_count_exp: 6, // Smaller for benchmarks
                     slot_size_exp: 3,
                 },
+                collection_commit: CollectionCommitConfig::default(),
             },
             analytics: None,
         },

@@ -13,7 +13,10 @@ use oramacore::{
     ai::{AIServiceConfig, AIServiceLLMConfig},
     build_orama,
     collection_manager::sides::{
-        read::{IndexesConfig, OffloadFieldConfig, ReadSideConfig, SearchRequest},
+        read::{
+            CollectionCommitConfig, IndexesConfig, OffloadFieldConfig, ReadSideConfig,
+            SearchRequest,
+        },
         write::{CollectionsWriterConfig, TempIndexCleanupConfig, WriteSideConfig},
         InputSideChannelType, OutputSideChannelType,
     },
@@ -137,6 +140,10 @@ fn create_test_config(build: bool) -> OramacoreConfig {
                     unload_window: DurationString::from_string("30m".to_string()).unwrap(),
                     slot_count_exp: 8,
                     slot_size_exp: 4,
+                },
+                collection_commit: CollectionCommitConfig {
+                    operation_threshold: 300,
+                    time_threshold: Duration::from_secs(5 * 60),
                 },
             },
             analytics: None,

@@ -86,6 +86,27 @@ pub struct OffloadFieldConfig {
     pub slot_size_exp: u8,
 }
 
+/// Configuration for per-collection commit thresholds
+#[derive(Debug, Deserialize, Clone, Copy)]
+pub struct CollectionCommitConfig {
+    /// Number of operations before per-collection commit
+    #[serde(default = "default_collection_commit_operation_threshold")]
+    pub operation_threshold: u64,
+
+    /// Time elapsed before per-collection commit (if operations pending)
+    #[serde(
+        deserialize_with = "deserialize_duration",
+        default = "default_collection_commit_time_threshold"
+    )]
+    pub time_threshold: Duration,
+}
+
+impl Default for CollectionCommitConfig {
+    fn default() -> Self {
+        default_collection_commit()
+    }
+}
+
 #[derive(Debug, Deserialize, Clone)]
 pub struct IndexesConfig {
     pub data_dir: PathBuf,
@@ -96,6 +117,8 @@ pub struct IndexesConfig {
     pub notifier: Option<NotifierConfig>,
     #[serde(default = "default_offload_field")]
     pub offload_field: OffloadFieldConfig,
+    #[serde(default = "default_collection_commit")]
+    pub collection_commit: CollectionCommitConfig,
 }
 
 #[derive(Error, Debug)]
@@ -819,6 +842,21 @@ fn default_offload_field() -> OffloadFieldConfig {
         unload_window: Duration::from_secs(30 * 60).into(),
         slot_count_exp: 8,
         slot_size_exp: 4,
+    }
+}
+
+fn default_collection_commit_operation_threshold() -> u64 {
+    300 // Match current hardcoded value
+}
+
+fn default_collection_commit_time_threshold() -> Duration {
+    Duration::from_secs(5 * 60) // Match current hardcoded value (5 minutes)
+}
+
+fn default_collection_commit() -> CollectionCommitConfig {
+    CollectionCommitConfig {
+        operation_threshold: default_collection_commit_operation_threshold(),
+        time_threshold: default_collection_commit_time_threshold(),
     }
 }
 

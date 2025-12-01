@@ -69,6 +69,14 @@ reader_side:
         # Set interval for commiting the changes to the disk
         commit_interval: 1m
 
+        # Per-collection commit thresholds
+        # Uncomment to customize (these are the defaults)
+        # collection_commit:
+        #     # Number of operations before collection commits immediately
+        #     operation_threshold: 300
+        #     # Time since last commit before collection participates in global commit
+        #     time_threshold: 5m
+
 ai_server:
     scheme: http
     host: python-ai-server

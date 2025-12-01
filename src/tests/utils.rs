@@ -19,8 +19,8 @@ use crate::{
     build_orama,
     collection_manager::sides::{
         read::{
-            CollectionStats, IndexesConfig, OffloadFieldConfig, ReadSide, ReadSideConfig,
-            SearchRequest,
+            CollectionCommitConfig, CollectionStats, IndexesConfig, OffloadFieldConfig, ReadSide,
+            ReadSideConfig, SearchRequest,
         },
         write::{
             CollectionsWriterConfig, TempIndexCleanupConfig, WriteError, WriteSide, WriteSideConfig,
@@ -129,6 +129,11 @@ pub fn create_oramacore_config() -> OramacoreConfig {
                     unload_window: DurationString::from_string("30m".to_string()).unwrap(),
                     slot_count_exp: 8,
                     slot_size_exp: 4,
+                },
+                // Use default commit thresholds for tests
+                collection_commit: CollectionCommitConfig {
+                    operation_threshold: 300,
+                    time_threshold: Duration::from_secs(5 * 60),
                 },
             },
             analytics: None,

@@ -8,7 +8,6 @@ use std::{
         atomic::{AtomicU64, Ordering},
         Arc,
     },
-    time::Duration,
 };
 
 use axum::extract::State;
@@ -43,24 +42,15 @@ use crate::{
 
 use super::{
     index::{Index, IndexStats},
-    CommittedBoolFieldStats, CommittedNumberFieldStats, CommittedStringFilterFieldStats,
-    CommittedVectorFieldStats, DeletionReason, OffloadFieldConfig, ReadSide,
-    UncommittedBoolFieldStats, UncommittedNumberFieldStats, UncommittedStringFieldStats,
+    CollectionCommitConfig, CommittedBoolFieldStats, CommittedNumberFieldStats,
+    CommittedStringFilterFieldStats, CommittedVectorFieldStats, DeletionReason, OffloadFieldConfig,
+    ReadSide, UncommittedBoolFieldStats, UncommittedNumberFieldStats, UncommittedStringFieldStats,
     UncommittedStringFilterFieldStats, UncommittedVectorFieldStats,
 };
 
 use crate::types::NLPSearchRequest;
 use oramacore_lib::fs::*;
 use oramacore_lib::nlp::locales::Locale;
-
-/// Threshold for triggering per-collection commits based on operation count
-const COLLECTION_COMMIT_THRESHOLD: u64 = 300;
-
-/// Time threshold for triggering per-collection commits
-/// If this duration has passed since the last commit AND there are uncommitted
-/// operations, the collection will commit during the next global commit cycle.
-/// This prevents inactive collections from accumulating uncommitted operations indefinitely.
-const COLLECTION_COMMIT_TIME_THRESHOLD: Duration = Duration::from_secs(5 * 60); // 5 minutes
 
 #[derive(Serialize)]
 pub struct FilterableFieldBool {
@@ -129,6 +119,7 @@ pub struct CollectionReader {
     write_api_key: Option<ApiKey>,
     context: ReadSideContext,
     offload_config: OffloadFieldConfig,
+    commit_config: CollectionCommitConfig,
 
     indexes: OramaAsyncLock<Vec<Index>>,
 
@@ -167,6 +158,7 @@ impl CollectionReader {
         write_api_key: Option<ApiKey>,
         context: ReadSideContext,
         offload_config: OffloadFieldConfig,
+        commit_config: CollectionCommitConfig,
     ) -> Result<Self> {
         Ok(Self {
             id,
@@ -180,6 +172,7 @@ impl CollectionReader {
 
             context,
             offload_config,
+            commit_config,
 
             indexes: OramaAsyncLock::new("collection_indexes", Default::default()),
             temp_indexes: OramaAsyncLock::new("collection_temp_indexes", Default::default()),
@@ -203,7 +196,7 @@ impl CollectionReader {
             // Initialize to past time to allow immediate commit when operations arrive
             last_commit_time: OramaSyncLock::new(
                 "collection_last_commit_time",
-                Instant::now() - COLLECTION_COMMIT_TIME_THRESHOLD,
+                Instant::now() - commit_config.time_threshold,
             ),
 
             pin_rules_reader: OramaAsyncLock::new("pin_rules_reader", PinRulesReader::empty()),
@@ -216,6 +209,7 @@ impl CollectionReader {
         context: ReadSideContext,
         data_dir: PathBuf,
         offload_config: OffloadFieldConfig,
+        commit_config: CollectionCommitConfig,
     ) -> Result<Self> {
         debug!("Loading collection info");
         let dump: Dump = BufferedFile::open(data_dir.join("collection.json"))
@@ -294,6 +288,7 @@ impl CollectionReader {
 
             context,
             offload_config,
+            commit_config,
 
             indexes: OramaAsyncLock::new("collection_indexes", indexes),
             temp_indexes: OramaAsyncLock::new("collection_temp_indexes", temp_indexes),
@@ -955,7 +950,7 @@ impl CollectionReader {
         // Commit collection if threshold reached
         // NB: this commits only this collection
         let pending = self.pending_operations.fetch_add(1, Ordering::SeqCst) + 1;
-        if pending >= COLLECTION_COMMIT_THRESHOLD {
+        if pending >= self.commit_config.operation_threshold {
             info!(
                 collection_id=?self.id,
                 offset=?offset,
@@ -1280,7 +1275,7 @@ impl CollectionReader {
     fn should_commit(&self, force: bool) -> bool {
         // We commit only if:
         // 1. Forced (from per-collection threshold or shutdown)
-        // 2. Collection operation threshold reached (>=300 operations)
+        // 2. Collection operation threshold reached (configurable via collection_commit.operation_threshold)
         // 3. Time threshold reached AND we have pending operations
 
         if force {
@@ -1289,7 +1284,7 @@ impl CollectionReader {
 
         let pending = self.pending_operations.load(Ordering::SeqCst);
         // Fast path: operation threshold reached
-        if pending >= COLLECTION_COMMIT_THRESHOLD {
+        if pending >= self.commit_config.operation_threshold {
             info!(
                 collection_id=?self.id,
                 pending=pending,
@@ -1301,7 +1296,7 @@ impl CollectionReader {
         else {
             let last_commit_lock = self.last_commit_time.read("commit_check").unwrap();
             let elapsed = last_commit_lock.elapsed();
-            let should_commit_by_time = elapsed >= COLLECTION_COMMIT_TIME_THRESHOLD;
+            let should_commit_by_time = elapsed >= self.commit_config.time_threshold;
             drop(last_commit_lock);
 
             should_commit_by_time
