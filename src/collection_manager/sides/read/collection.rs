@@ -4,7 +4,10 @@ use std::{
     io::ErrorKind,
     ops::{Deref, DerefMut},
     path::PathBuf,
-    sync::{atomic::AtomicU64, Arc},
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc,
+    },
 };
 
 use axum::extract::State;
@@ -16,6 +19,7 @@ use oramacore_lib::{
     pin_rules::PinRulesReader,
 };
 use serde::{Deserialize, Serialize};
+use tokio::time::Instant;
 use tracing::{debug, error, info, warn};
 
 use crate::{
@@ -29,7 +33,7 @@ use crate::{
         write::index::EnumStrategy,
         CollectionWriteOperation, Offset, ReplaceIndexReason,
     },
-    lock::{OramaAsyncLock, OramaAsyncLockReadGuard, OramaAsyncLockWriteGuard},
+    lock::{OramaAsyncLock, OramaAsyncLockReadGuard, OramaAsyncLockWriteGuard, OramaSyncLock},
     types::{
         ApiKey, CollectionId, CollectionStatsRequest, DocumentId, FieldId, IndexId,
         InteractionMessage, Number, OramaDate, Role,
@@ -38,9 +42,9 @@ use crate::{
 
 use super::{
     index::{Index, IndexStats},
-    CommittedBoolFieldStats, CommittedNumberFieldStats, CommittedStringFilterFieldStats,
-    CommittedVectorFieldStats, DeletionReason, OffloadFieldConfig, ReadSide,
-    UncommittedBoolFieldStats, UncommittedNumberFieldStats, UncommittedStringFieldStats,
+    CollectionCommitConfig, CommittedBoolFieldStats, CommittedNumberFieldStats,
+    CommittedStringFilterFieldStats, CommittedVectorFieldStats, DeletionReason, OffloadFieldConfig,
+    ReadSide, UncommittedBoolFieldStats, UncommittedNumberFieldStats, UncommittedStringFieldStats,
     UncommittedStringFilterFieldStats, UncommittedVectorFieldStats,
 };
 
@@ -115,6 +119,7 @@ pub struct CollectionReader {
     write_api_key: Option<ApiKey>,
     context: ReadSideContext,
     offload_config: OffloadFieldConfig,
+    commit_config: CollectionCommitConfig,
 
     indexes: OramaAsyncLock<Vec<Index>>,
 
@@ -125,7 +130,19 @@ pub struct CollectionReader {
     created_at: DateTime<Utc>,
     updated_at: OramaAsyncLock<DateTime<Utc>>,
 
+    // Per-collection offset tracking - single unified offset
+    offset: OramaAsyncLock<Offset>,
+
     document_count_estimation: AtomicU64,
+
+    // Counter for operations applied since last commit
+    pending_operations: Arc<AtomicU64>,
+
+    /// Timestamp of the last successful commit
+    /// For new collections, initialized to (now - threshold) to allow immediate commit
+    /// For loaded collections, initialized to now to provide grace period
+    /// Updated after each successful commit to track elapsed time
+    last_commit_time: OramaSyncLock<Instant>,
 
     pin_rules_reader: OramaAsyncLock<PinRulesReader<DocumentId>>,
 }
@@ -141,6 +158,7 @@ impl CollectionReader {
         write_api_key: Option<ApiKey>,
         context: ReadSideContext,
         offload_config: OffloadFieldConfig,
+        commit_config: CollectionCommitConfig,
     ) -> Result<Self> {
         Ok(Self {
             id,
@@ -154,6 +172,7 @@ impl CollectionReader {
 
             context,
             offload_config,
+            commit_config,
 
             indexes: OramaAsyncLock::new("collection_indexes", Default::default()),
             temp_indexes: OramaAsyncLock::new("collection_temp_indexes", Default::default()),
@@ -166,7 +185,19 @@ impl CollectionReader {
             created_at: Utc::now(),
             updated_at: OramaAsyncLock::new("collection_updated_at", Utc::now()),
 
+            // Initialize per-collection offset to 0
+            offset: OramaAsyncLock::new("collection_offset", Offset(0)),
+
             document_count_estimation: AtomicU64::new(0),
+
+            // Initialize pending operations counter to 0
+            pending_operations: Arc::new(AtomicU64::new(0)),
+
+            // Initialize to past time to allow immediate commit when operations arrive
+            last_commit_time: OramaSyncLock::new(
+                "collection_last_commit_time",
+                Instant::now() - commit_config.time_threshold,
+            ),
 
             pin_rules_reader: OramaAsyncLock::new("pin_rules_reader", PinRulesReader::empty()),
 
@@ -178,13 +209,40 @@ impl CollectionReader {
         context: ReadSideContext,
         data_dir: PathBuf,
         offload_config: OffloadFieldConfig,
+        commit_config: CollectionCommitConfig,
     ) -> Result<Self> {
         debug!("Loading collection info");
         let dump: Dump = BufferedFile::open(data_dir.join("collection.json"))
             .context("Cannot open collection.json")?
             .read_json_data()
             .context("Cannot read collection.json")?;
-        let Dump::V1(dump) = dump;
+
+        // Handle V1 to V2 migration
+        let (dump, offset) = match dump {
+            Dump::V1(v1) => {
+                info!("Migrating collection {:?} from V1 to V2", v1.id);
+                // Initialize offset to 0 - global check provides safety
+                (v1, Offset(0))
+            }
+            Dump::V2(v2) => {
+                // Use persisted offset value
+                (
+                    DumpV1 {
+                        id: v2.id,
+                        description: v2.description,
+                        mcp_description: v2.mcp_description,
+                        default_locale: v2.default_locale,
+                        read_api_key: v2.read_api_key,
+                        write_api_key: v2.write_api_key,
+                        index_ids: v2.index_ids,
+                        temp_index_ids: v2.temp_index_ids,
+                        created_at: v2.created_at,
+                        updated_at: v2.updated_at,
+                    },
+                    v2.offset,
+                )
+            }
+        };
         debug!("Collection info loaded");
 
         let mut indexes: Vec<Index> = Vec::with_capacity(dump.index_ids.len());
@@ -230,6 +288,7 @@ impl CollectionReader {
 
             context,
             offload_config,
+            commit_config,
 
             indexes: OramaAsyncLock::new("collection_indexes", indexes),
             temp_indexes: OramaAsyncLock::new("collection_temp_indexes", temp_indexes),
@@ -242,7 +301,16 @@ impl CollectionReader {
             created_at: dump.created_at,
             updated_at: OramaAsyncLock::new("collection_updated_at", dump.updated_at),
 
+            // Initialize per-collection offset from loaded data
+            offset: OramaAsyncLock::new("collection_offset", offset),
+
             document_count_estimation: AtomicU64::new(document_count_estimation),
+
+            // Always start at 0 after load (all operations before restart are committed)
+            pending_operations: Arc::new(AtomicU64::new(0)),
+
+            // Set to now after restart to give 5-minute grace period before first commit
+            last_commit_time: OramaSyncLock::new("collection_last_commit_time", Instant::now()),
 
             pin_rules_reader: OramaAsyncLock::new(
                 "pin_rules_reader",
@@ -255,7 +323,11 @@ impl CollectionReader {
         Ok(s)
     }
 
-    pub async fn commit(&self, offset: Offset) -> Result<()> {
+    pub async fn commit(&self, force: bool) -> Result<()> {
+        if !self.should_commit(force) {
+            return Ok(());
+        }
+
         // During the commit we have:
         // 1. indexes till alive
         // 2. indexes deleted by the user
@@ -270,6 +342,9 @@ impl CollectionReader {
         // NB: For deleted index, the documents are removed
         //     because the writer sends an appropriate command for that.
         //     Hence, we don't need to do anything here.
+
+        // Read current offset - this is what we actually processed
+        let offset = **self.offset.read("commit").await;
 
         let indexes_lock = self.indexes.read("commit").await;
         let mut index_ids = Vec::with_capacity(indexes_lock.len());
@@ -350,7 +425,8 @@ impl CollectionReader {
             .context("Cannot commit pin rules")?;
         drop(pin_rules_reader);
 
-        let dump = Dump::V1(DumpV1 {
+        // Save DumpV2 with single offset
+        let dump = Dump::V2(DumpV2 {
             id: self.id,
             description: self.description.clone(),
             mcp_description: self.mcp_description.read("commit").await.clone(),
@@ -361,6 +437,8 @@ impl CollectionReader {
             temp_index_ids,
             created_at: self.created_at,
             updated_at: **self.updated_at.read("commit").await,
+            // Per-collection offset tracking - single unified offset
+            offset,
         });
 
         BufferedFile::create_or_overwrite(self.data_dir.join("collection.json"))
@@ -411,6 +489,14 @@ impl CollectionReader {
 
         self.document_count_estimation
             .store(count, std::sync::atomic::Ordering::Relaxed);
+
+        // Reset pending operations counter after successful commit
+        self.pending_operations.store(0, Ordering::Relaxed);
+
+        // Update last commit timestamp
+        let mut last_commit_lock = self.last_commit_time.write("commit_complete").unwrap();
+        **last_commit_lock = Instant::now();
+        drop(last_commit_lock);
 
         Ok(())
     }
@@ -641,7 +727,20 @@ impl CollectionReader {
         IndexReadLock::try_new(indexes_lock, index_id)
     }
 
-    pub async fn update(&self, collection_operation: CollectionWriteOperation) -> Result<()> {
+    pub async fn update(
+        &self,
+        offset: Offset,
+        collection_operation: CollectionWriteOperation,
+    ) -> Result<()> {
+        // Check if operation already applied to THIS collection
+        let current = self.offset.read("update").await;
+        if offset <= **current && !current.is_zero() {
+            warn!(collection_id=?self.id, offset=?offset,
+                  "Already applied to this collection");
+            return Ok(());
+        }
+        drop(current);
+
         let mut updated_at_lock = self.updated_at.write("update").await;
         **updated_at_lock = Utc::now();
         drop(updated_at_lock);
@@ -841,6 +940,25 @@ impl CollectionReader {
                     .context("Cannot apply pin rule operation")?;
                 drop(pin_rules_lock);
             }
+        }
+
+        // Update offset after successful operation
+        let mut current = self.offset.write("update").await;
+        **current = offset;
+        drop(current);
+
+        // Commit collection if threshold reached
+        // NB: this commits only this collection
+        let pending = self.pending_operations.fetch_add(1, Ordering::SeqCst) + 1;
+        if pending >= self.commit_config.operation_threshold {
+            info!(
+                collection_id=?self.id,
+                offset=?offset,
+                pending=pending,
+                "Collection threshold reached, committing"
+            );
+            // Force commit since we've reached the per-collection threshold
+            self.commit(true).await?;
         }
 
         Ok(())
@@ -1153,6 +1271,37 @@ impl CollectionReader {
     ) -> OramaAsyncLockReadGuard<'_, PinRulesReader<DocumentId>> {
         self.pin_rules_reader.read(reason).await
     }
+
+    fn should_commit(&self, force: bool) -> bool {
+        // We commit only if:
+        // 1. Forced (from per-collection threshold or shutdown)
+        // 2. Collection operation threshold reached (configurable via collection_commit.operation_threshold)
+        // 3. Time threshold reached AND we have pending operations
+
+        if force {
+            return true;
+        }
+
+        let pending = self.pending_operations.load(Ordering::SeqCst);
+        // Fast path: operation threshold reached
+        if pending >= self.commit_config.operation_threshold {
+            info!(
+                collection_id=?self.id,
+                pending=pending,
+                "Collection operation threshold reached, committing"
+            );
+            true
+        }
+        // Check time threshold if we have pending operations
+        else {
+            let last_commit_lock = self.last_commit_time.read("commit_check").unwrap();
+            let elapsed = last_commit_lock.elapsed();
+            let should_commit_by_time = elapsed >= self.commit_config.time_threshold;
+            drop(last_commit_lock);
+
+            should_commit_by_time
+        }
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -1319,9 +1468,27 @@ struct DumpV1 {
     created_at: DateTime<Utc>,
     updated_at: DateTime<Utc>,
 }
+
+#[derive(Debug, Serialize, Deserialize)]
+struct DumpV2 {
+    id: CollectionId,
+    description: Option<String>,
+    mcp_description: Option<String>,
+    default_locale: Locale,
+    read_api_key: ApiKey,
+    write_api_key: Option<ApiKey>,
+    index_ids: Vec<IndexId>,
+    temp_index_ids: Vec<IndexId>,
+    created_at: DateTime<Utc>,
+    updated_at: DateTime<Utc>,
+    // Per-collection offset tracking - single unified offset
+    offset: Offset,
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 enum Dump {
     V1(DumpV1),
+    V2(DumpV2),
 }
 
 pub struct ReadIndexesLockGuard<'collection, 'search> {

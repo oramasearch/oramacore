@@ -13,7 +13,10 @@ use oramacore::{
     ai::{AIServiceConfig, AIServiceLLMConfig},
     build_orama,
     collection_manager::sides::{
-        read::{IndexesConfig, OffloadFieldConfig, ReadSideConfig, SearchRequest},
+        read::{
+            CollectionCommitConfig, IndexesConfig, OffloadFieldConfig, ReadSideConfig,
+            SearchRequest,
+        },
         write::{CollectionsWriterConfig, TempIndexCleanupConfig, WriteSideConfig},
         InputSideChannelType, OutputSideChannelType,
     },
@@ -138,6 +141,10 @@ fn create_test_config(build: bool) -> OramacoreConfig {
                     slot_count_exp: 8,
                     slot_size_exp: 4,
                 },
+                collection_commit: CollectionCommitConfig {
+                    operation_threshold: 300,
+                    time_threshold: Duration::from_secs(5 * 60),
+                },
             },
             analytics: None,
         },
@@ -258,7 +265,7 @@ async fn main() -> Result<()> {
         println!("Committing initial data");
         let commit_start = Instant::now();
         read_side
-            .commit()
+            .commit(true)
             .await
             .context("Failed to commit initial data")?;
         let commit_duration = commit_start.elapsed();
@@ -290,7 +297,7 @@ async fn main() -> Result<()> {
         println!("Committing deletions");
         let commit2_start = Instant::now();
         read_side
-            .commit()
+            .commit(true)
             .await
             .context("Failed to commit deletions")?;
         let commit2_duration = commit2_start.elapsed();

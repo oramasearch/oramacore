@@ -99,6 +99,14 @@ reader_side:
             # group by 2 ^ 4 seconds
             slot_size_exp: 4
 
+        # Per-collection commit thresholds
+        # Uncomment to customize (these are the defaults)
+        # collection_commit:
+        #     # Number of operations before collection commits immediately
+        #     operation_threshold: 300
+        #     # Time since last commit before collection participates in global commit
+        #     time_threshold: 5m
+
     # Uncomment to allow analytics
     analytics:
         api_key: my-analytics-api-key
