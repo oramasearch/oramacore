@@ -8,6 +8,7 @@ use std::{
         atomic::{AtomicU64, Ordering},
         Arc,
     },
+    time::Duration,
 };
 
 use axum::extract::State;
@@ -19,6 +20,7 @@ use oramacore_lib::{
     pin_rules::PinRulesReader,
 };
 use serde::{Deserialize, Serialize};
+use tokio::time::Instant;
 use tracing::{debug, error, info, warn};
 
 use crate::{
@@ -32,7 +34,7 @@ use crate::{
         write::index::EnumStrategy,
         CollectionWriteOperation, Offset, ReplaceIndexReason,
     },
-    lock::{OramaAsyncLock, OramaAsyncLockReadGuard, OramaAsyncLockWriteGuard},
+    lock::{OramaAsyncLock, OramaAsyncLockReadGuard, OramaAsyncLockWriteGuard, OramaSyncLock},
     types::{
         ApiKey, CollectionId, CollectionStatsRequest, DocumentId, FieldId, IndexId,
         InteractionMessage, Number, OramaDate, Role,
@@ -51,8 +53,14 @@ use crate::types::NLPSearchRequest;
 use oramacore_lib::fs::*;
 use oramacore_lib::nlp::locales::Locale;
 
-// Threshold for triggering per-collection commits
+/// Threshold for triggering per-collection commits based on operation count
 const COLLECTION_COMMIT_THRESHOLD: u64 = 300;
+
+/// Time threshold for triggering per-collection commits
+/// If this duration has passed since the last commit AND there are uncommitted
+/// operations, the collection will commit during the next global commit cycle.
+/// This prevents inactive collections from accumulating uncommitted operations indefinitely.
+const COLLECTION_COMMIT_TIME_THRESHOLD: Duration = Duration::from_secs(5 * 60); // 5 minutes
 
 #[derive(Serialize)]
 pub struct FilterableFieldBool {
@@ -139,6 +147,12 @@ pub struct CollectionReader {
     // Counter for operations applied since last commit
     pending_operations: Arc<AtomicU64>,
 
+    /// Timestamp of the last successful commit
+    /// For new collections, initialized to (now - threshold) to allow immediate commit
+    /// For loaded collections, initialized to now to provide grace period
+    /// Updated after each successful commit to track elapsed time
+    last_commit_time: OramaSyncLock<Instant>,
+
     pin_rules_reader: OramaAsyncLock<PinRulesReader<DocumentId>>,
 }
 
@@ -185,6 +199,12 @@ impl CollectionReader {
 
             // Initialize pending operations counter to 0
             pending_operations: Arc::new(AtomicU64::new(0)),
+
+            // Initialize to past time to allow immediate commit when operations arrive
+            last_commit_time: OramaSyncLock::new(
+                "collection_last_commit_time",
+                Instant::now() - COLLECTION_COMMIT_TIME_THRESHOLD,
+            ),
 
             pin_rules_reader: OramaAsyncLock::new("pin_rules_reader", PinRulesReader::empty()),
 
@@ -294,6 +314,9 @@ impl CollectionReader {
             // Always start at 0 after load (all operations before restart are committed)
             pending_operations: Arc::new(AtomicU64::new(0)),
 
+            // Set to now after restart to give 5-minute grace period before first commit
+            last_commit_time: OramaSyncLock::new("collection_last_commit_time", Instant::now()),
+
             pin_rules_reader: OramaAsyncLock::new(
                 "pin_rules_reader",
                 PinRulesReader::try_new(data_dir.join("pin_rules"))?,
@@ -306,18 +329,8 @@ impl CollectionReader {
     }
 
     pub async fn commit(&self, force: bool) -> Result<()> {
-        // We commit only if the collection threshold is reached or forced
-        if !force {
-            let pending = self.pending_operations.load(Ordering::SeqCst);
-            if pending < COLLECTION_COMMIT_THRESHOLD {
-                info!(
-                    collection_id=?self.id,
-                    pending=pending,
-                    threshold=COLLECTION_COMMIT_THRESHOLD,
-                    "Skipping global commit - collection threshold not reached"
-                );
-                return Ok(());
-            }
+        if !self.should_commit(force) {
+            return Ok(());
         }
 
         // During the commit we have:
@@ -484,6 +497,11 @@ impl CollectionReader {
 
         // Reset pending operations counter after successful commit
         self.pending_operations.store(0, Ordering::Relaxed);
+
+        // Update last commit timestamp
+        let mut last_commit_lock = self.last_commit_time.write("commit_complete").unwrap();
+        **last_commit_lock = Instant::now();
+        drop(last_commit_lock);
 
         Ok(())
     }
@@ -1257,6 +1275,37 @@ impl CollectionReader {
         reason: &'static str,
     ) -> OramaAsyncLockReadGuard<'_, PinRulesReader<DocumentId>> {
         self.pin_rules_reader.read(reason).await
+    }
+
+    fn should_commit(&self, force: bool) -> bool {
+        // We commit only if:
+        // 1. Forced (from per-collection threshold or shutdown)
+        // 2. Collection operation threshold reached (>=300 operations)
+        // 3. Time threshold reached AND we have pending operations
+
+        if force {
+            return true;
+        }
+
+        let pending = self.pending_operations.load(Ordering::SeqCst);
+        // Fast path: operation threshold reached
+        if pending >= COLLECTION_COMMIT_THRESHOLD {
+            info!(
+                collection_id=?self.id,
+                pending=pending,
+                "Collection operation threshold reached, committing"
+            );
+            true
+        }
+        // Check time threshold if we have pending operations
+        else {
+            let last_commit_lock = self.last_commit_time.read("commit_check").unwrap();
+            let elapsed = last_commit_lock.elapsed();
+            let should_commit_by_time = elapsed >= COLLECTION_COMMIT_TIME_THRESHOLD;
+            drop(last_commit_lock);
+
+            should_commit_by_time
+        }
     }
 }
 
