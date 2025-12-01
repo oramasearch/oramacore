@@ -128,7 +128,7 @@ impl CollectionsReader {
     }
 
     #[instrument(skip(self))]
-    pub async fn commit(&self) -> Result<()> {
+    pub async fn commit(&self, force: bool) -> Result<()> {
         let data_dir = &self.indexes_config.data_dir;
         let collections_dir = data_dir.join("collections");
 
@@ -152,7 +152,7 @@ impl CollectionsReader {
                     format!("Cannot create directory for collection '{}'", id.as_str())
                 })?;
 
-            match collection.commit().await {
+            match collection.commit(force).await {
                 Ok(_) => {}
                 Err(error) => {
                     error!(error = ?error, collection_id=?id, "Cannot commit collection {:?}: {:?}", id, error);

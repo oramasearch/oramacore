@@ -277,7 +277,7 @@ fn bench_fulltext_fast(c: &mut Criterion) {
     // Commit the data and test committed search
     rt.block_on(async {
         writer.commit().await.expect("Writer commit failed");
-        reader.commit().await.expect("Reader commit failed");
+        reader.commit(true).await.expect("Reader commit failed");
     });
 
     // Committed search benchmark

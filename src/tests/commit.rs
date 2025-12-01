@@ -20,7 +20,7 @@ async fn test_commit_after_operation_limit_reached() {
 
     index_client
         .insert_documents(
-            json!((0..5)
+            json!((0..300)
                 .map(|i| {
                     json!({
                         "id": i.to_string(),

@@ -203,7 +203,7 @@ impl TestContext {
 
     pub async fn commit_all(&self) -> Result<()> {
         self.writer.commit().await?;
-        self.reader.commit().await?;
+        self.reader.commit(true).await?;
         Ok(())
     }
 

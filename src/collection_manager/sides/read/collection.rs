@@ -305,7 +305,21 @@ impl CollectionReader {
         Ok(s)
     }
 
-    pub async fn commit(&self) -> Result<()> {
+    pub async fn commit(&self, force: bool) -> Result<()> {
+        // We commit only if the collection threshold is reached or forced
+        if !force {
+            let pending = self.pending_operations.load(Ordering::SeqCst);
+            if pending < COLLECTION_COMMIT_THRESHOLD {
+                info!(
+                    collection_id=?self.id,
+                    pending=pending,
+                    threshold=COLLECTION_COMMIT_THRESHOLD,
+                    "Skipping global commit - collection threshold not reached"
+                );
+                return Ok(());
+            }
+        }
+
         // During the commit we have:
         // 1. indexes till alive
         // 2. indexes deleted by the user
@@ -467,6 +481,9 @@ impl CollectionReader {
 
         self.document_count_estimation
             .store(count, std::sync::atomic::Ordering::Relaxed);
+
+        // Reset pending operations counter after successful commit
+        self.pending_operations.store(0, Ordering::Relaxed);
 
         Ok(())
     }
@@ -927,8 +944,8 @@ impl CollectionReader {
                 pending=pending,
                 "Collection threshold reached, committing"
             );
-            self.commit().await?;
-            self.pending_operations.store(0, Ordering::SeqCst);
+            // Force commit since we've reached the per-collection threshold
+            self.commit(true).await?;
         }
 
         Ok(())

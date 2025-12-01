@@ -268,7 +268,15 @@ impl ReadSide {
 
     pub async fn stop(&self) -> Result<()> {
         info!("Stopping read side");
-        // Broadcast
+
+        // Force commit all pending data before stopping to avoid data loss
+        info!("Performing forced commit before shutdown");
+        if let Err(e) = self.commit(true).await {
+            error!(error = ?e, "Cannot commit read side during shutdown");
+            // Continue with shutdown even if commit fails
+        }
+
+        // Broadcast stop signal
         self.stop_sender
             .send(())
             .context("Cannot send stop signal")?;
@@ -284,7 +292,7 @@ impl ReadSide {
         Ok(())
     }
 
-    pub async fn commit(&self) -> Result<()> {
+    pub async fn commit(&self, force: bool) -> Result<()> {
         // We stop insertion operations while we are committing
         // This lock is needed to prevent any collection from being created, deleted or changed
         // ie, we stop to process any new events
@@ -294,7 +302,8 @@ impl ReadSide {
         let offset = **live_offset;
         drop(live_offset);
 
-        self.collections.commit().await?;
+        // Pass force parameter to collections commit
+        self.collections.commit(force).await?;
         self.document_storage
             .commit()
             .await
@@ -450,7 +459,8 @@ impl ReadSide {
 
         if should_commit {
             info!(insert_batch_commit_size=?self.insert_batch_commit_size, "insert_batch_commit_size reached, committing");
-            self.commit().await?;
+            // Use non-forced commit to allow collections to skip if below threshold
+            self.commit(false).await?;
         }
 
         trace!(offset=?offset, "Updated");
@@ -798,30 +808,6 @@ impl ReadSide {
             None => None,
         }
     }
-
-    /*
-    pub async fn list_pin_rule_ids(
-        &self,
-        collection_id: CollectionId,
-        index_id: IndexId,
-        read_api_key: ApiKey,
-    ) -> Result<Vec<String>, ReadError> {
-        let collection = self
-            .collections
-            .get_collection(collection_id)
-            .await
-            .ok_or_else(|| ReadError::NotFound(collection_id))?;
-        collection.check_read_api_key(read_api_key, self.master_api_key)?;
-
-        let Some(index) = collection.get_index(index_id).await else {
-            return Err(ReadError::IndexNotFound(collection_id, index_id));
-        };
-
-        let ids = index.get_pin_rule_ids().await;
-
-        Ok(ids)
-    }
-    */
 }
 
 fn default_insert_batch_commit_size() -> u64 {
@@ -866,7 +852,8 @@ fn start_commit_loop(
                 "{:?} time reached. Committing read side",
                 insert_batch_commit_size.clone()
             );
-            if let Err(e) = read_side.commit().await {
+            // Use non-forced commit to allow collections to skip if below threshold
+            if let Err(e) = read_side.commit(false).await {
                 error!(error = ?e, "Cannot commit read side");
             }
         }

@@ -341,7 +341,8 @@ impl TestContext {
 
     pub async fn commit_all(&self) -> Result<()> {
         self.writer.commit().await?;
-        self.reader.commit().await?;
+        // Force commit in tests to ensure all data is written to disk
+        self.reader.commit(true).await?;
         Ok(())
     }
 

@@ -258,7 +258,7 @@ async fn main() -> Result<()> {
         println!("Committing initial data");
         let commit_start = Instant::now();
         read_side
-            .commit()
+            .commit(true)
             .await
             .context("Failed to commit initial data")?;
         let commit_duration = commit_start.elapsed();
@@ -290,7 +290,7 @@ async fn main() -> Result<()> {
         println!("Committing deletions");
         let commit2_start = Instant::now();
         read_side
-            .commit()
+            .commit(true)
             .await
             .context("Failed to commit deletions")?;
         let commit2_duration = commit2_start.elapsed();
