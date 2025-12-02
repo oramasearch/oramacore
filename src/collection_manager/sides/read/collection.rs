@@ -218,31 +218,39 @@ impl CollectionReader {
             .context("Cannot read collection.json")?;
 
         // Handle V1 to V2 migration
-        let (dump, offset) = match dump {
+        let dump = match dump {
             Dump::V1(v1) => {
                 info!("Migrating collection {:?} from V1 to V2", v1.id);
-                // Initialize offset to 0 - global check provides safety
-                (v1, Offset(0))
+                let dump = Dump::V2(DumpV2 {
+                    id: v1.id,
+                    description: v1.description,
+                    mcp_description: v1.mcp_description,
+                    default_locale: v1.default_locale,
+                    read_api_key: v1.read_api_key,
+                    write_api_key: v1.write_api_key,
+                    index_ids: v1.index_ids,
+                    temp_index_ids: v1.temp_index_ids,
+                    created_at: v1.created_at,
+                    updated_at: v1.updated_at,
+                    offset: Offset(0),
+                });
+
+                BufferedFile::create_or_overwrite(data_dir.join("collection.json"))
+                    .context("Cannot open collection.json")?
+                    .write_json_data(&dump)
+                    .context("Cannot read collection.json")?;
+
+                match dump {
+                    Dump::V2(v2) => v2,
+                    _ => unreachable!("Just wrote V2 dump"),
+                }
             }
             Dump::V2(v2) => {
                 // Use persisted offset value
-                (
-                    DumpV1 {
-                        id: v2.id,
-                        description: v2.description,
-                        mcp_description: v2.mcp_description,
-                        default_locale: v2.default_locale,
-                        read_api_key: v2.read_api_key,
-                        write_api_key: v2.write_api_key,
-                        index_ids: v2.index_ids,
-                        temp_index_ids: v2.temp_index_ids,
-                        created_at: v2.created_at,
-                        updated_at: v2.updated_at,
-                    },
-                    v2.offset,
-                )
+                v2
             }
         };
+        let offset = dump.offset;
         debug!("Collection info loaded");
 
         let mut indexes: Vec<Index> = Vec::with_capacity(dump.index_ids.len());
@@ -323,9 +331,21 @@ impl CollectionReader {
         Ok(s)
     }
 
-    pub async fn commit(&self, force: bool) -> Result<()> {
+    pub async fn commit(&self, force: bool) -> Result<Offset> {
         if !self.should_commit(force) {
-            return Ok(());
+            // Return current offset without committing
+
+            let dump: Dump = BufferedFile::open(self.data_dir.join("collection.json"))
+                .context("Cannot create collection.json")?
+                .read_json_data()
+                .context("Cannot write collection.json")?;
+
+            let offset = match dump {
+                Dump::V1(_) => Offset(0),
+                Dump::V2(v2) => v2.offset,
+            };
+
+            return Ok(offset);
         }
 
         // During the commit we have:
@@ -498,7 +518,7 @@ impl CollectionReader {
         **last_commit_lock = Instant::now();
         drop(last_commit_lock);
 
-        Ok(())
+        Ok(offset)
     }
 
     pub async fn clean_up(&self) -> Result<()> {
@@ -1277,6 +1297,7 @@ impl CollectionReader {
         // 1. Forced (from per-collection threshold or shutdown)
         // 2. Collection operation threshold reached (configurable via collection_commit.operation_threshold)
         // 3. Time threshold reached AND we have pending operations
+        // 4. No pending operations (to update last commit time)
 
         if force {
             return true;
@@ -1299,7 +1320,13 @@ impl CollectionReader {
             let should_commit_by_time = elapsed >= self.commit_config.time_threshold;
             drop(last_commit_lock);
 
-            should_commit_by_time
+            if pending > 0 {
+                should_commit_by_time
+            } else {
+                // In this case we commit even if no pending opertations
+                // So, we will update the last commit time even if no operations
+                true
+            }
         }
     }
 }
