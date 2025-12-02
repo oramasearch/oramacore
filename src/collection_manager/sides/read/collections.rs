@@ -4,7 +4,7 @@ use std::{
 };
 
 use crate::{
-    collection_manager::sides::read::context::ReadSideContext,
+    collection_manager::sides::{read::context::ReadSideContext, Offset},
     lock::{OramaAsyncLock, OramaAsyncLockReadGuard},
     types::{ApiKey, CollectionId},
 };
@@ -129,14 +129,20 @@ impl CollectionsReader {
     }
 
     #[instrument(skip(self))]
-    pub async fn commit(&self, force: bool) -> Result<()> {
+    pub async fn commit(&self, force: bool) -> Result<Offset> {
         let data_dir = &self.indexes_config.data_dir;
         let collections_dir = data_dir.join("collections");
 
         let col = self.collections.read("commit").await;
 
         let mut collection_ids: Vec<_> = vec![];
-        info!("Committing collections: {:?}", collection_ids);
+        if col.is_empty() {
+            info!("No collections to commit");
+            return Ok(Offset(0));
+        }
+
+        let mut min_offset = Offset(u64::MAX);
+
         for (id, collection) in col.iter() {
             let collection_dir = collections_dir.join(id.as_str());
 
@@ -154,7 +160,9 @@ impl CollectionsReader {
                 })?;
 
             match collection.commit(force).await {
-                Ok(_) => {}
+                Ok(offset) => {
+                    min_offset = min_offset.min(offset);
+                }
                 Err(error) => {
                     error!(error = ?error, collection_id=?id, "Cannot commit collection {:?}: {:?}", id, error);
                 }
@@ -176,7 +184,7 @@ impl CollectionsReader {
 
         info!("Collections committed");
 
-        Ok(())
+        Ok(min_offset)
     }
 
     pub async fn clean_up(&self) -> Result<()> {
