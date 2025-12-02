@@ -326,7 +326,7 @@ impl ReadSide {
         drop(live_offset);
 
         // Pass force parameter to collections commit
-        self.collections.commit(force).await?;
+        let min_offset = self.collections.commit(force).await?;
         self.document_storage
             .commit()
             .await
@@ -335,7 +335,7 @@ impl ReadSide {
 
         BufferedFile::create_or_overwrite(self.data_dir.join("read.info"))
             .context("Cannot create read.info file")?
-            .write_json_data(&ReadInfo::V1(ReadInfoV1 { offset }))
+            .write_json_data(&ReadInfo::V1(ReadInfoV1 { offset: min_offset }))
             .context("Cannot write read.info file")?;
 
         if let Err(e) = self.collections.clean_up().await {
