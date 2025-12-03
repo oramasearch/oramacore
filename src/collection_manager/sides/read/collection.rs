@@ -349,9 +349,7 @@ impl CollectionReader {
                 .context("Cannot write collection.json")?;
 
             let offset = match dump {
-                Dump::V1(_) => {
-                    **self.offset.read("commit").await
-                },
+                Dump::V1(_) => **self.offset.read("commit").await,
                 Dump::V2(v2) => v2.offset,
             };
 
