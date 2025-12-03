@@ -337,8 +337,8 @@ impl ReadSide {
             .context("Cannot commit document storage")?;
         self.kv.commit().await.context("Cannot commit KV")?;
 
-        // If forced, we committed all the collections,
-        // Otherwise we use the min_offset returned by collections
+        // If forced, we committed all the collections, so we can use the last global offset,
+        // Otherwise we have to use the min_offset returned by collections
         let offset_to_commit = if force { offset } else { min_offset };
 
         BufferedFile::create_or_overwrite(self.data_dir.join("read.info"))
