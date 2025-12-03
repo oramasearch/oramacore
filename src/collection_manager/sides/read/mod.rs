@@ -337,11 +337,18 @@ impl ReadSide {
             .context("Cannot commit document storage")?;
         self.kv.commit().await.context("Cannot commit KV")?;
 
+        // If forced, we committed all the collections,
+        // Otherwise we use the min_offset returned by collections
+        let offset_to_commit = if force { offset } else { min_offset };
+
         BufferedFile::create_or_overwrite(self.data_dir.join("read.info"))
             .context("Cannot create read.info file")?
-            .write_json_data(&ReadInfo::V1(ReadInfoV1 { offset: min_offset }))
+            .write_json_data(&ReadInfo::V1(ReadInfoV1 {
+                offset: offset_to_commit,
+            }))
             .context("Cannot write read.info file")?;
 
+        // Clean up collections is an heavy operation, so we do it only on forced commits
         if force {
             if let Err(e) = self.collections.clean_up().await {
                 error!(error = ?e, "Cannot clean up collections during commit. Do it manually later.");
