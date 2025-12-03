@@ -89,6 +89,15 @@ reader_side:
         insert_batch_commit_size: 50000000
         # Set interval for commiting the changes to the disk
         commit_interval: 1m
+        # Each Nth commit will be forced, regardless of per-collection thresholds
+        force_commit: 4
+        # Per-collection commit thresholds
+        # Uncomment to customize (these are the defaults)
+        collection_commit:
+            # Number of operations before collection commits immediately
+            operation_threshold: 300
+            # Time since last commit before collection participates in global commit
+            time_threshold: 5m
 
         # offload fields if there's no search on that field in the last 30minutes
         # keeping a window of 2 ^ 4 * 2 ^ 8 seconds = 4096 seconds = ~1 hour
@@ -99,13 +108,6 @@ reader_side:
             # group by 2 ^ 4 seconds
             slot_size_exp: 4
 
-        # Per-collection commit thresholds
-        # Uncomment to customize (these are the defaults)
-        # collection_commit:
-        #     # Number of operations before collection commits immediately
-        #     operation_threshold: 300
-        #     # Time since last commit before collection participates in global commit
-        #     time_threshold: 5m
 
     # Uncomment to allow analytics
     analytics:

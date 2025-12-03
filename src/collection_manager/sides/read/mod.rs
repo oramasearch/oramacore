@@ -114,6 +114,8 @@ pub struct IndexesConfig {
     pub insert_batch_commit_size: u64,
     #[serde(deserialize_with = "deserialize_duration")]
     pub commit_interval: Duration,
+    #[serde(default = "default_force_commit")]
+    pub force_commit: u32,
     pub notifier: Option<NotifierConfig>,
     #[serde(default = "default_offload_field")]
     pub offload_field: OffloadFieldConfig,
@@ -186,6 +188,7 @@ impl ReadSide {
 
         let insert_batch_commit_size = config.config.insert_batch_commit_size;
         let commit_interval = config.config.commit_interval;
+        let force_commit = config.config.force_commit;
         let data_dir = config.config.data_dir.clone();
 
         let mut notifier = None;
@@ -201,13 +204,6 @@ impl ReadSide {
             notifier,
         };
 
-        let collections_reader = CollectionsReader::try_load(context, config.config)
-            .await
-            .context("Cannot load collections")?;
-        document_storage
-            .load()
-            .context("Cannot load document storage")?;
-
         let read_info: Result<ReadInfo> = BufferedFile::open(data_dir.join("read.info"))
             .and_then(|f| f.read_json_data())
             .context("Cannot read offset file");
@@ -219,6 +215,13 @@ impl ReadSide {
             }
         };
         info!(offset=?last_offset, "Starting read side");
+
+        let collections_reader = CollectionsReader::try_load(context, config.config, last_offset)
+            .await
+            .context("Cannot load collections")?;
+        document_storage
+            .load()
+            .context("Cannot load document storage")?;
 
         let kv = KV::try_load(KVConfig {
             data_dir: data_dir.join("kv"),
@@ -276,6 +279,7 @@ impl ReadSide {
         start_commit_loop(
             read_side.clone(),
             commit_interval,
+            force_commit,
             commit_loop_receiver,
             stop_done_sender.clone(),
         );
@@ -338,8 +342,10 @@ impl ReadSide {
             .write_json_data(&ReadInfo::V1(ReadInfoV1 { offset: min_offset }))
             .context("Cannot write read.info file")?;
 
-        if let Err(e) = self.collections.clean_up().await {
-            error!(error = ?e, "Cannot clean up collections during commit. Do it manually later.");
+        if force {
+            if let Err(e) = self.collections.clean_up().await {
+                error!(error = ?e, "Cannot clean up collections during commit. Do it manually later.");
+            }
         }
 
         **commit_insert_mutex_lock = offset;
@@ -845,6 +851,10 @@ fn default_offload_field() -> OffloadFieldConfig {
     }
 }
 
+fn default_force_commit() -> u32 {
+    4
+}
+
 fn default_collection_commit_operation_threshold() -> u64 {
     300 // Match current hardcoded value
 }
@@ -863,6 +873,7 @@ fn default_collection_commit() -> CollectionCommitConfig {
 fn start_commit_loop(
     read_side: Arc<ReadSide>,
     insert_batch_commit_size: Duration,
+    force_commit: u32,
     mut stop_receiver: tokio::sync::broadcast::Receiver<()>,
     stop_done_sender: tokio::sync::mpsc::Sender<()>,
 ) {
@@ -876,6 +887,7 @@ fn start_commit_loop(
         // the commit will be run due to the `insert_batch_commit_size` config.
         interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
 
+        let mut counter: u32 = 0;
         'outer: loop {
             tokio::select! {
                 _ = stop_receiver.recv() => {
@@ -883,7 +895,7 @@ fn start_commit_loop(
                     break 'outer;
                 }
                 _ = interval.tick() => {
-
+                    counter = (counter + 1) % force_commit;
                 }
             };
             info!(
@@ -891,7 +903,7 @@ fn start_commit_loop(
                 insert_batch_commit_size.clone()
             );
             // Use non-forced commit to allow collections to skip if below threshold
-            if let Err(e) = read_side.commit(false).await {
+            if let Err(e) = read_side.commit(counter == 0).await {
                 error!(error = ?e, "Cannot commit read side");
             }
         }

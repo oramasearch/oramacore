@@ -90,6 +90,7 @@ pub fn create_minimal_config() -> OramacoreConfig {
                     slot_count_exp: 6, // Smaller for benchmarks
                     slot_size_exp: 3,
                 },
+                force_commit: 4,
                 collection_commit: CollectionCommitConfig::default(),
             },
             analytics: None,
