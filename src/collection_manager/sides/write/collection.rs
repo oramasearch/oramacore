@@ -495,7 +495,7 @@ impl CollectionWriter {
         drop(temp_index_lock);
         drop(index_lock);
 
-        panic!();
+        Ok(())
     }
 
     pub async fn get_document_ids(&self) -> Vec<DocumentId> {

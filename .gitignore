@@ -26,6 +26,7 @@ log.log
 src/tests/dump-test
 !src/tests/dump-test/before-remove-odered-key/.data
 config-dev.yaml
+config-local-rabbit.yaml
 *.html
 *.tar.gz
 

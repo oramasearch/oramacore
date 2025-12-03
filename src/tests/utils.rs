@@ -44,9 +44,9 @@ use oramacore_lib::pin_rules::PinRule;
 pub fn init_log() {
     if let Ok(a) = std::env::var("LOG") {
         if a == "info" {
-            std::env::set_var("RUST_LOG", "oramacore=info,warn");
+            unsafe { std::env::set_var("RUST_LOG", "oramacore=info,warn") };
         } else {
-            std::env::set_var("RUST_LOG", "oramacore=trace,warn");
+            unsafe { std::env::set_var("RUST_LOG", "oramacore=trace,warn") };
         }
     }
     let _ = tracing_subscriber::fmt::try_init();
@@ -135,6 +135,7 @@ pub fn create_oramacore_config() -> OramacoreConfig {
                     operation_threshold: 300,
                     time_threshold: Duration::from_secs(5 * 60),
                 },
+                force_commit: u32::MAX,
             },
             analytics: None,
         },
