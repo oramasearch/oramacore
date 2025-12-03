@@ -166,7 +166,10 @@ impl CollectionsReader {
 
             match collection.commit(force).await {
                 Ok(offset) => {
-                    min_offset = min_offset.min(offset);
+                    // Offset 0 means no new data, we skip it for min_offset calculation
+                    if offset.0 != 0 {
+                        min_offset = min_offset.min(offset);
+                    }
                 }
                 Err(error) => {
                     error!(error = ?error, collection_id=?id, "Cannot commit collection {:?}: {:?}", id, error);
