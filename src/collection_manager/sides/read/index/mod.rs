@@ -686,48 +686,28 @@ impl Index {
     pub async fn clean_up(&self, index_data_dir: PathBuf) -> Result<()> {
         let committed_fields = self.committed_fields.read("clean_up").await;
 
-        let field_data_dirs: HashSet<_> = committed_fields
-            .bool_fields
-            .values()
-            .map(|f| f.metadata().data_dir)
-            .chain(
-                committed_fields
-                    .number_fields
+        fn add<FM: CommittedFieldMetadata, CF: CommittedField<FieldMetadata = FM>>(
+            set: &mut HashSet<PathBuf>,
+            fields: &HashMap<FieldId, CF>,
+        ) {
+            set.extend(
+                fields
                     .values()
-                    .map(|f| f.metadata().data_dir),
-            )
-            .chain(
-                committed_fields
-                    .string_filter_fields
-                    .values()
-                    .map(|f| f.metadata().data_dir),
-            )
-            .chain(
-                committed_fields
-                    .date_fields
-                    .values()
-                    .map(|f| f.metadata().data_dir),
-            )
-            .chain(
-                committed_fields
-                    .geopoint_fields
-                    .values()
-                    .map(|f| f.metadata().data_dir),
-            )
-            .chain(
-                committed_fields
-                    .string_fields
-                    .values()
-                    .map(|f| f.metadata().data_dir),
-            )
-            .chain(
-                committed_fields
-                    .vector_fields
-                    .values()
-                    .map(|f| f.metadata().data_dir),
-            )
-            .map(|f| f.parent().unwrap().to_path_buf())
-            .collect();
+                    .map(CF::metadata)
+                    .map(|m| m.data_dir().clone()),
+            );
+        }
+
+        let mut field_data_dirs: HashSet<PathBuf> = HashSet::new();
+        add(&mut field_data_dirs, &committed_fields.bool_fields);
+        add(&mut field_data_dirs, &committed_fields.number_fields);
+        add(&mut field_data_dirs, &committed_fields.string_filter_fields);
+        add(&mut field_data_dirs, &committed_fields.date_fields);
+        add(&mut field_data_dirs, &committed_fields.geopoint_fields);
+        add(&mut field_data_dirs, &committed_fields.string_fields);
+        add(&mut field_data_dirs, &committed_fields.vector_fields);
+
+        trace!("Field data dirs to keep: {:?}", field_data_dirs);
 
         let subfolders = match std::fs::read_dir(index_data_dir) {
             Ok(a) => a,
@@ -741,9 +721,9 @@ impl Index {
                 ));
             }
         };
-        let subfolders: Result<Vec<_>, _> = subfolders.collect();
-
-        let subfolders = subfolders.context("Cannot read entry in index folder")?;
+        let subfolders = subfolders
+            .collect::<Result<Vec<_>, _>>()
+            .context("Cannot read entry in index folder")?;
 
         for entry in subfolders {
             let a = entry.file_type().context("Cannot get file type")?;
@@ -751,16 +731,27 @@ impl Index {
                 continue;
             }
 
-            if field_data_dirs.contains(&entry.path()) {
+            let subfolder = entry.path();
+
+            trace!("Checking subfolder: {:?}", subfolder);
+
+            // Avoid use `eq` or `contains`. To be safier, use `starts_with`
+            // So `field_data_dirs` could point to a folder inside `subfolder`
+            // and we will not delete it.
+            let is_used = field_data_dirs
+                .iter()
+                .any(|field_data_dir| field_data_dir.starts_with(&subfolder));
+            if is_used {
                 continue;
             }
 
+            // Delete only offset folders
             if !entry.file_name().to_str().unwrap().starts_with("offset-") {
                 continue;
             }
 
-            info!("Removing unused index data folder: {:?}", entry.path());
-            std::fs::remove_dir_all(entry.path()).context("Cannot remove path")?;
+            info!("Removing unused index data folder: {:?}", subfolder);
+            std::fs::remove_dir_all(subfolder).context("Cannot remove path")?;
         }
 
         Ok(())

@@ -145,6 +145,7 @@ fn create_test_config(build: bool) -> OramacoreConfig {
                     operation_threshold: 300,
                     time_threshold: Duration::from_secs(5 * 60),
                 },
+                force_commit: 4,
             },
             analytics: None,
         },

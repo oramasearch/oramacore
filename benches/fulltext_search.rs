@@ -36,9 +36,9 @@ use oramacore::{
 pub fn init_log() {
     if let Ok(a) = std::env::var("LOG") {
         if a == "info" {
-            std::env::set_var("RUST_LOG", "oramacore=info,warn");
+            unsafe { std::env::set_var("RUST_LOG", "oramacore=info,warn") };
         } else {
-            std::env::set_var("RUST_LOG", "oramacore=trace,warn");
+            unsafe { std::env::set_var("RUST_LOG", "oramacore=trace,warn") };
         }
     }
     let _ = tracing_subscriber::fmt::try_init();
@@ -103,6 +103,7 @@ pub fn create_oramacore_config() -> OramacoreConfig {
                     slot_count_exp: 8,
                     slot_size_exp: 4,
                 },
+                force_commit: 4,
                 collection_commit: CollectionCommitConfig::default(),
             },
             analytics: None,

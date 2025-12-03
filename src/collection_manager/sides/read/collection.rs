@@ -210,6 +210,7 @@ impl CollectionReader {
         data_dir: PathBuf,
         offload_config: OffloadFieldConfig,
         commit_config: CollectionCommitConfig,
+        global_offset: Offset,
     ) -> Result<Self> {
         debug!("Loading collection info");
         let dump: Dump = BufferedFile::open(data_dir.join("collection.json"))
@@ -232,7 +233,7 @@ impl CollectionReader {
                     temp_index_ids: v1.temp_index_ids,
                     created_at: v1.created_at,
                     updated_at: v1.updated_at,
-                    offset: Offset(0),
+                    offset: global_offset,
                 });
 
                 BufferedFile::create_or_overwrite(data_dir.join("collection.json"))
@@ -245,7 +246,14 @@ impl CollectionReader {
                     _ => unreachable!("Just wrote V2 dump"),
                 }
             }
-            Dump::V2(v2) => {
+            Dump::V2(mut v2) => {
+                // This collection offset could be:
+                // - higher than global_offset: this line doesn't change anything
+                // - equal to global_offset: this line doesn't change anything
+                // - lower than global_offset: this will not change anything
+                //   because the reader dequeues operations from global offset
+                v2.offset = v2.offset.max(global_offset);
+
                 // Use persisted offset value
                 v2
             }
@@ -755,8 +763,11 @@ impl CollectionReader {
         // Check if operation already applied to THIS collection
         let current = self.offset.read("update").await;
         if offset <= **current && !current.is_zero() {
-            warn!(collection_id=?self.id, offset=?offset,
-                  "Already applied to this collection");
+            warn!(
+                collection_id=?self.id,
+                offset=?offset,
+                "Already applied to this collection"
+            );
             return Ok(());
         }
         drop(current);

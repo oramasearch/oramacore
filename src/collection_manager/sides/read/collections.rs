@@ -38,7 +38,11 @@ pub struct CollectionsReader {
 }
 
 impl CollectionsReader {
-    pub async fn try_load(context: ReadSideContext, indexes_config: IndexesConfig) -> Result<Self> {
+    pub async fn try_load(
+        context: ReadSideContext,
+        indexes_config: IndexesConfig,
+        global_offset: Offset,
+    ) -> Result<Self> {
         let data_dir = &indexes_config.data_dir;
         info!("Loading collections from disk '{:?}'.", data_dir);
 
@@ -83,6 +87,7 @@ impl CollectionsReader {
                 collection_dir.clone(),
                 indexes_config.offload_field,
                 indexes_config.collection_commit,
+                global_offset,
             )
             .with_context(|| format!("Cannot load {collection_id:?} collection"))?;
 

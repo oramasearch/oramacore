@@ -91,6 +91,7 @@ pub fn create_oramacore_config() -> OramacoreConfig {
                     slot_count_exp: 8,
                     slot_size_exp: 4,
                 },
+                force_commit: 4,
                 collection_commit: CollectionCommitConfig::default(),
             },
             analytics: None,
