@@ -45,6 +45,7 @@ impl DocumentStorage {
         })
     }
 
+    /*
     pub async fn insert_many(&self, docs: &[(DocumentId, ZeboDocument<'_>)]) -> Result<()> {
         if docs.is_empty() {
             return Ok(());
@@ -60,6 +61,7 @@ impl DocumentStorage {
 
         Ok(())
     }
+    */
 
     pub async fn remove(&self, ids: Vec<DocumentId>) {
         if !ids.is_empty() {
@@ -250,7 +252,7 @@ pub async fn migrate_to_zebo(data_dir: &PathBuf) -> Result<Zebo<1_000_000, PAGE_
 
 static ZERO: &[u8] = b"\0";
 
-pub struct ZeboDocument<'s>(Cow<'s, str>, Cow<'s, str>);
+pub struct ZeboDocument<'s>(pub Cow<'s, str>, pub Cow<'s, str>);
 
 impl zebo::Document for ZeboDocument<'_> {
     fn as_bytes(&self, v: &mut Vec<u8>) {
@@ -269,7 +271,7 @@ impl<'s> ZeboDocument<'s> {
         Self(id, content)
     }
 
-    fn from_bytes(bytes: Vec<u8>) -> Result<Self> {
+    pub fn from_bytes(bytes: Vec<u8>) -> Result<Self> {
         let mut parts = bytes.split(|b| *b == b'\0');
         let id = parts
             .next()

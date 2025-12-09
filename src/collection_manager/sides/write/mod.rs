@@ -1,4 +1,5 @@
 pub mod collection;
+pub mod collection_document_storage;
 mod collections;
 pub mod document_storage;
 mod embedding;
@@ -16,7 +17,7 @@ use std::{
     ops::Deref,
     path::PathBuf,
     sync::{
-        atomic::{AtomicU32, AtomicU64, Ordering},
+        atomic::{AtomicU32, Ordering},
         Arc,
     },
     time::Duration,
@@ -43,6 +44,7 @@ use embedding::{start_calculate_embedding_loop, MultiEmbeddingCalculationRequest
 
 pub use context::WriteSideContext;
 
+use crate::collection_manager::sides::write::collection_document_storage::CollectionDocumentStorage;
 use crate::collection_manager::sides::write::document_storage::ZeboDocument;
 use crate::lock::OramaAsyncLock;
 use crate::metrics::CollectionLabels;
@@ -137,12 +139,14 @@ pub struct WriteSideConfig {
 pub struct WriteSide {
     op_sender: OperationSender,
     collections: CollectionsWriter,
-    document_count: AtomicU64,
+    // This will not used anymore,
+    // because each collection has its own document storage
+    document_count: u64,
     data_dir: PathBuf,
     operation_counter: OramaAsyncLock<u64>,
     insert_batch_commit_size: u64,
 
-    document_storage: DocumentStorage,
+    document_storage: Arc<DocumentStorage>,
     system_prompts: SystemPromptInterface,
     training_sets: TrainingSetInterface,
     tools: ToolsRuntime,
@@ -196,7 +200,7 @@ impl WriteSide {
             embedding_queue_limit as usize,
         );
 
-        let document_count = AtomicU64::new(0);
+        let mut document_count = 0;
 
         let write_side_info_path = data_dir.join("info.json");
         let r = BufferedFile::open(write_side_info_path)
@@ -204,7 +208,7 @@ impl WriteSide {
 
         let op_sender = if let Ok(info) = r {
             let WriteSideInfo::V1(info) = info;
-            document_count.store(info.document_count, Ordering::Relaxed);
+            document_count = info.document_count;
             op_sender_creator
                 .create(info.offset)
                 .await
@@ -216,6 +220,11 @@ impl WriteSide {
                 .context("Cannot create sender")?
         };
 
+        let document_storage = DocumentStorage::try_new(data_dir.join("documents"))
+            .await
+            .context("Cannot create document storage")?;
+        let document_storage = Arc::new(document_storage);
+
         let context = WriteSideContext {
             python_service: python_service.clone(),
             embedding_sender: sx,
@@ -223,6 +232,7 @@ impl WriteSide {
             nlp_service,
             automatic_embeddings_selector,
             llm_service,
+            global_document_storage: document_storage.clone(),
         };
 
         let kv_op_sender = context.op_sender.clone();
@@ -243,13 +253,9 @@ impl WriteSide {
         let tools = ToolsRuntime::new(kv.clone(), context.llm_service.clone());
 
         let collections_writer =
-            CollectionsWriter::try_load(collections_writer_config, context.clone())
+            CollectionsWriter::try_load(collections_writer_config, context.clone(), document_count)
                 .await
                 .context("Cannot load collections")?;
-
-        let document_storage = DocumentStorage::try_new(data_dir.join("documents"))
-            .await
-            .context("Cannot create document storage")?;
 
         let (stop_done_sender, stop_done_receiver) = tokio::sync::mpsc::channel(1);
         let (stop_sender, _) = tokio::sync::broadcast::channel(1);
@@ -345,11 +351,8 @@ impl WriteSide {
         output.1.context("Cannot commit kv")?;
 
         let offset = self.op_sender.get_offset();
-        // This load is not atomic with the commit.
-        // This means, we save a document count possible higher.
-        // Anyway it is not a problem, because the document count is only used for the document id generation
-        // So, if something goes wrong, we save an higher number, and this is ok.
-        let document_count = self.document_count.load(Ordering::Relaxed);
+
+        let document_count = self.document_count;
         let info = WriteSideInfo::V1(WriteSideInfoV1 {
             document_count,
             offset,
@@ -374,7 +377,7 @@ impl WriteSide {
         self.write_operation_counter.fetch_add(1, Ordering::Relaxed);
         let res = self
             .collections
-            .create_collection(option, self.op_sender.clone())
+            .create_collection(option, self.op_sender.clone(), self.document_count)
             .await;
         self.write_operation_counter.fetch_sub(1, Ordering::Relaxed);
 
@@ -484,7 +487,10 @@ impl WriteSide {
             let mut index_operation_batch = Vec::with_capacity(document_count * 10);
             let mut processed_count = -1;
 
-            let mut stream = self.document_storage.stream_documents(document_ids).await;
+            let collection_document_storage = collection.get_document_storage();
+            let mut stream = collection_document_storage
+                .stream_documents(document_ids)
+                .await;
             while let Some((doc_id, doc)) = stream.next().await {
                 processed_count += 1;
                 if processed_count % 100 == 0 {
@@ -724,8 +730,13 @@ impl WriteSide {
         });
 
         debug!("Inserting documents {}", document_count);
+        let collection_document_storage = collection.get_document_storage();
         let doc_ids = self
-            .add_documents_to_storage(&mut document_list, target_index_id)
+            .add_documents_to_storage(
+                collection_document_storage,
+                &mut document_list,
+                target_index_id,
+            )
             .await
             .context("Cannot insert documents into document storage")?;
         debug!("Document inserted");
@@ -809,6 +820,8 @@ impl WriteSide {
                 .await?;
         }
 
+        let mut collection_document_storage = collection.get_document_storage();
+
         let target_index_id = index.get_runtime_index_id().unwrap_or(index_id);
 
         // Prepare document ID mapping
@@ -865,7 +878,9 @@ impl WriteSide {
         let mut index_operation_batch = Vec::with_capacity(document_count * 10);
         let mut docs_to_remove = Vec::with_capacity(document_count);
 
-        let mut doc_stream = self.document_storage.stream_documents(document_ids).await;
+        let mut doc_stream = collection_document_storage
+            .stream_documents(document_ids)
+            .await;
         let mut processed_count = -1;
 
         while let Some((doc_id, doc)) = doc_stream.next().await {
@@ -887,6 +902,7 @@ impl WriteSide {
             // Check for pending write operations and yield if needed
             if self.write_operation_counter.load(Ordering::Relaxed) > 0 {
                 drop(pin_rules_writer);
+                let _ = collection_document_storage;
                 drop(index);
                 drop(collection);
 
@@ -900,6 +916,7 @@ impl WriteSide {
                     Some(index) => index,
                     None => return Err(WriteError::IndexNotFound(collection_id, index_id)),
                 };
+                collection_document_storage = collection.get_document_storage();
                 pin_rules_writer = collection.get_pin_rule_writer("update_documents").await;
             }
 
@@ -908,12 +925,11 @@ impl WriteSide {
                     if let Some(delta) = documents.remove(doc_id_str) {
                         let new_document = merge(v, delta);
 
-                        let doc_id = self.document_count.fetch_add(1, Ordering::Relaxed);
-                        let doc_id = DocumentId(doc_id);
+                        let doc_id = collection_document_storage.get_next_document_id();
 
                         let doc_str = serde_json::to_string(&doc.inner)
                             .context("Cannot serialize document")?;
-                        self.document_storage
+                        collection_document_storage
                             .insert_many(&[(
                                 doc_id,
                                 ZeboDocument::new(Cow::Borrowed(doc_id_str), Cow::Owned(doc_str)),
@@ -1039,7 +1055,9 @@ impl WriteSide {
 
         let document_ids = collection.get_document_ids().await;
 
-        let stream = self.document_storage.stream_documents(document_ids).await;
+        let document_storage = collection.get_document_storage();
+
+        let stream = document_storage.stream_documents(document_ids).await;
         let docs = stream
             .filter_map(|(_, doc)| {
                 let inner = doc.inner;
@@ -1083,6 +1101,7 @@ impl WriteSide {
 
     async fn add_documents_to_storage(
         self: &WriteSide,
+        collection_document_storage: &CollectionDocumentStorage,
         document_list: &mut DocumentList,
         target_index_id: IndexId,
     ) -> Result<Vec<DocumentId>> {
@@ -1100,7 +1119,7 @@ impl WriteSide {
             }
 
             if index % batch_size == 0 && !batch.is_empty() {
-                self.document_storage
+                collection_document_storage
                     .insert_many(&docs)
                     .await
                     .context("Cannot inser document into document storage")?;
@@ -1111,8 +1130,6 @@ impl WriteSide {
                 ));
                 batch = Vec::with_capacity(batch_size);
             }
-
-            let doc_id = self.document_count.fetch_add(1, Ordering::Relaxed);
 
             // We try to guess the document id from the document
             // Eventually, we generate a new one
@@ -1134,7 +1151,7 @@ impl WriteSide {
                 serde_json::Value::String(doc_id_str.clone()),
             );
 
-            let doc_id = DocumentId(doc_id);
+            let doc_id = collection_document_storage.get_next_document_id();
             doc_ids.push(doc_id);
 
             batch.push((
@@ -1158,7 +1175,7 @@ impl WriteSide {
                 DocumentStorageWriteOperation::InsertDocuments(batch),
             ));
 
-            self.document_storage
+            collection_document_storage
                 .insert_many(&docs)
                 .await
                 .context("Cannot inser document into document storage")?;

@@ -1,5 +1,6 @@
 use anyhow::Result;
 use serde_json::json;
+use tracing::info;
 
 use crate::tests::utils::{init_log, TestContext};
 
@@ -25,6 +26,7 @@ async fn test_list_documents() -> Result<()> {
         .await
         .unwrap();
 
+    info!("Documents inserted, listing documents...");
     let docs = test_context
         .writer
         .list_document(
@@ -32,6 +34,7 @@ async fn test_list_documents() -> Result<()> {
             collection_client.collection_id,
         )
         .await?;
+    info!("Done {:?}", docs);
     assert_eq!(docs.len(), document_count);
 
     Ok(())
