@@ -1,5 +1,6 @@
 mod analytics;
 mod collection;
+mod collection_document_storage;
 mod collections;
 mod context;
 pub mod document_storage;
@@ -143,7 +144,7 @@ pub enum ReadError {
 
 pub struct ReadSide {
     collections: CollectionsReader,
-    document_storage: DocumentStorage,
+    _global_document_storage: Arc<DocumentStorage>,
     operation_counter: OramaAsyncLock<u64>,
     insert_batch_commit_size: u64,
     data_dir: PathBuf,
@@ -180,11 +181,12 @@ impl ReadSide {
         local_gpu_manager: Arc<LocalGPUManager>,
         python_service: Arc<PythonService>,
     ) -> Result<Arc<Self>> {
-        let mut document_storage = DocumentStorage::try_new(DocumentStorageConfig {
+        let document_storage = DocumentStorage::try_new(DocumentStorageConfig {
             data_dir: config.config.data_dir.join("docs"),
         })
         .await
         .context("Cannot create document storage")?;
+        let global_document_storage = Arc::new(document_storage);
 
         let insert_batch_commit_size = config.config.insert_batch_commit_size;
         let commit_interval = config.config.commit_interval;
@@ -197,11 +199,14 @@ impl ReadSide {
             notifier = Some(n);
         }
 
+        let zebo_info = global_document_storage.get_zebo_info().await?;
         let context = ReadSideContext {
             python_service: python_service.clone(),
             nlp_service: nlp_service.clone(),
             llm_service: llm_service.clone(),
             notifier,
+            global_document_storage: global_document_storage.clone(),
+            first_non_global_doc_id: zebo_info.document_count,
         };
 
         let read_info: Result<ReadInfo> = BufferedFile::open(data_dir.join("read.info"))
@@ -219,9 +224,6 @@ impl ReadSide {
         let collections_reader = CollectionsReader::try_load(context, config.config, last_offset)
             .await
             .context("Cannot load collections")?;
-        document_storage
-            .load()
-            .context("Cannot load document storage")?;
 
         let kv = KV::try_load(KVConfig {
             data_dir: data_dir.join("kv"),
@@ -249,7 +251,7 @@ impl ReadSide {
 
         let read_side = ReadSide {
             collections: collections_reader,
-            document_storage,
+            _global_document_storage: global_document_storage,
             operation_counter: OramaAsyncLock::new("operation_counter", Default::default()),
             insert_batch_commit_size,
             live_offset: OramaAsyncLock::new("live_offset", last_offset),
@@ -331,7 +333,7 @@ impl ReadSide {
 
         // Pass force parameter to collections commit
         let min_offset = self.collections.commit(force).await?;
-        self.document_storage
+        self._global_document_storage
             .commit()
             .await
             .context("Cannot commit document storage")?;
@@ -465,8 +467,9 @@ impl ReadSide {
                 // Pass offset to collection - it handles per-collection tracking internally
                 collection.update(offset, collection_operation).await?;
             }
+            #[allow(deprecated)]
             WriteOperation::DocumentStorage(op) => {
-                self.document_storage
+                self._global_document_storage
                     .update(op)
                     .await
                     .context("Cannot update document storage")?;
@@ -519,7 +522,7 @@ impl ReadSide {
 
         let search = Search::new(
             &collection,
-            &self.document_storage,
+            // &self.global_document_storage,
             self.analytics_storage.as_ref(),
             request,
         );

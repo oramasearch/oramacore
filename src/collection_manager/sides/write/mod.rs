@@ -46,6 +46,7 @@ pub use context::WriteSideContext;
 
 use crate::collection_manager::sides::write::collection_document_storage::CollectionDocumentStorage;
 use crate::collection_manager::sides::write::document_storage::ZeboDocument;
+use crate::collection_manager::sides::{CollectionWriteOperation, DocumentStorageWriteOperation};
 use crate::lock::OramaAsyncLock;
 use crate::metrics::CollectionLabels;
 use crate::python::embeddings::Model;
@@ -60,7 +61,7 @@ use crate::{
     collection_manager::sides::{
         system_prompts::CollectionSystemPromptsInterface,
         write::jwt_manager::{JwtConfig, JwtManager},
-        DocumentStorageWriteOperation, DocumentToInsert, ReplaceIndexReason, WriteOperation,
+        DocumentToInsert, ReplaceIndexReason, WriteOperation,
     },
     metrics::document_insertion::DOCUMENTS_INSERTION_TIME,
     types::{
@@ -647,10 +648,13 @@ impl WriteSide {
             let old_doc_ids = old_index.get_document_ids().await;
             self.context
                 .op_sender
-                .send(WriteOperation::DocumentStorage(
-                    DocumentStorageWriteOperation::DeleteDocuments {
-                        doc_ids: old_doc_ids,
-                    },
+                .send(WriteOperation::Collection(
+                    collection_id,
+                    CollectionWriteOperation::DocumentStorage(
+                        DocumentStorageWriteOperation::DeleteDocuments {
+                            doc_ids: old_doc_ids,
+                        },
+                    ),
                 ))
                 .await
                 .context("Cannot send operation to delete old index documents")?;
@@ -735,6 +739,7 @@ impl WriteSide {
             .add_documents_to_storage(
                 collection_document_storage,
                 &mut document_list,
+                collection_id,
                 target_index_id,
             )
             .await
@@ -938,16 +943,19 @@ impl WriteSide {
                             .context("Cannot insert document into document storage")?;
 
                         self.op_sender
-                            .send(WriteOperation::DocumentStorage(
-                                DocumentStorageWriteOperation::InsertDocument {
-                                    doc_id,
-                                    doc: DocumentToInsert(
-                                        new_document
-                                            .clone()
-                                            .into_raw(format!("{target_index_id}:{doc_id_str}"))
-                                            .expect("Cannot get raw document"),
-                                    ),
-                                },
+                            .send(WriteOperation::Collection(
+                                collection_id,
+                                CollectionWriteOperation::DocumentStorage(
+                                    DocumentStorageWriteOperation::InsertDocument {
+                                        doc_id,
+                                        doc: DocumentToInsert(
+                                            new_document
+                                                .clone()
+                                                .into_raw(format!("{target_index_id}:{doc_id_str}"))
+                                                .expect("Cannot get raw document"),
+                                        ),
+                                    },
+                                ),
                             ))
                             .await
                             .context("Cannot send document storage operation")?;
@@ -1103,6 +1111,7 @@ impl WriteSide {
         self: &WriteSide,
         collection_document_storage: &CollectionDocumentStorage,
         document_list: &mut DocumentList,
+        collection_id: CollectionId,
         target_index_id: IndexId,
     ) -> Result<Vec<DocumentId>> {
         let document_count = document_list.len();
@@ -1125,8 +1134,11 @@ impl WriteSide {
                     .context("Cannot inser document into document storage")?;
                 docs.clear();
 
-                insert_document_batch.push(WriteOperation::DocumentStorage(
-                    DocumentStorageWriteOperation::InsertDocuments(batch),
+                insert_document_batch.push(WriteOperation::Collection(
+                    collection_id,
+                    CollectionWriteOperation::DocumentStorage(
+                        DocumentStorageWriteOperation::InsertDocuments(batch),
+                    ),
                 ));
                 batch = Vec::with_capacity(batch_size);
             }
@@ -1171,8 +1183,11 @@ impl WriteSide {
         }
 
         if !batch.is_empty() {
-            insert_document_batch.push(WriteOperation::DocumentStorage(
-                DocumentStorageWriteOperation::InsertDocuments(batch),
+            insert_document_batch.push(WriteOperation::Collection(
+                collection_id,
+                CollectionWriteOperation::DocumentStorage(
+                    DocumentStorageWriteOperation::InsertDocuments(batch),
+                ),
             ));
 
             collection_document_storage

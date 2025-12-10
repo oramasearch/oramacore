@@ -381,10 +381,13 @@ impl Index {
             old_document_id = Some(old_doc_id);
 
             // Remove the old document
-            index_operation_batch.push(WriteOperation::DocumentStorage(
-                DocumentStorageWriteOperation::DeleteDocuments {
-                    doc_ids: vec![old_doc_id],
-                },
+            index_operation_batch.push(WriteOperation::Collection(
+                self.collection_id,
+                CollectionWriteOperation::DocumentStorage(
+                    DocumentStorageWriteOperation::DeleteDocuments {
+                        doc_ids: vec![old_doc_id],
+                    },
+                ),
             ));
             index_operation_batch.push(WriteOperation::Collection(
                 self.collection_id,
@@ -487,10 +490,13 @@ impl Index {
                 .context("Cannot send operation")?;
             self.context
                 .op_sender
-                .send(WriteOperation::DocumentStorage(
-                    DocumentStorageWriteOperation::DeleteDocuments {
-                        doc_ids: doc_ids.clone(),
-                    },
+                .send(WriteOperation::Collection(
+                    self.collection_id,
+                    CollectionWriteOperation::DocumentStorage(
+                        DocumentStorageWriteOperation::DeleteDocuments {
+                            doc_ids: doc_ids.clone(),
+                        },
+                    ),
                 ))
                 .await
                 .context("Cannot send operation")?;

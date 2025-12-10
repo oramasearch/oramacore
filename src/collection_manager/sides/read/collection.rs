@@ -26,7 +26,8 @@ use crate::{
     ai::advanced_autoquery::{AdvancedAutoQuery, AdvancedAutoQuerySteps, QueryMappedSearchResult},
     collection_manager::sides::{
         read::{
-            analytics::SearchAnalyticEventOrigin, context::ReadSideContext,
+            analytics::SearchAnalyticEventOrigin,
+            collection_document_storage::CollectionDocumentStorage, context::ReadSideContext,
             CommittedDateFieldStats, CommittedGeoPointFieldStats, CommittedStringFieldStats,
             ReadError, UncommittedDateFieldStats, UncommittedGeoPointFieldStats,
         },
@@ -145,6 +146,8 @@ pub struct CollectionReader {
     last_commit_time: OramaSyncLock<Instant>,
 
     pin_rules_reader: OramaAsyncLock<PinRulesReader<DocumentId>>,
+
+    document_storage: Arc<CollectionDocumentStorage>,
 }
 
 impl CollectionReader {
@@ -160,6 +163,14 @@ impl CollectionReader {
         offload_config: OffloadFieldConfig,
         commit_config: CollectionCommitConfig,
     ) -> Result<Self> {
+        let document_storage = CollectionDocumentStorage::new(
+            context.global_document_storage.clone(),
+            data_dir.join("document_storage"),
+            DocumentId(context.first_non_global_doc_id),
+            id,
+        )?;
+        let document_storage = Arc::new(document_storage);
+
         Ok(Self {
             id,
             description,
@@ -202,6 +213,8 @@ impl CollectionReader {
             pin_rules_reader: OramaAsyncLock::new("pin_rules_reader", PinRulesReader::empty()),
 
             data_dir,
+
+            document_storage,
         })
     }
 
@@ -289,6 +302,14 @@ impl CollectionReader {
 
         let document_count_estimation = indexes.iter().map(|i| i.document_count()).sum::<u64>();
 
+        let document_storage = CollectionDocumentStorage::new(
+            context.global_document_storage.clone(),
+            data_dir.join("document_storage"),
+            DocumentId(context.first_non_global_doc_id),
+            dump.id,
+        )?;
+        let document_storage = Arc::new(document_storage);
+
         let s = Self {
             id: dump.id,
             description: dump.description,
@@ -334,6 +355,8 @@ impl CollectionReader {
             ),
 
             data_dir,
+
+            document_storage,
         };
 
         Ok(s)
@@ -373,6 +396,8 @@ impl CollectionReader {
 
         // Read current offset - this is what we actually processed
         let offset = **self.offset.read("commit").await;
+
+        self.document_storage.commit(offset).await?;
 
         let indexes_lock = self.indexes.read("commit").await;
         let mut index_ids = Vec::with_capacity(indexes_lock.len());
@@ -971,6 +996,12 @@ impl CollectionReader {
                     .context("Cannot apply pin rule operation")?;
                 drop(pin_rules_lock);
             }
+            CollectionWriteOperation::DocumentStorage(op) => {
+                self.document_storage
+                    .update(op)
+                    .await
+                    .context("Cannot apply document storage operation")?;
+            }
         }
 
         // Update offset after successful operation
@@ -993,6 +1024,10 @@ impl CollectionReader {
         }
 
         Ok(())
+    }
+
+    pub fn get_document_storage(&self) -> &CollectionDocumentStorage {
+        &self.document_storage
     }
 
     pub async fn stats(&self, _req: CollectionStatsRequest) -> Result<CollectionStats, ReadError> {

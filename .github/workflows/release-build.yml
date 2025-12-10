@@ -81,7 +81,6 @@ jobs:
             ./target/release/oramacore-compact
             ./target/release/oramacore-reader
             ./target/release/oramacore-writer
-            ./target/release/debug-dump
           token: ${{ secrets.GITHUB_TOKEN }}
 
   build-docker-OramaCore-x86_64:

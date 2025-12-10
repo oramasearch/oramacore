@@ -161,6 +161,11 @@ pub mod commit {
         "document_commit_calculation_time_sec",
         Empty
     );
+    create_time_histogram!(
+        COLLECTION_DOCUMENT_COMMIT_CALCULATION_TIME,
+        "collection_document_commit_calculation_time_sec",
+        CollectionCommitLabels
+    );
 }
 
 pub mod operations {

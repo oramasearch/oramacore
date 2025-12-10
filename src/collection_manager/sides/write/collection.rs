@@ -458,9 +458,14 @@ impl CollectionWriter {
                     self.id,
                     CollectionWriteOperation::DeleteIndex2 { index_id },
                 ),
-                WriteOperation::DocumentStorage(DocumentStorageWriteOperation::DeleteDocuments {
-                    doc_ids: doc_ids.clone(),
-                }),
+                WriteOperation::Collection(
+                    self.id,
+                    CollectionWriteOperation::DocumentStorage(
+                        DocumentStorageWriteOperation::DeleteDocuments {
+                            doc_ids: doc_ids.clone(),
+                        },
+                    ),
+                ),
             ])
             .await
             .context("Cannot send delete index operation")?;
@@ -487,9 +492,12 @@ impl CollectionWriter {
                     self.id,
                     CollectionWriteOperation::DeleteTempIndex { temp_index_id },
                 ),
-                WriteOperation::DocumentStorage(DocumentStorageWriteOperation::DeleteDocuments {
-                    doc_ids,
-                }),
+                WriteOperation::Collection(
+                    self.id,
+                    CollectionWriteOperation::DocumentStorage(
+                        DocumentStorageWriteOperation::DeleteDocuments { doc_ids },
+                    ),
+                ),
             ])
             .await
             .context("Cannot send delete temp index operation")?;

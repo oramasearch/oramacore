@@ -232,6 +232,7 @@ pub enum CollectionWriteOperation {
         mcp_description: Option<String>,
     },
     PinRule(PinRuleOperation<DocumentId>),
+    DocumentStorage(DocumentStorageWriteOperation),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -338,6 +339,8 @@ pub enum WriteOperation {
     },
     DeleteCollection(CollectionId),
     Collection(CollectionId, CollectionWriteOperation),
+    #[deprecated(note = "Use CollectionWriteOperation::DocumentStorage instead")]
+    #[allow(deprecated)]
     DocumentStorage(DocumentStorageWriteOperation),
 }
 
@@ -431,12 +434,33 @@ impl WriteOperation {
                 _,
                 CollectionWriteOperation::PinRule(PinRuleOperation::Delete(_)),
             ) => "delete_merchandising_pin_rule",
+            WriteOperation::Collection(
+                _,
+                CollectionWriteOperation::DocumentStorage(
+                    DocumentStorageWriteOperation::InsertDocument { .. },
+                ),
+            ) => "collection_document_storage_insert_document",
+            WriteOperation::Collection(
+                _,
+                CollectionWriteOperation::DocumentStorage(
+                    DocumentStorageWriteOperation::InsertDocuments { .. },
+                ),
+            ) => "collection_document_storage_insert_documents",
+            WriteOperation::Collection(
+                _,
+                CollectionWriteOperation::DocumentStorage(
+                    DocumentStorageWriteOperation::DeleteDocuments { .. },
+                ),
+            ) => "collection_document_storage_delete_documents",
+            #[allow(deprecated)]
             WriteOperation::DocumentStorage(DocumentStorageWriteOperation::InsertDocument {
                 ..
             }) => "document_storage_insert_document",
+            #[allow(deprecated)]
             WriteOperation::DocumentStorage(DocumentStorageWriteOperation::InsertDocuments(_)) => {
                 "document_storage_insert_documents"
             }
+            #[allow(deprecated)]
             WriteOperation::DocumentStorage(DocumentStorageWriteOperation::DeleteDocuments {
                 ..
             }) => "document_storage_delete_documents",

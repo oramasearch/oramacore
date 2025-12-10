@@ -436,6 +436,8 @@ async fn test_offload_vector_field() {
         "Field should be loaded again after search"
     );
 
+    println!("--------\n\n----\n\n");
+
     let search_result = wait_for(&collection_client, |collection_client| {
         async move {
             // Verify field still works correctly with different search

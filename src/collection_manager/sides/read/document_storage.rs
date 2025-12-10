@@ -1,11 +1,13 @@
-use itertools::Itertools;
 use std::{borrow::Cow, fmt::Debug, path::PathBuf, sync::Arc, time::Duration};
 use tokio::time::{sleep, timeout};
 use tracing::{debug, error, info, trace, warn};
 use zebo::{Zebo, ZeboInfo};
 
+#[allow(deprecated)]
+use crate::collection_manager::sides::DocumentStorageWriteOperation;
+
 use crate::{
-    collection_manager::sides::{DocumentStorageWriteOperation, DocumentToInsert},
+    collection_manager::sides::DocumentToInsert,
     lock::OramaAsyncLock,
     metrics::{commit::DOCUMENT_COMMIT_CALCULATION_TIME, Empty},
     types::{DocumentId, RawJSONDocument},
@@ -44,35 +46,24 @@ impl CommittedDiskDocumentStorage {
     async fn get_documents_by_ids(
         &self,
         doc_ids: &[DocumentId],
-    ) -> Result<Vec<Option<Arc<RawJSONDocument>>>> {
+        result: &mut Vec<(DocumentId, Arc<RawJSONDocument>)>,
+    ) -> Result<()> {
         trace!(doc_len=?doc_ids.len(), "Read document");
 
         let zebo = self.zebo.read("get_documents_by_ids").await;
         let output = zebo
             .get_documents(doc_ids.to_vec())
-            .context("Cannot get documents from zebo")?;
-        let output: Result<Vec<_>, zebo::ZeboError> = output.collect();
+            .context("Cannot get documents from zebo")?
+            .filter_map(|r| {
+                let (id, doc) = r.ok()?;
+                let doc = ZeboDocument::from_bytes(doc).ok()?;
+                let doc = doc.as_raw_json_doc().ok()?;
+                Some((id, doc))
+            });
+        result.extend(output);
         drop(zebo);
 
-        let output = output.context("Failed to got documents")?;
-        let mut output: Vec<_> = output
-            .into_iter()
-            .map(|d| {
-                let doc = ZeboDocument::from_bytes(d.1).ok();
-                (d.0, doc)
-            })
-            .collect();
-        output.sort_by_key(|d| doc_ids.iter().find_position(|dd| **dd == d.0));
-
-        let output: Vec<_> = output
-            .into_iter()
-            .map(|(_, d)| match d {
-                None => None,
-                Some(d) => d.as_raw_json_doc().ok(),
-            })
-            .collect();
-
-        Ok(output)
+        Ok(())
     }
 
     async fn apply(
@@ -162,6 +153,7 @@ impl DocumentStorage {
         })
     }
 
+    #[allow(deprecated)]
     pub async fn update(&self, op: DocumentStorageWriteOperation) -> Result<()> {
         match op {
             DocumentStorageWriteOperation::InsertDocument { doc_id, doc } => {
@@ -210,11 +202,11 @@ impl DocumentStorage {
         zebo.get_info().context("Cannot get zebo info")
     }
 
-    #[tracing::instrument(skip(self, doc_ids))]
     pub async fn get_documents_by_ids(
         &self,
         mut doc_ids: Vec<DocumentId>,
-    ) -> Result<Vec<Option<Arc<RawJSONDocument>>>> {
+        result: &mut Vec<(DocumentId, Arc<RawJSONDocument>)>,
+    ) -> Result<()> {
         let uncommitted_document_deletions = self
             .uncommitted_document_deletions
             .read("get_documents_by_ids")
@@ -224,47 +216,28 @@ impl DocumentStorage {
 
         trace!("Get from uncommitted documents");
         let uncommitted = self.uncommitted.read("get_documents_by_ids").await;
-        let uncommitted: Vec<_> = doc_ids
+        let uncommitted_docs: Vec<_> = doc_ids
             .iter()
-            .map(|doc_id| uncommitted.iter().find(|i| i.0 == *doc_id).cloned())
+            .filter_map(|doc_id| {
+                uncommitted
+                    .iter()
+                    .find(|i| i.0 == *doc_id)
+                    .map(|(id, doc)| (*id, doc.clone()))
+            })
             .collect();
+        let doc_ids_found_in_uncommitted: Vec<_> = uncommitted.iter().map(|(id, _)| *id).collect();
+        result.extend(uncommitted_docs);
+        drop(uncommitted);
         trace!("Get from uncommitted documents done");
 
         debug!("Get from committed documents");
-        let doc_ids_to_find_in_committed: Vec<_> = doc_ids
-            .iter()
-            .filter(|id| {
-                uncommitted
-                    .iter()
-                    .find(|p| match p {
-                        Some((uncommitted_id, _)) => *uncommitted_id == **id,
-                        None => false,
-                    })
-                    .is_none()
-            })
-            .copied()
-            .collect();
-        let committed = self
-            .committed
-            .get_documents_by_ids(&doc_ids_to_find_in_committed)
+        doc_ids.retain(|id| !doc_ids_found_in_uncommitted.contains(id));
+        let doc_ids_to_find_in_committed = doc_ids;
+        self.committed
+            .get_documents_by_ids(&doc_ids_to_find_in_committed, result)
             .await?;
 
-        let mut result = Vec::with_capacity(doc_ids.len());
-        for (i, doc_id) in doc_ids.iter().enumerate() {
-            let committed = committed.get(i).cloned().flatten();
-            let uncommitted = uncommitted.get(i).cloned().flatten();
-
-            if let Some((_, doc)) = uncommitted {
-                result.push(Some(doc));
-            } else {
-                if committed.is_none() {
-                    warn!("Document {:?} not found", doc_id);
-                }
-                result.push(committed);
-            }
-        }
-
-        Ok(result)
+        Ok(())
     }
 
     pub async fn commit(&self) -> Result<()> {
@@ -294,10 +267,6 @@ impl DocumentStorage {
 
         info!("Documents committed");
 
-        Ok(())
-    }
-
-    pub fn load(&mut self) -> Result<()> {
         Ok(())
     }
 }
@@ -352,7 +321,8 @@ pub async fn migrate_to_zebo(data_dir: &PathBuf) -> Result<Zebo<1_000_000, PAGE_
 
 static ZERO: &[u8] = b"\0";
 
-enum ZeboDocument<'s> {
+#[derive(Debug)]
+pub enum ZeboDocument<'s> {
     Split(Cow<'s, str>, Cow<'s, str>),
     FromJSONDoc(Arc<RawJSONDocument>),
 }
@@ -387,7 +357,7 @@ impl zebo::Document for ZeboDocument<'_> {
 }
 
 impl ZeboDocument<'_> {
-    fn from_bytes(bytes: Vec<u8>) -> Result<Self> {
+    pub fn from_bytes(bytes: Vec<u8>) -> Result<Self> {
         let mut parts = bytes.split(|b| *b == b'\0');
         let id = parts
             .next()
@@ -402,7 +372,7 @@ impl ZeboDocument<'_> {
         Ok(ZeboDocument::Split(Cow::Owned(id), Cow::Owned(data)))
     }
 
-    fn as_raw_json_doc(&self) -> Result<Arc<RawJSONDocument>> {
+    pub fn as_raw_json_doc(&self) -> Result<Arc<RawJSONDocument>> {
         match self {
             Self::Split(id, json) => {
                 let inner = serde_json::value::RawValue::from_string(json.to_string())?;
