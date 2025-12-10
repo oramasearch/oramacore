@@ -190,8 +190,6 @@ impl CollectionDocumentStorage {
         &self,
         mut ids: Vec<DocumentId>,
     ) -> Result<Vec<(DocumentId, Arc<RawJSONDocument>)>> {
-        println!("Getting documents by ids: {ids:?}");
-
         let mut results: Vec<(DocumentId, Arc<RawJSONDocument>)> = Vec::with_capacity(ids.len());
 
         let uncommitted_document_deletions =
@@ -201,10 +199,6 @@ impl CollectionDocumentStorage {
 
         let (uncommitted_ids, local_ids, global_ids) =
             self.split_into_uncommitted_local_and_global(ids);
-
-        println!(
-            "Uncommitted ids: {uncommitted_ids:?}, Local ids: {local_ids:?}, global ids: {global_ids:?}"
-        );
 
         // Get global documents
         {
@@ -232,8 +226,6 @@ impl CollectionDocumentStorage {
             self.uncommitted
                 .get_documents_by_ids(&uncommitted_ids, &mut results)?;
         }
-
-        println!("Got documents: {results:?}");
 
         Ok(results)
     }
