@@ -161,8 +161,9 @@ impl CollectionDocumentStorage {
             None => 0,
         };
 
-        let (global_ids, local_ids): (Vec<DocumentId>, Vec<DocumentId>) =
-            ids.into_iter().partition(|id| id.0 < first_non_global_doc_id);
+        let (global_ids, local_ids): (Vec<DocumentId>, Vec<DocumentId>) = ids
+            .into_iter()
+            .partition(|id| id.0 < first_non_global_doc_id);
 
         let uncommitted = self
             .uncommitted
@@ -172,9 +173,9 @@ impl CollectionDocumentStorage {
         let first_uncommitted = uncommitted.first().map(|(id, _)| id.0);
 
         let (uncommitted_ids, committed_ids) = if let Some(first_uncommitted) = first_uncommitted {
-            local_ids.into_iter().partition(|id| {
-                return id.0 >= first_uncommitted;
-            })
+            local_ids
+                .into_iter()
+                .partition(|id| id.0 >= first_uncommitted)
         } else {
             (vec![], local_ids)
         };

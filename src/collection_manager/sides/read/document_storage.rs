@@ -133,6 +133,7 @@ pub struct DocumentStorage {
     uncommitted: OramaAsyncLock<Vec<(DocumentId, Arc<RawJSONDocument>)>>,
     committed: CommittedDiskDocumentStorage,
     uncommitted_document_deletions: OramaAsyncLock<Vec<DocumentId>>,
+    last_document_id: OramaAsyncLock<Option<DocumentId>>,
 }
 
 impl DocumentStorage {
@@ -150,6 +151,7 @@ impl DocumentStorage {
                 "uncommitted_document_deletions",
                 Default::default(),
             ),
+            last_document_id: OramaAsyncLock::new("last_document_id", None),
         })
     }
 
@@ -158,10 +160,14 @@ impl DocumentStorage {
         match op {
             DocumentStorageWriteOperation::InsertDocument { doc_id, doc } => {
                 self.add_document(doc_id, doc).await;
+                let mut lock = self.last_document_id.write("update").await;
+                **lock = None;
                 Ok(())
             }
             DocumentStorageWriteOperation::InsertDocuments(docs) => {
                 self.add_documents(docs).await;
+                let mut lock = self.last_document_id.write("update").await;
+                **lock = None;
                 Ok(())
             }
             DocumentStorageWriteOperation::DeleteDocuments { doc_ids } => {
@@ -203,24 +209,41 @@ impl DocumentStorage {
     }
 
     pub async fn get_last_inserted_document_id(&self) -> Result<Option<DocumentId>> {
+        let lock = self
+            .last_document_id
+            .read("get_last_inserted_document_id")
+            .await;
+        if let Some(doc_id) = lock.as_ref() {
+            return Ok(Some(*doc_id));
+        }
+        drop(lock);
+
         let zebo = self
             .committed
             .zebo
             .read("get_last_inserted_document_id")
             .await;
-        let last_inserted_document_id = zebo.get_last_inserted_document_id()
+        let last_inserted_document_id = zebo
+            .get_last_inserted_document_id()
             .context("Cannot get last inserted document ID")?;
 
-        let last_uncommitted_inserted_document_id = self.uncommitted
+        let last_uncommitted_inserted_document_id = self
+            .uncommitted
             .read("get_last_inserted_document_id")
             .await
             .last()
             .map(|(id, _)| *id);
 
-        let last = last_inserted_document_id.zip(last_uncommitted_inserted_document_id)
-            .map(|(committed_id, uncommitted_id)| {
-                committed_id.max(uncommitted_id)
-            });
+        let last = last_inserted_document_id
+            .zip(last_uncommitted_inserted_document_id)
+            .map(|(committed_id, uncommitted_id)| committed_id.max(uncommitted_id));
+
+        let mut lock = self
+            .last_document_id
+            .write("get_last_inserted_document_id")
+            .await;
+        **lock = last;
+        drop(lock);
 
         Ok(last)
     }
@@ -287,6 +310,9 @@ impl DocumentStorage {
         drop(uncommitted_lock);
 
         drop(m);
+
+        let mut lock = self.last_document_id.write("update").await;
+        **lock = None;
 
         info!("Documents committed");
 
