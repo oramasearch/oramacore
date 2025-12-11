@@ -761,7 +761,7 @@ impl WriteSide {
             .inner_process_documents(collection_id, index_id, document_list, doc_ids)
             .await
             .context("Cannot process documents")?;
-        info!("All documents are inserted");
+        info!("All documents are inserted: {}", document_count);
 
         drop(metric);
 

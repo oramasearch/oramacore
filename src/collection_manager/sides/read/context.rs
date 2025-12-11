@@ -15,5 +15,4 @@ pub struct ReadSideContext {
     pub llm_service: Arc<LLMService>,
     pub notifier: Option<Arc<Notifier>>,
     pub global_document_storage: Arc<DocumentStorage>,
-    pub first_non_global_doc_id: u64,
 }

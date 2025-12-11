@@ -96,7 +96,6 @@ pub struct CollectionDocumentStorage {
     uncommitted: UncommittedDocumentStorage,
     zebo: Arc<OramaAsyncLock<Zebo<1_000_000, PAGE_SIZE, DocumentId>>>,
     global_document_storage: Arc<DocumentStorage>,
-    first_non_global_doc_id: OramaSyncLock<DocumentId>,
     deleted_documents: OramaAsyncLock<Vec<DocumentId>>,
     collection_id: CollectionId,
 }
@@ -105,7 +104,6 @@ impl CollectionDocumentStorage {
     pub fn new(
         global_document_storage: Arc<DocumentStorage>,
         base_dir: PathBuf,
-        first_non_global_doc_id: DocumentId,
         collection_id: CollectionId,
     ) -> Result<Self> {
         let zebo_dir = base_dir.join("zebo");
@@ -117,14 +115,8 @@ impl CollectionDocumentStorage {
         Ok(Self {
             zebo,
             global_document_storage,
-            first_non_global_doc_id: OramaSyncLock::new(
-                "first_non_global_doc_id",
-                first_non_global_doc_id,
-            ),
             uncommitted: UncommittedDocumentStorage::new(),
-
             deleted_documents: OramaAsyncLock::new("deleted_documents", Vec::new()),
-
             collection_id,
         })
     }
@@ -152,22 +144,25 @@ impl CollectionDocumentStorage {
         Ok(())
     }
 
-    fn split_into_uncommitted_local_and_global(
+    async fn split_into_uncommitted_local_and_global(
         &self,
         ids: Vec<DocumentId>,
-    ) -> (Vec<DocumentId>, Vec<DocumentId>, Vec<DocumentId>) {
-        let first_non_global_doc_id = self
-            .first_non_global_doc_id
-            .read("split_into_local_and_global")
-            .unwrap();
+    ) -> Result<(Vec<DocumentId>, Vec<DocumentId>, Vec<DocumentId>)> {
+        let last_inserted_id = self
+            .global_document_storage
+            .get_last_inserted_document_id()
+            .await
+            .context("Cannot get last inserted document ID")?;
+
+        let first_non_global_doc_id = match last_inserted_id {
+            // There are documents in global storage
+            Some(doc_id) => doc_id.0 + 1,
+            // No documents in global storage, all IDs are per-collection
+            None => 0,
+        };
+
         let (global_ids, local_ids): (Vec<DocumentId>, Vec<DocumentId>) =
-            ids.into_iter().partition(|id| {
-                if first_non_global_doc_id.0 == 0 {
-                    return false;
-                }
-                *id < **first_non_global_doc_id
-            });
-        drop(first_non_global_doc_id);
+            ids.into_iter().partition(|id| id.0 < first_non_global_doc_id);
 
         let uncommitted = self
             .uncommitted
@@ -176,14 +171,15 @@ impl CollectionDocumentStorage {
             .expect("Cannot lock uncommitted storage for split");
         let first_uncommitted = uncommitted.first().map(|(id, _)| id.0);
 
-        let (uncommitted_ids, committed_ids) = local_ids.into_iter().partition(|id| {
-            if let Some(first_uncommitted) = first_uncommitted {
+        let (uncommitted_ids, committed_ids) = if let Some(first_uncommitted) = first_uncommitted {
+            local_ids.into_iter().partition(|id| {
                 return id.0 >= first_uncommitted;
-            }
-            false
-        });
+            })
+        } else {
+            (vec![], local_ids)
+        };
 
-        (uncommitted_ids, committed_ids, global_ids)
+        Ok((uncommitted_ids, committed_ids, global_ids))
     }
 
     pub async fn get_documents_by_ids(
@@ -198,7 +194,7 @@ impl CollectionDocumentStorage {
         drop(uncommitted_document_deletions);
 
         let (uncommitted_ids, local_ids, global_ids) =
-            self.split_into_uncommitted_local_and_global(ids);
+            self.split_into_uncommitted_local_and_global(ids).await?;
 
         // Get global documents
         {

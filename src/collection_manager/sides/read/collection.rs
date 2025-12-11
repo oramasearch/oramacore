@@ -153,7 +153,7 @@ pub struct CollectionReader {
 impl CollectionReader {
     pub fn empty(
         data_dir: PathBuf,
-        id: CollectionId,
+        collection_id: CollectionId,
         description: Option<String>,
         mcp_description: Option<String>,
         default_locale: Locale,
@@ -166,13 +166,12 @@ impl CollectionReader {
         let document_storage = CollectionDocumentStorage::new(
             context.global_document_storage.clone(),
             data_dir.join("document_storage"),
-            DocumentId(context.first_non_global_doc_id),
-            id,
+            collection_id,
         )?;
         let document_storage = Arc::new(document_storage);
 
         Ok(Self {
-            id,
+            id: collection_id,
             description,
             mcp_description: OramaAsyncLock::new("collection_mcp_description", mcp_description),
             default_locale,
@@ -305,7 +304,6 @@ impl CollectionReader {
         let document_storage = CollectionDocumentStorage::new(
             context.global_document_storage.clone(),
             data_dir.join("document_storage"),
-            DocumentId(context.first_non_global_doc_id),
             dump.id,
         )?;
         let document_storage = Arc::new(document_storage);

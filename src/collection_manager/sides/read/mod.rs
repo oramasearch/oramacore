@@ -199,14 +199,12 @@ impl ReadSide {
             notifier = Some(n);
         }
 
-        let zebo_info = global_document_storage.get_zebo_info().await?;
         let context = ReadSideContext {
             python_service: python_service.clone(),
             nlp_service: nlp_service.clone(),
             llm_service: llm_service.clone(),
             notifier,
             global_document_storage: global_document_storage.clone(),
-            first_non_global_doc_id: zebo_info.document_count,
         };
 
         let read_info: Result<ReadInfo> = BufferedFile::open(data_dir.join("read.info"))

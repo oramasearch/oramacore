@@ -202,6 +202,29 @@ impl DocumentStorage {
         zebo.get_info().context("Cannot get zebo info")
     }
 
+    pub async fn get_last_inserted_document_id(&self) -> Result<Option<DocumentId>> {
+        let zebo = self
+            .committed
+            .zebo
+            .read("get_last_inserted_document_id")
+            .await;
+        let last_inserted_document_id = zebo.get_last_inserted_document_id()
+            .context("Cannot get last inserted document ID")?;
+
+        let last_uncommitted_inserted_document_id = self.uncommitted
+            .read("get_last_inserted_document_id")
+            .await
+            .last()
+            .map(|(id, _)| *id);
+
+        let last = last_inserted_document_id.zip(last_uncommitted_inserted_document_id)
+            .map(|(committed_id, uncommitted_id)| {
+                committed_id.max(uncommitted_id)
+            });
+
+        Ok(last)
+    }
+
     pub async fn get_documents_by_ids(
         &self,
         mut doc_ids: Vec<DocumentId>,
