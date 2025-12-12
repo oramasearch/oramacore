@@ -946,8 +946,9 @@ impl WriteSide {
                             .send(WriteOperation::Collection(
                                 collection_id,
                                 CollectionWriteOperation::DocumentStorage(
-                                    DocumentStorageWriteOperation::InsertDocument {
+                                    DocumentStorageWriteOperation::InsertDocumentWithDocIdStr {
                                         doc_id,
+                                        doc_id_str: doc_id_str.clone(),
                                         doc: DocumentToInsert(
                                             new_document
                                                 .clone()
@@ -1137,7 +1138,7 @@ impl WriteSide {
                 insert_document_batch.push(WriteOperation::Collection(
                     collection_id,
                     CollectionWriteOperation::DocumentStorage(
-                        DocumentStorageWriteOperation::InsertDocuments(batch),
+                        DocumentStorageWriteOperation::InsertDocumentsWithDocIdStr(batch),
                     ),
                 ));
                 batch = Vec::with_capacity(batch_size);
@@ -1168,6 +1169,7 @@ impl WriteSide {
 
             batch.push((
                 doc_id,
+                doc_id_str.clone(),
                 DocumentToInsert(
                     doc.clone()
                         .into_raw(format!("{target_index_id}:{doc_id_str}"))
@@ -1186,7 +1188,7 @@ impl WriteSide {
             insert_document_batch.push(WriteOperation::Collection(
                 collection_id,
                 CollectionWriteOperation::DocumentStorage(
-                    DocumentStorageWriteOperation::InsertDocuments(batch),
+                    DocumentStorageWriteOperation::InsertDocumentsWithDocIdStr(batch),
                 ),
             ));
 

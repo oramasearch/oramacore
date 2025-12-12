@@ -19,6 +19,7 @@ use oramacore_lib::{
     pin_rules::PinRulesReader,
 };
 use serde::{Deserialize, Serialize};
+use serde_json::{Map, Value};
 use tokio::time::Instant;
 use tracing::{debug, error, info, warn};
 
@@ -36,7 +37,7 @@ use crate::{
     },
     lock::{OramaAsyncLock, OramaAsyncLockReadGuard, OramaAsyncLockWriteGuard, OramaSyncLock},
     types::{
-        ApiKey, CollectionId, CollectionStatsRequest, DocumentId, FieldId, IndexId,
+        ApiKey, CollectionId, CollectionStatsRequest, Document, DocumentId, FieldId, IndexId,
         InteractionMessage, Number, OramaDate, Role,
     },
 };
@@ -1081,6 +1082,32 @@ impl CollectionReader {
             created_at: self.created_at,
             updated_at: **self.updated_at.read("stats").await,
         })
+    }
+
+    /// Retrieves multiple documents by their string document IDs in a single batch operation.
+    /// Returns a HashMap where keys are document ID strings and values are Document objects.
+    /// Missing document IDs are silently omitted from the result.
+    pub async fn batch_get_documents(
+        &self,
+        doc_id_strs: Vec<String>,
+    ) -> Result<HashMap<String, Document>, ReadError> {
+        // Retrieve raw documents from storage
+        let raw_docs = self
+            .document_storage
+            .get_documents_by_str_ids(doc_id_strs)
+            .await
+            .map_err(ReadError::Generic)?;
+
+        // Convert Arc<RawJSONDocument> to Document for API response
+        let mut result = HashMap::new();
+        for (doc_id_str, raw_doc) in raw_docs {
+            let inner: Map<String, Value> = serde_json::from_str(raw_doc.inner.get())
+                .context("Cannot deserialize document")
+                .map_err(ReadError::Generic)?;
+            result.insert(doc_id_str, Document { inner });
+        }
+
+        Ok(result)
     }
 
     pub async fn get_filterable_fields(

@@ -174,6 +174,26 @@ impl DocumentStorage {
                 self.delete_documents(doc_ids).await?;
                 Ok(())
             }
+            // New per-collection variants - should not reach global storage
+            DocumentStorageWriteOperation::InsertDocumentWithDocIdStr { doc_id, doc, .. } => {
+                self.add_document(doc_id, doc).await;
+                let mut lock = self.last_document_id.write("update").await;
+                **lock = None;
+                Ok(())
+            }
+            DocumentStorageWriteOperation::InsertDocumentsWithDocIdStr(docs) => {
+                let docs_without_str: Vec<(DocumentId, DocumentToInsert)> =
+                    docs.into_iter().map(|(id, _, doc)| (id, doc)).collect();
+                self.add_documents(docs_without_str).await;
+                let mut lock = self.last_document_id.write("update").await;
+                **lock = None;
+                Ok(())
+            }
+            DocumentStorageWriteOperation::DeleteDocumentsWithDocIdStr(doc_id_pairs) => {
+                let doc_ids: Vec<DocumentId> = doc_id_pairs.into_iter().map(|(id, _)| id).collect();
+                self.delete_documents(doc_ids).await?;
+                Ok(())
+            }
         }
     }
 

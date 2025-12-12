@@ -56,7 +56,7 @@ use crate::metrics::Empty;
 use crate::python::PythonService;
 use crate::types::CollectionId;
 use crate::types::{
-    ApiKey, CollectionStatsRequest, InteractionLLMConfig, SearchMode, SearchModeResult,
+    ApiKey, CollectionStatsRequest, Document, InteractionLLMConfig, SearchMode, SearchModeResult,
     SearchResult,
 };
 use crate::types::{IndexId, NLPSearchRequest};
@@ -376,6 +376,25 @@ impl ReadSide {
         collection.check_read_api_key(read_api_key, self.master_api_key)?;
 
         collection.stats(req).await
+    }
+
+    /// Retrieves multiple documents by their string IDs in a single batch operation.
+    /// Returns a HashMap where keys are document ID strings and values are Document objects.
+    /// Missing document IDs are silently omitted from the result.
+    pub async fn batch_get_documents(
+        &self,
+        read_api_key: ApiKey,
+        collection_id: CollectionId,
+        doc_id_strs: Vec<String>,
+    ) -> Result<HashMap<String, Document>, ReadError> {
+        let collection = self
+            .collections
+            .get_collection(collection_id)
+            .await
+            .ok_or_else(|| ReadError::NotFound(collection_id))?;
+        collection.check_read_api_key(read_api_key, self.master_api_key)?;
+
+        collection.batch_get_documents(doc_id_strs).await
     }
 
     pub async fn filterable_fields(

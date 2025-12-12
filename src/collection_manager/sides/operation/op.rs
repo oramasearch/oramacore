@@ -305,6 +305,14 @@ pub enum DocumentStorageWriteOperation {
     DeleteDocuments {
         doc_ids: Vec<DocumentId>,
     },
+    // New variants for per-collection storage with document_id_str
+    InsertDocumentWithDocIdStr {
+        doc_id: DocumentId,
+        doc_id_str: String,
+        doc: DocumentToInsert,
+    },
+    InsertDocumentsWithDocIdStr(Vec<(DocumentId, String, DocumentToInsert)>),
+    DeleteDocumentsWithDocIdStr(Vec<(DocumentId, String)>),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -452,6 +460,24 @@ impl WriteOperation {
                     DocumentStorageWriteOperation::DeleteDocuments { .. },
                 ),
             ) => "collection_document_storage_delete_documents",
+            WriteOperation::Collection(
+                _,
+                CollectionWriteOperation::DocumentStorage(
+                    DocumentStorageWriteOperation::InsertDocumentWithDocIdStr { .. },
+                ),
+            ) => "collection_document_storage_insert_document_with_doc_id_str",
+            WriteOperation::Collection(
+                _,
+                CollectionWriteOperation::DocumentStorage(
+                    DocumentStorageWriteOperation::InsertDocumentsWithDocIdStr { .. },
+                ),
+            ) => "collection_document_storage_insert_documents_with_doc_id_str",
+            WriteOperation::Collection(
+                _,
+                CollectionWriteOperation::DocumentStorage(
+                    DocumentStorageWriteOperation::DeleteDocumentsWithDocIdStr { .. },
+                ),
+            ) => "collection_document_storage_delete_documents_with_doc_id_str",
             #[allow(deprecated)]
             WriteOperation::DocumentStorage(DocumentStorageWriteOperation::InsertDocument {
                 ..
@@ -464,6 +490,18 @@ impl WriteOperation {
             WriteOperation::DocumentStorage(DocumentStorageWriteOperation::DeleteDocuments {
                 ..
             }) => "document_storage_delete_documents",
+            #[allow(deprecated)]
+            WriteOperation::DocumentStorage(
+                DocumentStorageWriteOperation::InsertDocumentWithDocIdStr { .. },
+            ) => "document_storage_insert_document_with_doc_id_str",
+            #[allow(deprecated)]
+            WriteOperation::DocumentStorage(
+                DocumentStorageWriteOperation::InsertDocumentsWithDocIdStr(_),
+            ) => "document_storage_insert_documents_with_doc_id_str",
+            #[allow(deprecated)]
+            WriteOperation::DocumentStorage(
+                DocumentStorageWriteOperation::DeleteDocumentsWithDocIdStr(_),
+            ) => "document_storage_delete_documents_with_doc_id_str",
         }
     }
 }
