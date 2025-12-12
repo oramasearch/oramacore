@@ -1,4 +1,4 @@
-use std::{net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
+use std::{collections::HashMap, net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
 
 use anyhow::{bail, Result};
 use axum::{response::sse::Event, Json};
@@ -30,8 +30,8 @@ use crate::{
     python::embeddings::Model,
     types::{
         ApiKey, CollectionId, CollectionStatsRequest, CreateCollection, CreateIndexRequest,
-        DescribeCollectionResponse, DocumentList, IndexId, InsertDocumentsResult, LanguageDTO,
-        ReplaceIndexRequest, SearchParams, SearchResult, TypeParsingStrategies,
+        DescribeCollectionResponse, Document, DocumentList, IndexId, InsertDocumentsResult,
+        LanguageDTO, ReplaceIndexRequest, SearchParams, SearchResult, TypeParsingStrategies,
         UpdateDocumentRequest, UpdateDocumentsResult, WriteApiKey,
     },
     web_server::HttpConfig,
@@ -596,6 +596,17 @@ impl TestCollectionClient {
             .await?;
 
         Ok(())
+    }
+
+    /// Batch retrieves documents by their string IDs for testing purposes.
+    pub async fn batch_get_documents(
+        &self,
+        doc_ids: Vec<String>,
+    ) -> Result<HashMap<String, Document>> {
+        self.reader
+            .batch_get_documents(self.read_api_key, self.collection_id, doc_ids)
+            .await
+            .map_err(|e| e.into())
     }
 
     fn generate_index_id(prefix: &str) -> IndexId {

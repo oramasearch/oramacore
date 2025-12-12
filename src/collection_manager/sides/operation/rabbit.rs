@@ -223,6 +223,7 @@ impl RabbitOperationSender {
                 WriteOperation::DeleteCollection(id) => Some(*id),
                 WriteOperation::CreateCollection { id, .. } => Some(*id),
                 WriteOperation::CreateCollection2 { id, .. } => Some(*id),
+                #[allow(deprecated)]
                 WriteOperation::KV(_) | WriteOperation::DocumentStorage(_) => None,
             };
 
@@ -267,6 +268,7 @@ impl RabbitOperationSender {
             WriteOperation::DeleteCollection(id) => Some(*id),
             WriteOperation::CreateCollection { id, .. } => Some(*id),
             WriteOperation::CreateCollection2 { id, .. } => Some(*id),
+            #[allow(deprecated)]
             WriteOperation::KV(_) | WriteOperation::DocumentStorage(_) => None,
         };
 

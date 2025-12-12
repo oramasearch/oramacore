@@ -6,7 +6,8 @@ use tokio::sync::mpsc::Sender;
 use crate::{
     ai::{automatic_embeddings_selector::AutomaticEmbeddingsSelector, llms::LLMService},
     collection_manager::sides::{
-        write::embedding::MultiEmbeddingCalculationRequest, OperationSender,
+        write::{document_storage::DocumentStorage, embedding::MultiEmbeddingCalculationRequest},
+        OperationSender,
     },
     python::PythonService,
 };
@@ -19,4 +20,5 @@ pub struct WriteSideContext {
     pub nlp_service: Arc<NLPService>,
     pub automatic_embeddings_selector: Arc<AutomaticEmbeddingsSelector>,
     pub llm_service: Arc<LLMService>,
+    pub global_document_storage: Arc<DocumentStorage>,
 }

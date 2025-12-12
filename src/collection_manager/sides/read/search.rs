@@ -20,7 +20,6 @@ use crate::{
             SearchAnalyticEventV1,
         },
         collection::ReadIndexesLockGuard,
-        document_storage::DocumentStorage,
         sort::sort_documents_in_groups,
         GroupValue, ReadError, SortContext,
     },
@@ -42,25 +41,23 @@ pub struct SearchRequest {
     pub interaction_id: Option<String>,
 }
 
-pub struct Search<'collection, 'document_storage, 'analytics_storage> {
+pub struct Search<'collection, 'analytics_storage> {
     collection: &'collection CollectionReader,
-    document_storage: &'document_storage DocumentStorage,
+    // document_storage: &'document_storage DocumentStorage,
     analytics_storage: Option<&'analytics_storage OramaCoreAnalytics>,
     request: SearchRequest,
 }
 
-impl<'collection, 'document_storage, 'analytics_storage>
-    Search<'collection, 'document_storage, 'analytics_storage>
-{
+impl<'collection, 'analytics_storage> Search<'collection, 'analytics_storage> {
     pub fn new(
         collection: &'collection CollectionReader,
-        document_storage: &'document_storage DocumentStorage,
+        // document_storage: &'document_storage DocumentStorage,
         analytics_storage: Option<&'analytics_storage OramaCoreAnalytics>,
         request: SearchRequest,
     ) -> Self {
         Self {
             collection,
-            document_storage,
+            // document_storage,
             analytics_storage,
             request,
         }
@@ -71,7 +68,6 @@ impl<'collection, 'document_storage, 'analytics_storage>
 
         let Self {
             collection,
-            document_storage,
             analytics_storage,
             request,
         } = self;
@@ -175,36 +171,45 @@ impl<'collection, 'document_storage, 'analytics_storage>
             )
             .await?;
 
+            let collection_document_storage = collection.get_document_storage();
+
             let groups: Vec<_> = futures::stream::iter(groups.into_iter())
                 .filter_map(|(k, ids)| async {
                     if ids.is_empty() {
                         return None;
                     }
 
-                    let docs = document_storage
+                    let docs = collection_document_storage
                         .get_documents_by_ids(ids.clone())
                         .await
                         .ok()?;
 
+                    let result = ids
+                        .into_iter()
+                        .take(group_by.max_results)
+                        .map(|id| {
+                            docs.iter()
+                                .find(|(doc_id, _)| doc_id == &id)
+                                .cloned()
+                                .map(|(id, doc)| {
+                                    let doc_id = doc.id.clone();
+                                    SearchResultHit {
+                                        id: doc_id.unwrap_or_default(),
+                                        score: *token_scores.get(&id).unwrap_or(&0.0),
+                                        document: Some(doc.clone()),
+                                    }
+                                })
+                                .unwrap_or_else(|| SearchResultHit {
+                                    id: Default::default(),
+                                    score: *token_scores.get(&id).unwrap_or(&0.0),
+                                    document: None,
+                                })
+                        })
+                        .collect();
+
                     Some(GroupedResult {
                         values: k.into_iter().map(|v| v.into()).collect(),
-                        result: docs
-                            .into_iter()
-                            .zip(ids.into_iter())
-                            .take(group_by.max_results)
-                            .map(|(document, doc_id)| {
-                                let id = document
-                                    .as_ref()
-                                    .and_then(|d| d.id.clone())
-                                    .unwrap_or_default();
-
-                                SearchResultHit {
-                                    id,
-                                    score: *token_scores.get(&doc_id).unwrap_or(&0.0),
-                                    document,
-                                }
-                            })
-                            .collect(),
+                        result,
                     })
                 })
                 .collect()
@@ -227,11 +232,13 @@ impl<'collection, 'document_storage, 'analytics_storage>
             .take(limit.0)
             .collect::<Vec<_>>();
 
-        let docs = document_storage
+        let collection_document_storage = collection.get_document_storage();
+        let docs = collection_document_storage
             .get_documents_by_ids(result.iter().map(|m| m.document_id).collect())
             .await?;
 
         trace!("Calculates hits");
+        /*
         let hits: Vec<_> = result
             .into_iter()
             .zip(docs)
@@ -246,6 +253,34 @@ impl<'collection, 'document_storage, 'analytics_storage>
                     document,
                 }
             })
+            .collect();
+        */
+
+        let hits = result
+            .into_iter()
+            .map(
+                |TokenScore {
+                     document_id: id,
+                     score,
+                 }| {
+                    docs.iter()
+                        .find(|(doc_id, _)| doc_id == &id)
+                        .cloned()
+                        .map(|(_, doc)| {
+                            let doc_id = doc.id.clone();
+                            SearchResultHit {
+                                id: doc_id.unwrap_or_default(),
+                                score,
+                                document: Some(doc),
+                            }
+                        })
+                        .unwrap_or_else(|| SearchResultHit {
+                            id: Default::default(),
+                            score,
+                            document: None,
+                        })
+                },
+            )
             .collect();
 
         drop(m);

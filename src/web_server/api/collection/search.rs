@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use axum::{
     extract::{Path, Query, State},
+    http::StatusCode,
     response::IntoResponse,
     routing::{get, post},
     Json, Router,
@@ -13,7 +14,10 @@ use crate::collection_manager::sides::read::{
 };
 use crate::{
     collection_manager::sides::read::ReadSide,
-    types::{ApiKey, CollectionId, CollectionStatsRequest, SearchParams},
+    types::{
+        ApiKey, BatchGetDocumentsRequest, BatchGetDocumentsResponse, CollectionId,
+        CollectionStatsRequest, SearchParams,
+    },
 };
 
 pub fn apis(read_side: Arc<ReadSide>) -> Router {
@@ -23,6 +27,10 @@ pub fn apis(read_side: Arc<ReadSide>) -> Router {
         .route(
             "/v1/collections/{collection_id}/filterable_fields",
             get(filterable_fields),
+        )
+        .route(
+            "/v1/collections/{collection_id}/documents/batch-get",
+            post(batch_get_documents),
         )
         .with_state(read_side)
 }
@@ -94,4 +102,26 @@ async fn filterable_fields(
         .filterable_fields(read_api_key, collection_id, with_keys)
         .await
         .map(Json)
+}
+
+async fn batch_get_documents(
+    Path(collection_id): Path<CollectionId>,
+    read_side: State<Arc<ReadSide>>,
+    Query(query): Query<SearchQueryParams>,
+    Json(request): Json<BatchGetDocumentsRequest>,
+) -> impl IntoResponse {
+    // Validate request size
+    if let Err(e) = request.validate() {
+        return (StatusCode::BAD_REQUEST, e).into_response();
+    }
+
+    let read_api_key = query.api_key;
+
+    match read_side
+        .batch_get_documents(read_api_key, collection_id, request.ids)
+        .await
+    {
+        Ok(documents) => Json(BatchGetDocumentsResponse { documents }).into_response(),
+        Err(e) => e.into_response(),
+    }
 }

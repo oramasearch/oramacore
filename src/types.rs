@@ -670,6 +670,31 @@ pub struct UpdateCollectionMcpRequest {
     pub mcp_description: Option<String>,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct BatchGetDocumentsRequest {
+    pub ids: Vec<String>,
+}
+
+impl BatchGetDocumentsRequest {
+    pub fn validate(&self) -> Result<(), String> {
+        const MAX_IDS: usize = 1000;
+        if self.ids.len() > MAX_IDS {
+            return Err(format!(
+                "Too many document IDs. Maximum is {}, got {}",
+                MAX_IDS,
+                self.ids.len()
+            ));
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Serialize)]
+pub struct BatchGetDocumentsResponse {
+    #[serde(flatten)]
+    pub documents: HashMap<String, Document>,
+}
+
 impl TryFrom<serde_json::Value> for CreateCollection {
     type Error = anyhow::Error;
 
