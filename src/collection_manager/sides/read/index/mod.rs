@@ -339,6 +339,10 @@ impl Index {
         })
     }
 
+    pub fn get_text_parser(&self) -> &TextParser {
+        self.text_parser.as_ref()
+    }
+
     pub async fn get_all_document_ids(&self) -> Result<Vec<DocumentId>> {
         let search_document_context =
             SearchDocumentContext::new(&self.uncommitted_deleted_documents, None);
