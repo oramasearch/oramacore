@@ -45,24 +45,6 @@ impl DocumentStorage {
         })
     }
 
-    /*
-    pub async fn insert_many(&self, docs: &[(DocumentId, ZeboDocument<'_>)]) -> Result<()> {
-        if docs.is_empty() {
-            return Ok(());
-        }
-
-        let mut zebo = self.zebo.write("insert_many").await;
-        let space = zebo
-            .reserve_space_for(docs)
-            .context("Cannot reserve space in zebo")?;
-        drop(zebo);
-
-        space.write_all().context("Cannot write documents")?;
-
-        Ok(())
-    }
-    */
-
     pub async fn remove(&self, ids: Vec<DocumentId>) {
         if !ids.is_empty() {
             let mut zebo = self.zebo.write("remove").await;

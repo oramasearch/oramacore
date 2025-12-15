@@ -43,7 +43,6 @@ pub struct SearchRequest {
 
 pub struct Search<'collection, 'analytics_storage> {
     collection: &'collection CollectionReader,
-    // document_storage: &'document_storage DocumentStorage,
     analytics_storage: Option<&'analytics_storage OramaCoreAnalytics>,
     request: SearchRequest,
 }
@@ -51,13 +50,11 @@ pub struct Search<'collection, 'analytics_storage> {
 impl<'collection, 'analytics_storage> Search<'collection, 'analytics_storage> {
     pub fn new(
         collection: &'collection CollectionReader,
-        // document_storage: &'document_storage DocumentStorage,
         analytics_storage: Option<&'analytics_storage OramaCoreAnalytics>,
         request: SearchRequest,
     ) -> Self {
         Self {
             collection,
-            // document_storage,
             analytics_storage,
             request,
         }
@@ -238,31 +235,15 @@ impl<'collection, 'analytics_storage> Search<'collection, 'analytics_storage> {
             .await?;
 
         trace!("Calculates hits");
-        /*
-        let hits: Vec<_> = result
-            .into_iter()
-            .zip(docs)
-            .map(|(token_score, document)| {
-                let id = document
-                    .as_ref()
-                    .and_then(|d| d.id.clone())
-                    .unwrap_or_default();
-                SearchResultHit {
-                    id,
-                    score: token_score.score,
-                    document,
-                }
-            })
-            .collect();
-        */
 
         let hits = result
             .into_iter()
             .map(
-                |TokenScore {
-                     document_id: id,
-                     score,
-                 }| {
+                |ts| {
+                    let TokenScore {
+                        document_id: id,
+                        score,
+                    } = ts;
                     docs.iter()
                         .find(|(doc_id, _)| doc_id == &id)
                         .cloned()
