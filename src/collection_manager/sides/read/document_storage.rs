@@ -254,9 +254,15 @@ impl DocumentStorage {
             .last()
             .map(|(id, _)| *id);
 
-        let last = last_inserted_document_id
-            .zip(last_uncommitted_inserted_document_id)
-            .map(|(committed_id, uncommitted_id)| committed_id.max(uncommitted_id));
+        let last = match (
+            last_inserted_document_id,
+            last_uncommitted_inserted_document_id,
+        ) {
+            (Some(committed_id), Some(uncommitted_id)) => Some(committed_id.max(uncommitted_id)),
+            (Some(committed_id), None) => Some(committed_id),
+            (None, Some(uncommitted_id)) => Some(uncommitted_id),
+            (None, None) => None,
+        };
 
         let mut lock = self
             .last_document_id

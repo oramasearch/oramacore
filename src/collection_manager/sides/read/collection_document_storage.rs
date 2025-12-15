@@ -201,16 +201,14 @@ impl CollectionDocumentStorage {
             .await
             .context("Cannot get last inserted document ID")?;
 
-        let first_non_global_doc_id = match last_inserted_id {
-            // There are documents in global storage
-            Some(doc_id) => doc_id.0 + 1,
-            // No documents in global storage, all IDs are per-collection
-            None => 0,
-        };
-
-        let (global_ids, local_ids): (Vec<DocumentId>, Vec<DocumentId>) = ids
-            .into_iter()
-            .partition(|id| id.0 < first_non_global_doc_id);
+        let (global_ids, local_ids): (Vec<DocumentId>, Vec<DocumentId>) =
+            if let Some(first_non_global_doc_id) = last_inserted_id {
+                ids.into_iter()
+                    .partition(|id| *id <= first_non_global_doc_id)
+            } else {
+                // All IDs are local
+                (vec![], ids)
+            };
 
         let uncommitted = self
             .uncommitted
