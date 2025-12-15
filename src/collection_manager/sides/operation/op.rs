@@ -547,9 +547,11 @@ mod tests {
                 default_locale: locale,
             },
             WriteOperation::DeleteCollection(collection_id),
+            #[allow(deprecated)]
             WriteOperation::DocumentStorage(DocumentStorageWriteOperation::DeleteDocuments {
                 doc_ids: vec![DocumentId(2)],
             }),
+            #[allow(deprecated)]
             WriteOperation::DocumentStorage(DocumentStorageWriteOperation::InsertDocument {
                 doc_id: DocumentId(1),
                 doc: DocumentToInsert(RawJSONDocument {
