@@ -382,6 +382,7 @@ impl WriteSide {
             .await;
         self.write_operation_counter.fetch_sub(1, Ordering::Relaxed);
 
+        // Chain the error here to decrement the counter even if we have an error
         res?;
 
         Ok(CollectionCreated { collection_id })
@@ -642,7 +643,11 @@ impl WriteSide {
 
         if let Some(old_index) = old {
             let document_ids = old_index.get_document_ids().await;
-            self.document_storage.remove(document_ids).await;
+            collection
+                .get_document_storage()
+                .remove(document_ids)
+                .await
+                .context("Cannot remove old index documents")?;
 
             // Forward document deletions to the reader side
             let old_doc_ids = old_index.get_document_ids().await;
@@ -695,7 +700,11 @@ impl WriteSide {
 
         let document_to_remove = collection.delete_index(index_id).await?;
 
-        self.document_storage.remove(document_to_remove).await;
+        collection
+            .get_document_storage()
+            .remove(document_to_remove)
+            .await
+            .context("Cannot remove documents from deleted index")?;
 
         Ok(())
     }
@@ -798,9 +807,13 @@ impl WriteSide {
 
         let doc_id_pairs = index.delete_documents(document_ids_to_delete).await?;
 
-        // Extract DocumentIds for global storage removal
+        // Extract DocumentIds for removal (split will happen in collection_document_storage)
         let doc_ids: Vec<DocumentId> = doc_id_pairs.iter().map(|(doc_id, _)| *doc_id).collect();
-        self.document_storage.remove(doc_ids).await;
+        collection
+            .get_document_storage()
+            .remove(doc_ids)
+            .await
+            .context("Cannot remove deleted documents")?;
 
         Ok(())
     }
@@ -1018,7 +1031,10 @@ impl WriteSide {
             trace!("Operations sent");
         }
 
-        self.document_storage.remove(docs_to_remove).await;
+        collection_document_storage
+            .remove(docs_to_remove)
+            .await
+            .context("Cannot remove replaced documents")?;
 
         debug!("All documents");
 
@@ -1033,27 +1049,25 @@ impl WriteSide {
         self.check_master_api_key(master_api_key)?;
 
         self.write_operation_counter.fetch_add(1, Ordering::Relaxed);
-        let document_ids = self.collections.delete_collection(collection_id).await;
+        let r = self.collections.delete_collection(collection_id).await;
         self.write_operation_counter.fetch_sub(1, Ordering::Relaxed);
 
-        if let Some(document_ids) = document_ids {
-            self.commit()
-                .await
-                .context("Cannot commit collections after collection deletion")?;
+        // Chain the error here to decrement the counter even if we have an error
+        r?;
 
-            self.op_sender
-                .send(WriteOperation::DeleteCollection(collection_id))
-                .await
-                .context("Cannot send delete collection operation")?;
+        self.commit()
+            .await
+            .context("Cannot commit collections after collection deletion")?;
 
-            self.kv
-                .delete_with_prefix(collection_id.as_str())
-                .await
-                .context("Cannot delete collection from KV")?;
+        self.op_sender
+            .send(WriteOperation::DeleteCollection(collection_id))
+            .await
+            .context("Cannot send delete collection operation")?;
 
-            self.document_storage.remove(document_ids).await;
-        }
-
+        self.kv
+            .delete_with_prefix(collection_id.as_str())
+            .await
+            .context("Cannot delete collection from KV")?;
         Ok(())
     }
 
@@ -1300,7 +1314,11 @@ impl WriteSide {
                     // If the document cannot be processed, we should remove it from the document storage
                     // and from the read side
                     // NB: check if the error handling is correct
-                    self.document_storage.remove(vec![doc_id]).await;
+                    if let Err(remove_err) =
+                        collection.get_document_storage().remove(vec![doc_id]).await
+                    {
+                        tracing::error!(error = ?remove_err, "Cannot remove failed document");
+                    }
 
                     tracing::error!(error = ?e, "Cannot process document");
                     result.failed += 1;
@@ -1325,7 +1343,11 @@ impl WriteSide {
             trace!("Operations sent");
         }
 
-        self.document_storage.remove(docs_to_remove).await;
+        collection
+            .get_document_storage()
+            .remove(docs_to_remove)
+            .await
+            .context("Cannot remove replaced documents")?;
 
         Ok(result)
     }

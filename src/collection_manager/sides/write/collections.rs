@@ -17,7 +17,7 @@ use crate::lock::{OramaAsyncLock, OramaAsyncLockReadGuard};
 use crate::metrics::commit::COMMIT_CALCULATION_TIME;
 use crate::metrics::CollectionCommitLabels;
 use crate::python::embeddings::Model;
-use crate::types::{CollectionId, DocumentId};
+use crate::types::CollectionId;
 use crate::types::{CreateCollection, DescribeCollectionResponse, LanguageDTO};
 use oramacore_lib::fs::{create_if_not_exists, BufferedFile};
 use oramacore_lib::nlp::locales::Locale;
@@ -252,12 +252,12 @@ impl CollectionsWriter {
         Ok(())
     }
 
-    pub async fn delete_collection(&self, collection_id: CollectionId) -> Option<Vec<DocumentId>> {
+    pub async fn delete_collection(&self, collection_id: CollectionId) -> Result<()> {
         let mut collections = self.collections.write("delete_collection").await;
         let collection = collections.remove(&collection_id);
 
         let collection = match collection {
-            None => return None,
+            None => return Ok(()),
             Some(coll) => coll,
         };
 
@@ -273,6 +273,12 @@ impl CollectionsWriter {
             document_ids.extend(index.get_document_ids().await);
         }
 
+        collection
+            .get_document_storage()
+            .remove(document_ids)
+            .await
+            .context("Cannot remove collection documents")?;
+
         collection.remove_from_fs(collection_dir).await;
 
         if let Err(error) = self
@@ -285,7 +291,7 @@ impl CollectionsWriter {
             error!(error = ?error, "Error sending delete collection");
         }
 
-        Some(document_ids)
+        Ok(())
     }
 
     pub async fn cleanup_expired_temp_indexes(&self, max_age: Duration) -> Result<usize> {
