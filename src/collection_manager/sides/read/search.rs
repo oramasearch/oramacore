@@ -238,30 +238,28 @@ impl<'collection, 'analytics_storage> Search<'collection, 'analytics_storage> {
 
         let hits = result
             .into_iter()
-            .map(
-                |ts| {
-                    let TokenScore {
-                        document_id: id,
-                        score,
-                    } = ts;
-                    docs.iter()
-                        .find(|(doc_id, _)| doc_id == &id)
-                        .cloned()
-                        .map(|(_, doc)| {
-                            let doc_id = doc.id.clone();
-                            SearchResultHit {
-                                id: doc_id.unwrap_or_default(),
-                                score,
-                                document: Some(doc),
-                            }
-                        })
-                        .unwrap_or_else(|| SearchResultHit {
-                            id: Default::default(),
+            .map(|ts| {
+                let TokenScore {
+                    document_id: id,
+                    score,
+                } = ts;
+                docs.iter()
+                    .find(|(doc_id, _)| doc_id == &id)
+                    .cloned()
+                    .map(|(_, doc)| {
+                        let doc_id = doc.id.clone();
+                        SearchResultHit {
+                            id: doc_id.unwrap_or_default(),
                             score,
-                            document: None,
-                        })
-                },
-            )
+                            document: Some(doc),
+                        }
+                    })
+                    .unwrap_or_else(|| SearchResultHit {
+                        id: Default::default(),
+                        score,
+                        document: None,
+                    })
+            })
             .collect();
 
         drop(m);

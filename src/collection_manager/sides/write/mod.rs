@@ -796,8 +796,10 @@ impl WriteSide {
             .await
             .ok_or_else(|| WriteError::IndexNotFound(collection_id, index_id))?;
 
-        let doc_ids = index.delete_documents(document_ids_to_delete).await?;
+        let doc_id_pairs = index.delete_documents(document_ids_to_delete).await?;
 
+        // Extract DocumentIds for global storage removal
+        let doc_ids: Vec<DocumentId> = doc_id_pairs.iter().map(|(doc_id, _)| *doc_id).collect();
         self.document_storage.remove(doc_ids).await;
 
         Ok(())

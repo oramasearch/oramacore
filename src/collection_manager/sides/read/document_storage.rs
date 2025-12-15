@@ -335,6 +335,11 @@ impl DocumentStorage {
         uncommitted_lock.clear();
         drop(uncommitted_lock);
 
+        // Clear uncommitted deletions to prevent memory leak
+        let mut deletions_lock = self.uncommitted_document_deletions.write("commit").await;
+        deletions_lock.clear();
+        drop(deletions_lock);
+
         drop(m);
 
         let mut lock = self.last_document_id.write("update").await;

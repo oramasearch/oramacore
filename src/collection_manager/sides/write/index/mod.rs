@@ -381,6 +381,9 @@ impl Index {
             old_document_id = Some(old_doc_id);
 
             // Remove the old document
+            // Note: We use DeleteDocuments (not DeleteDocumentsWithDocIdStr) here because
+            // insert_document_id has already updated the doc_id_str mapping to point to the new doc_id.
+            // Only the old document data needs to be deleted from storage and index.
             index_operation_batch.push(WriteOperation::Collection(
                 self.collection_id,
                 CollectionWriteOperation::DocumentStorage(
@@ -459,7 +462,10 @@ impl Index {
     }
 
     #[instrument(skip(self, doc_ids), fields(collection_id = ?self.collection_id, index_id = ?self.index_id))]
-    pub async fn delete_documents(&self, doc_ids: Vec<String>) -> Result<Vec<DocumentId>> {
+    pub async fn delete_documents(
+        &self,
+        doc_ids: Vec<String>,
+    ) -> Result<Vec<(DocumentId, String)>> {
         info!("Deleting documents: {:?}", doc_ids);
 
         let doc_ids: Vec<&str> = doc_ids
@@ -472,30 +478,33 @@ impl Index {
             .collect();
 
         let mut doc_id_storage = self.doc_id_storage.write("delete").await;
-        let doc_ids = doc_id_storage.remove_document_ids(doc_ids);
+        let doc_id_pairs = doc_id_storage.remove_document_ids(doc_ids);
 
-        if !doc_ids.is_empty() {
+        if !doc_id_pairs.is_empty() {
+            // Send document storage operation FIRST with doc_id_str for proper cleanup
+            self.context
+                .op_sender
+                .send(WriteOperation::Collection(
+                    self.collection_id,
+                    CollectionWriteOperation::DocumentStorage(
+                        DocumentStorageWriteOperation::DeleteDocumentsWithDocIdStr(
+                            doc_id_pairs.clone(),
+                        ),
+                    ),
+                ))
+                .await
+                .context("Cannot send operation")?;
+
+            // Send index deletion (only needs DocumentId)
+            let doc_ids: Vec<DocumentId> = doc_id_pairs.iter().map(|(doc_id, _)| *doc_id).collect();
+
             self.context
                 .op_sender
                 .send(WriteOperation::Collection(
                     self.collection_id,
                     CollectionWriteOperation::IndexWriteOperation(
                         self.index_id,
-                        IndexWriteOperation::DeleteDocuments {
-                            doc_ids: doc_ids.clone(),
-                        },
-                    ),
-                ))
-                .await
-                .context("Cannot send operation")?;
-            self.context
-                .op_sender
-                .send(WriteOperation::Collection(
-                    self.collection_id,
-                    CollectionWriteOperation::DocumentStorage(
-                        DocumentStorageWriteOperation::DeleteDocuments {
-                            doc_ids: doc_ids.clone(),
-                        },
+                        IndexWriteOperation::DeleteDocuments { doc_ids },
                     ),
                 ))
                 .await
@@ -507,7 +516,7 @@ impl Index {
 
         self.is_dirty.store(true, Ordering::SeqCst);
 
-        Ok(doc_ids)
+        Ok(doc_id_pairs)
     }
 
     pub async fn describe(&self) -> DescribeCollectionIndexResponse {
