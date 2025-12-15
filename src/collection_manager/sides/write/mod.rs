@@ -147,7 +147,7 @@ pub struct WriteSide {
     operation_counter: OramaAsyncLock<u64>,
     insert_batch_commit_size: u64,
 
-    document_storage: Arc<DocumentStorage>,
+    _document_storage: Arc<DocumentStorage>,
     system_prompts: SystemPromptInterface,
     training_sets: TrainingSetInterface,
     tools: ToolsRuntime,
@@ -273,7 +273,7 @@ impl WriteSide {
         let write_side = Self {
             document_count,
             collections: collections_writer,
-            document_storage,
+            _document_storage: document_storage,
             data_dir,
             insert_batch_commit_size,
             master_api_key,
@@ -1005,7 +1005,10 @@ impl WriteSide {
                                 // If the document cannot be processed, we should remove it from the document storage
                                 // and from the read side
                                 // NB: check if the error handling is correct
-                                self.document_storage.remove(vec![doc_id]).await;
+                                collection_document_storage
+                                    .remove(vec![doc_id])
+                                    .await
+                                    .context("Cannot remove document after failed processing")?;
 
                                 tracing::error!(error = ?e, "Cannot process document");
                                 result.failed += 1;

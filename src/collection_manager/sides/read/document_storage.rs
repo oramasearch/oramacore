@@ -351,7 +351,7 @@ impl DocumentStorage {
     }
 }
 
-pub async fn migrate_to_zebo(data_dir: &PathBuf) -> Result<Zebo<1_000_000, PAGE_SIZE, DocumentId>> {
+async fn migrate_to_zebo(data_dir: &PathBuf) -> Result<Zebo<1_000_000, PAGE_SIZE, DocumentId>> {
     let mut files_in_dir = std::fs::read_dir(data_dir)
         .context("Cannot read data directory")?
         .filter_map(|entry| {
