@@ -155,32 +155,37 @@ impl DocumentStorage {
         })
     }
 
-    #[allow(deprecated)]
+    #[deprecated = "Use per collection DocumentStorage instead"]
     pub async fn update(&self, op: DocumentStorageWriteOperation) -> Result<()> {
         match op {
+            #[allow(deprecated)]
             DocumentStorageWriteOperation::InsertDocument { doc_id, doc } => {
                 self.add_document(doc_id, doc).await;
                 let mut lock = self.last_document_id.write("update").await;
                 **lock = None;
                 Ok(())
             }
+            #[allow(deprecated)]
             DocumentStorageWriteOperation::InsertDocuments(docs) => {
                 self.add_documents(docs).await;
                 let mut lock = self.last_document_id.write("update").await;
                 **lock = None;
                 Ok(())
             }
+            #[allow(deprecated)]
             DocumentStorageWriteOperation::DeleteDocuments { doc_ids } => {
                 self.delete_documents(doc_ids).await?;
                 Ok(())
             }
             // New per-collection variants - should not reach global storage
+            #[allow(deprecated)]
             DocumentStorageWriteOperation::InsertDocumentWithDocIdStr { doc_id, doc, .. } => {
                 self.add_document(doc_id, doc).await;
                 let mut lock = self.last_document_id.write("update").await;
                 **lock = None;
                 Ok(())
             }
+            #[allow(deprecated)]
             DocumentStorageWriteOperation::InsertDocumentsWithDocIdStr(docs) => {
                 let docs_without_str: Vec<(DocumentId, DocumentToInsert)> =
                     docs.into_iter().map(|(id, _, doc)| (id, doc)).collect();
@@ -189,6 +194,7 @@ impl DocumentStorage {
                 **lock = None;
                 Ok(())
             }
+            #[allow(deprecated)]
             DocumentStorageWriteOperation::DeleteDocumentsWithDocIdStr(doc_id_pairs) => {
                 let doc_ids: Vec<DocumentId> = doc_id_pairs.into_iter().map(|(id, _)| id).collect();
                 self.delete_documents(doc_ids).await?;
@@ -274,6 +280,7 @@ impl DocumentStorage {
         Ok(last)
     }
 
+    #[deprecated = "Use per collection DocumentStorage instead"]
     pub async fn get_documents_by_ids(
         &self,
         mut doc_ids: Vec<DocumentId>,

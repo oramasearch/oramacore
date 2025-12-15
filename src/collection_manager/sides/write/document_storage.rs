@@ -45,6 +45,7 @@ impl DocumentStorage {
         })
     }
 
+    #[deprecated = "Use per collection DocumentStorage instead"]
     pub async fn remove(&self, ids: Vec<DocumentId>) {
         if !ids.is_empty() {
             let mut zebo = self.zebo.write("remove").await;
@@ -52,6 +53,7 @@ impl DocumentStorage {
         }
     }
 
+    #[deprecated = "Use per collection DocumentStorage instead"]
     pub async fn stream_documents(
         &self,
         ids: Vec<DocumentId>,

@@ -244,6 +244,7 @@ impl CollectionDocumentStorage {
 
         // Get global documents
         {
+            #[allow(deprecated)]
             self.global_document_storage
                 .get_documents_by_ids(global_ids, &mut results)
                 .await?;

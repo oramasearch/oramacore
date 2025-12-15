@@ -118,6 +118,7 @@ impl CollectionDocumentStorage {
         }
 
         if !global_ids.is_empty() {
+            #[allow(deprecated)]
             self.global_document_storage.remove(global_ids).await;
         }
 
@@ -181,6 +182,7 @@ impl CollectionDocumentStorage {
         let global_tx = tx.clone();
         let global_storage = self.global_document_storage.clone();
         tokio::spawn(async move {
+            #[allow(deprecated)]
             let mut stream = global_storage.stream_documents(global_ids).await;
             while let Some(doc) = stream.next().await {
                 if let Err(e) = global_tx.send(doc).await {
