@@ -304,7 +304,7 @@ impl LLMService {
                                 OpenAIConfig::new()
                                     .with_api_key(&conf.api_key)
                                     .with_api_base(conf.url.unwrap_or_else(|| {
-                                        "https://api.anthropic.com/v1/".to_string()
+                                        "https://api.anthropic.com/v1".to_string()
                                     })),
                             ),
                         );
