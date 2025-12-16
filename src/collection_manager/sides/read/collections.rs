@@ -148,16 +148,17 @@ impl CollectionsReader {
 
         let mut min_offset = Offset(u64::MAX);
 
+        let mut to_delete = Vec::new();
         for (id, collection) in col.iter() {
-            let collection_dir = collections_dir.join(id.as_str());
-
             if collection.is_deleted() {
+                to_delete.push(*id);
                 // TODO: should we delete the collection from the disk?
                 continue;
             }
 
             collection_ids.push(*id);
 
+            let collection_dir = collections_dir.join(id.as_str());
             create_if_not_exists_async(&collection_dir)
                 .await
                 .with_context(|| {
@@ -191,6 +192,16 @@ impl CollectionsReader {
             .context("Cannot write info.json file")?;
 
         info!("Collections committed");
+
+        if !to_delete.is_empty() {
+            drop(col);
+            let mut guard = self.collections.write("commit").await;
+            for id in to_delete.iter() {
+                guard.remove(id);
+                // TODO: should we delete the collection from the disk?
+                info!(collection_id=?id, "Collection deleted from memory {:?}", id);
+            }
+        }
 
         Ok(min_offset)
     }

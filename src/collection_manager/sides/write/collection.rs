@@ -15,7 +15,10 @@ use tracing::{info, warn};
 use crate::{
     collection_manager::sides::{
         field_name_to_path,
-        write::{context::WriteSideContext, index::EnumStrategy, WriteError},
+        write::{
+            collection_document_storage::CollectionDocumentStorage, context::WriteSideContext,
+            index::EnumStrategy, WriteError,
+        },
         CollectionWriteOperation, DocumentStorageWriteOperation, ReplaceIndexReason,
         WriteOperation,
     },
@@ -58,10 +61,12 @@ pub struct CollectionWriter {
     pin_rules_writer: OramaAsyncLock<PinRulesWriter>,
 
     is_new: bool,
+
+    document_storage: CollectionDocumentStorage,
 }
 
 impl CollectionWriter {
-    pub fn empty(
+    pub async fn empty(
         data_dir: PathBuf,
         req: CreateEmptyCollection,
         context: WriteSideContext,
@@ -94,6 +99,13 @@ impl CollectionWriter {
                     embeddings_model: req.embeddings_model,
                 },
             ),
+
+            document_storage: CollectionDocumentStorage::new(
+                context.global_document_storage.clone(),
+                data_dir.join("documents"),
+            )
+            .await?,
+
             context,
 
             indexes: OramaAsyncLock::new("indexes", Default::default()),
@@ -163,6 +175,13 @@ impl CollectionWriter {
                     embeddings_model: dump.embeddings_model,
                 },
             ),
+
+            document_storage: CollectionDocumentStorage::new(
+                context.global_document_storage.clone(),
+                data_dir.join("documents"),
+            )
+            .await?,
+
             context,
             indexes: OramaAsyncLock::new("indexes", indexes),
             temp_indexes: OramaAsyncLock::new("temp_indexes", temp_indexes),
@@ -222,6 +241,10 @@ impl CollectionWriter {
             .collect::<Result<Vec<_>, _>>()
             .context("Error committing indexes")?;
 
+        self.document_storage
+            .commit()
+            .context("Cannot commit collection document storage")?;
+
         let temporary_indexes = temp_indexes_lock.keys().copied().collect::<Vec<_>>();
         let indexes_path = data_dir.join("temp_indexes");
 
@@ -263,6 +286,10 @@ impl CollectionWriter {
         self.is_new = false;
 
         Ok(())
+    }
+
+    pub fn get_document_storage(&self) -> &CollectionDocumentStorage {
+        &self.document_storage
     }
 
     pub async fn get_index_ids(&self) -> Vec<IndexId> {
@@ -426,9 +453,14 @@ impl CollectionWriter {
                     self.id,
                     CollectionWriteOperation::DeleteIndex2 { index_id },
                 ),
-                WriteOperation::DocumentStorage(DocumentStorageWriteOperation::DeleteDocuments {
-                    doc_ids: doc_ids.clone(),
-                }),
+                WriteOperation::Collection(
+                    self.id,
+                    CollectionWriteOperation::DocumentStorage(
+                        DocumentStorageWriteOperation::DeleteDocuments {
+                            doc_ids: doc_ids.clone(),
+                        },
+                    ),
+                ),
             ])
             .await
             .context("Cannot send delete index operation")?;
@@ -455,9 +487,12 @@ impl CollectionWriter {
                     self.id,
                     CollectionWriteOperation::DeleteTempIndex { temp_index_id },
                 ),
-                WriteOperation::DocumentStorage(DocumentStorageWriteOperation::DeleteDocuments {
-                    doc_ids,
-                }),
+                WriteOperation::Collection(
+                    self.id,
+                    CollectionWriteOperation::DocumentStorage(
+                        DocumentStorageWriteOperation::DeleteDocuments { doc_ids },
+                    ),
+                ),
             ])
             .await
             .context("Cannot send delete temp index operation")?;

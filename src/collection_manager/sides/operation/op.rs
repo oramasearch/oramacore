@@ -232,6 +232,7 @@ pub enum CollectionWriteOperation {
         mcp_description: Option<String>,
     },
     PinRule(PinRuleOperation<DocumentId>),
+    DocumentStorage(DocumentStorageWriteOperation),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -304,6 +305,14 @@ pub enum DocumentStorageWriteOperation {
     DeleteDocuments {
         doc_ids: Vec<DocumentId>,
     },
+    // New variants for per-collection storage with document_id_str
+    InsertDocumentWithDocIdStr {
+        doc_id: DocumentId,
+        doc_id_str: String,
+        doc: DocumentToInsert,
+    },
+    InsertDocumentsWithDocIdStr(Vec<(DocumentId, String, DocumentToInsert)>),
+    DeleteDocumentsWithDocIdStr(Vec<(DocumentId, String)>),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -338,6 +347,8 @@ pub enum WriteOperation {
     },
     DeleteCollection(CollectionId),
     Collection(CollectionId, CollectionWriteOperation),
+    #[deprecated(note = "Use CollectionWriteOperation::DocumentStorage instead")]
+    #[allow(deprecated)]
     DocumentStorage(DocumentStorageWriteOperation),
 }
 
@@ -431,15 +442,66 @@ impl WriteOperation {
                 _,
                 CollectionWriteOperation::PinRule(PinRuleOperation::Delete(_)),
             ) => "delete_merchandising_pin_rule",
+            WriteOperation::Collection(
+                _,
+                CollectionWriteOperation::DocumentStorage(
+                    DocumentStorageWriteOperation::InsertDocument { .. },
+                ),
+            ) => "collection_document_storage_insert_document",
+            WriteOperation::Collection(
+                _,
+                CollectionWriteOperation::DocumentStorage(
+                    DocumentStorageWriteOperation::InsertDocuments { .. },
+                ),
+            ) => "collection_document_storage_insert_documents",
+            WriteOperation::Collection(
+                _,
+                CollectionWriteOperation::DocumentStorage(
+                    DocumentStorageWriteOperation::DeleteDocuments { .. },
+                ),
+            ) => "collection_document_storage_delete_documents",
+            WriteOperation::Collection(
+                _,
+                CollectionWriteOperation::DocumentStorage(
+                    DocumentStorageWriteOperation::InsertDocumentWithDocIdStr { .. },
+                ),
+            ) => "collection_document_storage_insert_document_with_doc_id_str",
+            WriteOperation::Collection(
+                _,
+                CollectionWriteOperation::DocumentStorage(
+                    DocumentStorageWriteOperation::InsertDocumentsWithDocIdStr { .. },
+                ),
+            ) => "collection_document_storage_insert_documents_with_doc_id_str",
+            WriteOperation::Collection(
+                _,
+                CollectionWriteOperation::DocumentStorage(
+                    DocumentStorageWriteOperation::DeleteDocumentsWithDocIdStr { .. },
+                ),
+            ) => "collection_document_storage_delete_documents_with_doc_id_str",
+            #[allow(deprecated)]
             WriteOperation::DocumentStorage(DocumentStorageWriteOperation::InsertDocument {
                 ..
             }) => "document_storage_insert_document",
+            #[allow(deprecated)]
             WriteOperation::DocumentStorage(DocumentStorageWriteOperation::InsertDocuments(_)) => {
                 "document_storage_insert_documents"
             }
+            #[allow(deprecated)]
             WriteOperation::DocumentStorage(DocumentStorageWriteOperation::DeleteDocuments {
                 ..
             }) => "document_storage_delete_documents",
+            #[allow(deprecated)]
+            WriteOperation::DocumentStorage(
+                DocumentStorageWriteOperation::InsertDocumentWithDocIdStr { .. },
+            ) => "document_storage_insert_document_with_doc_id_str",
+            #[allow(deprecated)]
+            WriteOperation::DocumentStorage(
+                DocumentStorageWriteOperation::InsertDocumentsWithDocIdStr(_),
+            ) => "document_storage_insert_documents_with_doc_id_str",
+            #[allow(deprecated)]
+            WriteOperation::DocumentStorage(
+                DocumentStorageWriteOperation::DeleteDocumentsWithDocIdStr(_),
+            ) => "document_storage_delete_documents_with_doc_id_str",
         }
     }
 }
@@ -485,9 +547,11 @@ mod tests {
                 default_locale: locale,
             },
             WriteOperation::DeleteCollection(collection_id),
+            #[allow(deprecated)]
             WriteOperation::DocumentStorage(DocumentStorageWriteOperation::DeleteDocuments {
                 doc_ids: vec![DocumentId(2)],
             }),
+            #[allow(deprecated)]
             WriteOperation::DocumentStorage(DocumentStorageWriteOperation::InsertDocument {
                 doc_id: DocumentId(1),
                 doc: DocumentToInsert(RawJSONDocument {

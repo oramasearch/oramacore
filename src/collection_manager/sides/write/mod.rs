@@ -1,4 +1,5 @@
 pub mod collection;
+pub mod collection_document_storage;
 mod collections;
 pub mod document_storage;
 mod embedding;
@@ -16,7 +17,7 @@ use std::{
     ops::Deref,
     path::PathBuf,
     sync::{
-        atomic::{AtomicU32, AtomicU64, Ordering},
+        atomic::{AtomicU32, Ordering},
         Arc,
     },
     time::Duration,
@@ -43,7 +44,9 @@ use embedding::{start_calculate_embedding_loop, MultiEmbeddingCalculationRequest
 
 pub use context::WriteSideContext;
 
+use crate::collection_manager::sides::write::collection_document_storage::CollectionDocumentStorage;
 use crate::collection_manager::sides::write::document_storage::ZeboDocument;
+use crate::collection_manager::sides::{CollectionWriteOperation, DocumentStorageWriteOperation};
 use crate::lock::OramaAsyncLock;
 use crate::metrics::CollectionLabels;
 use crate::python::embeddings::Model;
@@ -58,7 +61,7 @@ use crate::{
     collection_manager::sides::{
         system_prompts::CollectionSystemPromptsInterface,
         write::jwt_manager::{JwtConfig, JwtManager},
-        DocumentStorageWriteOperation, DocumentToInsert, ReplaceIndexReason, WriteOperation,
+        DocumentToInsert, ReplaceIndexReason, WriteOperation,
     },
     metrics::document_insertion::DOCUMENTS_INSERTION_TIME,
     types::{
@@ -137,12 +140,12 @@ pub struct WriteSideConfig {
 pub struct WriteSide {
     op_sender: OperationSender,
     collections: CollectionsWriter,
-    document_count: AtomicU64,
+
     data_dir: PathBuf,
     operation_counter: OramaAsyncLock<u64>,
     insert_batch_commit_size: u64,
 
-    document_storage: DocumentStorage,
+    _document_storage: Arc<DocumentStorage>,
     system_prompts: SystemPromptInterface,
     training_sets: TrainingSetInterface,
     tools: ToolsRuntime,
@@ -196,15 +199,12 @@ impl WriteSide {
             embedding_queue_limit as usize,
         );
 
-        let document_count = AtomicU64::new(0);
-
         let write_side_info_path = data_dir.join("info.json");
         let r = BufferedFile::open(write_side_info_path)
             .and_then(|f| f.read_json_data::<WriteSideInfo>());
 
         let op_sender = if let Ok(info) = r {
             let WriteSideInfo::V1(info) = info;
-            document_count.store(info.document_count, Ordering::Relaxed);
             op_sender_creator
                 .create(info.offset)
                 .await
@@ -216,6 +216,11 @@ impl WriteSide {
                 .context("Cannot create sender")?
         };
 
+        let document_storage = DocumentStorage::try_new(data_dir.join("documents"))
+            .await
+            .context("Cannot create document storage")?;
+        let document_storage = Arc::new(document_storage);
+
         let context = WriteSideContext {
             python_service: python_service.clone(),
             embedding_sender: sx,
@@ -223,6 +228,7 @@ impl WriteSide {
             nlp_service,
             automatic_embeddings_selector,
             llm_service,
+            global_document_storage: document_storage.clone(),
         };
 
         let kv_op_sender = context.op_sender.clone();
@@ -247,10 +253,6 @@ impl WriteSide {
                 .await
                 .context("Cannot load collections")?;
 
-        let document_storage = DocumentStorage::try_new(data_dir.join("documents"))
-            .await
-            .context("Cannot create document storage")?;
-
         let (stop_done_sender, stop_done_receiver) = tokio::sync::mpsc::channel(1);
         let (stop_sender, _) = tokio::sync::broadcast::channel(1);
         let commit_loop_receiver = stop_sender.subscribe();
@@ -264,9 +266,8 @@ impl WriteSide {
         let training_sets = TrainingSetInterface::new(kv.clone());
 
         let write_side = Self {
-            document_count,
             collections: collections_writer,
-            document_storage,
+            _document_storage: document_storage,
             data_dir,
             insert_batch_commit_size,
             master_api_key,
@@ -345,13 +346,9 @@ impl WriteSide {
         output.1.context("Cannot commit kv")?;
 
         let offset = self.op_sender.get_offset();
-        // This load is not atomic with the commit.
-        // This means, we save a document count possible higher.
-        // Anyway it is not a problem, because the document count is only used for the document id generation
-        // So, if something goes wrong, we save an higher number, and this is ok.
-        let document_count = self.document_count.load(Ordering::Relaxed);
+
         let info = WriteSideInfo::V1(WriteSideInfoV1 {
-            document_count,
+            document_count: 0, // Don't care anymore after https://github.com/oramasearch/oramacore/pull/291
             offset,
         });
         BufferedFile::create_or_overwrite(self.data_dir.join("info.json"))
@@ -378,6 +375,7 @@ impl WriteSide {
             .await;
         self.write_operation_counter.fetch_sub(1, Ordering::Relaxed);
 
+        // Chain the error here to decrement the counter even if we have an error
         res?;
 
         Ok(CollectionCreated { collection_id })
@@ -484,7 +482,10 @@ impl WriteSide {
             let mut index_operation_batch = Vec::with_capacity(document_count * 10);
             let mut processed_count = -1;
 
-            let mut stream = self.document_storage.stream_documents(document_ids).await;
+            let collection_document_storage = collection.get_document_storage();
+            let mut stream = collection_document_storage
+                .stream_documents(document_ids)
+                .await;
             while let Some((doc_id, doc)) = stream.next().await {
                 processed_count += 1;
                 if processed_count % 100 == 0 {
@@ -635,16 +636,23 @@ impl WriteSide {
 
         if let Some(old_index) = old {
             let document_ids = old_index.get_document_ids().await;
-            self.document_storage.remove(document_ids).await;
+            collection
+                .get_document_storage()
+                .remove(document_ids)
+                .await
+                .context("Cannot remove old index documents")?;
 
             // Forward document deletions to the reader side
             let old_doc_ids = old_index.get_document_ids().await;
             self.context
                 .op_sender
-                .send(WriteOperation::DocumentStorage(
-                    DocumentStorageWriteOperation::DeleteDocuments {
-                        doc_ids: old_doc_ids,
-                    },
+                .send(WriteOperation::Collection(
+                    collection_id,
+                    CollectionWriteOperation::DocumentStorage(
+                        DocumentStorageWriteOperation::DeleteDocuments {
+                            doc_ids: old_doc_ids,
+                        },
+                    ),
                 ))
                 .await
                 .context("Cannot send operation to delete old index documents")?;
@@ -685,7 +693,11 @@ impl WriteSide {
 
         let document_to_remove = collection.delete_index(index_id).await?;
 
-        self.document_storage.remove(document_to_remove).await;
+        collection
+            .get_document_storage()
+            .remove(document_to_remove)
+            .await
+            .context("Cannot remove documents from deleted index")?;
 
         Ok(())
     }
@@ -724,8 +736,14 @@ impl WriteSide {
         });
 
         debug!("Inserting documents {}", document_count);
+        let collection_document_storage = collection.get_document_storage();
         let doc_ids = self
-            .add_documents_to_storage(&mut document_list, target_index_id)
+            .add_documents_to_storage(
+                collection_document_storage,
+                &mut document_list,
+                collection_id,
+                target_index_id,
+            )
             .await
             .context("Cannot insert documents into document storage")?;
         debug!("Document inserted");
@@ -745,7 +763,7 @@ impl WriteSide {
             .inner_process_documents(collection_id, index_id, document_list, doc_ids)
             .await
             .context("Cannot process documents")?;
-        info!("All documents are inserted");
+        info!("All documents are inserted: {}", document_count);
 
         drop(metric);
 
@@ -780,9 +798,15 @@ impl WriteSide {
             .await
             .ok_or_else(|| WriteError::IndexNotFound(collection_id, index_id))?;
 
-        let doc_ids = index.delete_documents(document_ids_to_delete).await?;
+        let doc_id_pairs = index.delete_documents(document_ids_to_delete).await?;
 
-        self.document_storage.remove(doc_ids).await;
+        // Extract DocumentIds for removal (split will happen in collection_document_storage)
+        let doc_ids: Vec<DocumentId> = doc_id_pairs.iter().map(|(doc_id, _)| *doc_id).collect();
+        collection
+            .get_document_storage()
+            .remove(doc_ids)
+            .await
+            .context("Cannot remove deleted documents")?;
 
         Ok(())
     }
@@ -808,6 +832,8 @@ impl WriteSide {
                 .check_claim_limitations(write_api_key, document_count, 0)
                 .await?;
         }
+
+        let mut collection_document_storage = collection.get_document_storage();
 
         let target_index_id = index.get_runtime_index_id().unwrap_or(index_id);
 
@@ -865,7 +891,9 @@ impl WriteSide {
         let mut index_operation_batch = Vec::with_capacity(document_count * 10);
         let mut docs_to_remove = Vec::with_capacity(document_count);
 
-        let mut doc_stream = self.document_storage.stream_documents(document_ids).await;
+        let mut doc_stream = collection_document_storage
+            .stream_documents(document_ids)
+            .await;
         let mut processed_count = -1;
 
         while let Some((doc_id, doc)) = doc_stream.next().await {
@@ -887,6 +915,7 @@ impl WriteSide {
             // Check for pending write operations and yield if needed
             if self.write_operation_counter.load(Ordering::Relaxed) > 0 {
                 drop(pin_rules_writer);
+                let _ = collection_document_storage;
                 drop(index);
                 drop(collection);
 
@@ -900,6 +929,7 @@ impl WriteSide {
                     Some(index) => index,
                     None => return Err(WriteError::IndexNotFound(collection_id, index_id)),
                 };
+                collection_document_storage = collection.get_document_storage();
                 pin_rules_writer = collection.get_pin_rule_writer("update_documents").await;
             }
 
@@ -908,12 +938,11 @@ impl WriteSide {
                     if let Some(delta) = documents.remove(doc_id_str) {
                         let new_document = merge(v, delta);
 
-                        let doc_id = self.document_count.fetch_add(1, Ordering::Relaxed);
-                        let doc_id = DocumentId(doc_id);
+                        let doc_id = collection_document_storage.get_next_document_id();
 
                         let doc_str = serde_json::to_string(&doc.inner)
                             .context("Cannot serialize document")?;
-                        self.document_storage
+                        collection_document_storage
                             .insert_many(&[(
                                 doc_id,
                                 ZeboDocument::new(Cow::Borrowed(doc_id_str), Cow::Owned(doc_str)),
@@ -922,16 +951,20 @@ impl WriteSide {
                             .context("Cannot insert document into document storage")?;
 
                         self.op_sender
-                            .send(WriteOperation::DocumentStorage(
-                                DocumentStorageWriteOperation::InsertDocument {
-                                    doc_id,
-                                    doc: DocumentToInsert(
-                                        new_document
-                                            .clone()
-                                            .into_raw(format!("{target_index_id}:{doc_id_str}"))
-                                            .expect("Cannot get raw document"),
-                                    ),
-                                },
+                            .send(WriteOperation::Collection(
+                                collection_id,
+                                CollectionWriteOperation::DocumentStorage(
+                                    DocumentStorageWriteOperation::InsertDocumentWithDocIdStr {
+                                        doc_id,
+                                        doc_id_str: doc_id_str.clone(),
+                                        doc: DocumentToInsert(
+                                            new_document
+                                                .clone()
+                                                .into_raw(format!("{target_index_id}:{doc_id_str}"))
+                                                .expect("Cannot get raw document"),
+                                        ),
+                                    },
+                                ),
                             ))
                             .await
                             .context("Cannot send document storage operation")?;
@@ -965,7 +998,10 @@ impl WriteSide {
                                 // If the document cannot be processed, we should remove it from the document storage
                                 // and from the read side
                                 // NB: check if the error handling is correct
-                                self.document_storage.remove(vec![doc_id]).await;
+                                collection_document_storage
+                                    .remove(vec![doc_id])
+                                    .await
+                                    .context("Cannot remove document after failed processing")?;
 
                                 tracing::error!(error = ?e, "Cannot process document");
                                 result.failed += 1;
@@ -991,7 +1027,10 @@ impl WriteSide {
             trace!("Operations sent");
         }
 
-        self.document_storage.remove(docs_to_remove).await;
+        collection_document_storage
+            .remove(docs_to_remove)
+            .await
+            .context("Cannot remove replaced documents")?;
 
         debug!("All documents");
 
@@ -1006,27 +1045,25 @@ impl WriteSide {
         self.check_master_api_key(master_api_key)?;
 
         self.write_operation_counter.fetch_add(1, Ordering::Relaxed);
-        let document_ids = self.collections.delete_collection(collection_id).await;
+        let r = self.collections.delete_collection(collection_id).await;
         self.write_operation_counter.fetch_sub(1, Ordering::Relaxed);
 
-        if let Some(document_ids) = document_ids {
-            self.commit()
-                .await
-                .context("Cannot commit collections after collection deletion")?;
+        // Chain the error here to decrement the counter even if we have an error
+        r?;
 
-            self.op_sender
-                .send(WriteOperation::DeleteCollection(collection_id))
-                .await
-                .context("Cannot send delete collection operation")?;
+        self.commit()
+            .await
+            .context("Cannot commit collections after collection deletion")?;
 
-            self.kv
-                .delete_with_prefix(collection_id.as_str())
-                .await
-                .context("Cannot delete collection from KV")?;
+        self.op_sender
+            .send(WriteOperation::DeleteCollection(collection_id))
+            .await
+            .context("Cannot send delete collection operation")?;
 
-            self.document_storage.remove(document_ids).await;
-        }
-
+        self.kv
+            .delete_with_prefix(collection_id.as_str())
+            .await
+            .context("Cannot delete collection from KV")?;
         Ok(())
     }
 
@@ -1039,7 +1076,9 @@ impl WriteSide {
 
         let document_ids = collection.get_document_ids().await;
 
-        let stream = self.document_storage.stream_documents(document_ids).await;
+        let document_storage = collection.get_document_storage();
+
+        let stream = document_storage.stream_documents(document_ids).await;
         let docs = stream
             .filter_map(|(_, doc)| {
                 let inner = doc.inner;
@@ -1083,7 +1122,9 @@ impl WriteSide {
 
     async fn add_documents_to_storage(
         self: &WriteSide,
+        collection_document_storage: &CollectionDocumentStorage,
         document_list: &mut DocumentList,
+        collection_id: CollectionId,
         target_index_id: IndexId,
     ) -> Result<Vec<DocumentId>> {
         let document_count = document_list.len();
@@ -1100,19 +1141,20 @@ impl WriteSide {
             }
 
             if index % batch_size == 0 && !batch.is_empty() {
-                self.document_storage
+                collection_document_storage
                     .insert_many(&docs)
                     .await
                     .context("Cannot inser document into document storage")?;
                 docs.clear();
 
-                insert_document_batch.push(WriteOperation::DocumentStorage(
-                    DocumentStorageWriteOperation::InsertDocuments(batch),
+                insert_document_batch.push(WriteOperation::Collection(
+                    collection_id,
+                    CollectionWriteOperation::DocumentStorage(
+                        DocumentStorageWriteOperation::InsertDocumentsWithDocIdStr(batch),
+                    ),
                 ));
                 batch = Vec::with_capacity(batch_size);
             }
-
-            let doc_id = self.document_count.fetch_add(1, Ordering::Relaxed);
 
             // We try to guess the document id from the document
             // Eventually, we generate a new one
@@ -1134,11 +1176,12 @@ impl WriteSide {
                 serde_json::Value::String(doc_id_str.clone()),
             );
 
-            let doc_id = DocumentId(doc_id);
+            let doc_id = collection_document_storage.get_next_document_id();
             doc_ids.push(doc_id);
 
             batch.push((
                 doc_id,
+                doc_id_str.clone(),
                 DocumentToInsert(
                     doc.clone()
                         .into_raw(format!("{target_index_id}:{doc_id_str}"))
@@ -1154,11 +1197,14 @@ impl WriteSide {
         }
 
         if !batch.is_empty() {
-            insert_document_batch.push(WriteOperation::DocumentStorage(
-                DocumentStorageWriteOperation::InsertDocuments(batch),
+            insert_document_batch.push(WriteOperation::Collection(
+                collection_id,
+                CollectionWriteOperation::DocumentStorage(
+                    DocumentStorageWriteOperation::InsertDocumentsWithDocIdStr(batch),
+                ),
             ));
 
-            self.document_storage
+            collection_document_storage
                 .insert_many(&docs)
                 .await
                 .context("Cannot inser document into document storage")?;
@@ -1264,7 +1310,11 @@ impl WriteSide {
                     // If the document cannot be processed, we should remove it from the document storage
                     // and from the read side
                     // NB: check if the error handling is correct
-                    self.document_storage.remove(vec![doc_id]).await;
+                    if let Err(remove_err) =
+                        collection.get_document_storage().remove(vec![doc_id]).await
+                    {
+                        tracing::error!(error = ?remove_err, "Cannot remove failed document");
+                    }
 
                     tracing::error!(error = ?e, "Cannot process document");
                     result.failed += 1;
@@ -1289,7 +1339,11 @@ impl WriteSide {
             trace!("Operations sent");
         }
 
-        self.document_storage.remove(docs_to_remove).await;
+        collection
+            .get_document_storage()
+            .remove(docs_to_remove)
+            .await
+            .context("Cannot remove replaced documents")?;
 
         Ok(result)
     }
