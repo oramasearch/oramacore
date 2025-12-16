@@ -63,13 +63,13 @@ async fn test_empty_index_reload() {
 
     test_context.commit_all().await.unwrap();
 
+    let collection_id = collection_client.collection_id;
+    let write_api_key = collection_client.write_api_key;
+    let read_api_key = collection_client.read_api_key;
+
     let test_context = test_context.reload().await;
     let collection_client = test_context
-        .get_test_collection_client(
-            collection_client.collection_id,
-            collection_client.write_api_key,
-            collection_client.read_api_key,
-        )
+        .get_test_collection_client(collection_id, write_api_key, read_api_key)
         .unwrap();
 
     let stats = collection_client.reader_stats().await.unwrap();
@@ -95,13 +95,13 @@ async fn test_empty_collection_reload() {
 
     test_context.commit_all().await.unwrap();
 
+    let collection_id = collection_client.collection_id;
+    let write_api_key = collection_client.write_api_key;
+    let read_api_key = collection_client.read_api_key;
+
     let test_context = test_context.reload().await;
     let collection_client = test_context
-        .get_test_collection_client(
-            collection_client.collection_id,
-            collection_client.write_api_key,
-            collection_client.read_api_key,
-        )
+        .get_test_collection_client(collection_id, write_api_key, read_api_key)
         .unwrap();
 
     let stats = collection_client
@@ -137,13 +137,13 @@ async fn test_collection_continue_commit() {
         test_context.commit_all().await.unwrap();
     }
 
+    let collection_id = collection_client.collection_id;
+    let write_api_key = collection_client.write_api_key;
+    let read_api_key = collection_client.read_api_key;
+
     let test_context = test_context.reload().await;
     let collection_client = test_context
-        .get_test_collection_client(
-            collection_client.collection_id,
-            collection_client.write_api_key,
-            collection_client.read_api_key,
-        )
+        .get_test_collection_client(collection_id, write_api_key, read_api_key)
         .unwrap();
 
     let search_result = collection_client

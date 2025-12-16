@@ -620,13 +620,13 @@ async fn test_date() {
     let output = collection_client.search(search_params).await.unwrap();
     assert_eq!(output.count, 1);
 
+    let collection_id = collection_client.collection_id;
+    let write_api_key = collection_client.write_api_key;
+    let read_api_key = collection_client.read_api_key;
+
     let test_context = test_context.reload().await;
     let collection_client = test_context
-        .get_test_collection_client(
-            collection_client.collection_id,
-            collection_client.write_api_key,
-            collection_client.read_api_key,
-        )
+        .get_test_collection_client(collection_id, write_api_key, read_api_key)
         .unwrap();
 
     let search_params: SearchParams = json!({
@@ -755,14 +755,14 @@ async fn test_enum_strategy() {
         EnumStrategy::Explicit
     );
 
+    let collection_id = collection_client.collection_id;
+    let write_api_key = collection_client.write_api_key;
+    let read_api_key = collection_client.read_api_key;
+
     let new_test_context = test_context.reload().await;
 
     let new_collection = new_test_context
-        .get_test_collection_client(
-            collection_client.collection_id,
-            collection_client.write_api_key,
-            collection_client.read_api_key,
-        )
+        .get_test_collection_client(collection_id, write_api_key, read_api_key)
         .unwrap();
 
     let output = new_collection

@@ -119,13 +119,13 @@ async fn test_index_replacement_1() {
         .unwrap();
     assert_eq!(result.count, 1);
 
+    let collection_id = collection_client.collection_id;
+    let write_api_key = collection_client.write_api_key;
+    let read_api_key = collection_client.read_api_key;
+
     let test_context = test_context.reload().await;
     let collection_client = test_context
-        .get_test_collection_client(
-            collection_client.collection_id,
-            collection_client.write_api_key,
-            collection_client.read_api_key,
-        )
+        .get_test_collection_client(collection_id, write_api_key, read_api_key)
         .unwrap();
 
     let result = collection_client

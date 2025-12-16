@@ -223,14 +223,15 @@ async fn test_vector_search_should_work_after_commit() {
     );
     assert!(output2.hits[0].score > 0.);
 
+    let collection_id = collection_client.collection_id;
+    let write_api_key = collection_client.write_api_key;
+    let read_api_key = collection_client.read_api_key;
+    let index_id = index_client.index_id;
+
     let test_context = test_context.reload().await;
 
     let collection_client = test_context
-        .get_test_collection_client(
-            collection_client.collection_id,
-            collection_client.write_api_key,
-            collection_client.read_api_key,
-        )
+        .get_test_collection_client(collection_id, write_api_key, read_api_key)
         .unwrap();
 
     let output3 = collection_client
@@ -247,10 +248,7 @@ async fn test_vector_search_should_work_after_commit() {
         .unwrap();
     assert_eq!(output3.count, 1);
     assert_eq!(output3.hits.len(), 1);
-    assert_eq!(
-        output3.hits[0].id,
-        format!("{}:{}", index_client.index_id, "1")
-    );
+    assert_eq!(output3.hits[0].id, format!("{}:{}", index_id, "1"));
     assert!(output3.hits[0].score > 0.);
 
     assert_approx_eq!(output1.hits[0].score, output2.hits[0].score);
