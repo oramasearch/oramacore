@@ -23,10 +23,14 @@ impl DocIdStorage {
         self.document_ids.get(doc_id).copied()
     }
 
-    pub fn remove_document_ids(&mut self, doc_ids: Vec<&str>) -> Vec<DocumentId> {
+    pub fn remove_document_ids(&mut self, doc_ids: Vec<&str>) -> Vec<(DocumentId, String)> {
         doc_ids
             .into_iter()
-            .filter_map(|doc_id| self.document_ids.remove(doc_id))
+            .filter_map(|doc_id_str| {
+                self.document_ids
+                    .remove(doc_id_str)
+                    .map(|doc_id| (doc_id, doc_id_str.to_string()))
+            })
             .collect()
     }
 

@@ -1,5 +1,6 @@
 use crate::types::InteractionLLMConfig;
 use anyhow::Result;
+use llm_json::RepairOptions;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use std::collections::HashMap;
@@ -209,7 +210,9 @@ impl AutomaticEmbeddingsSelector {
                 }
             };
 
-            match serde_json::from_str::<ChosenPropertiesResult>(&result) {
+            let fixed_result = llm_json::repair_json(&result, &RepairOptions::default())?;
+
+            match serde_json::from_str::<ChosenPropertiesResult>(&fixed_result) {
                 Ok(ChosenPropertiesResult::Properties(properties)) => {
                     return Ok(properties);
                 }

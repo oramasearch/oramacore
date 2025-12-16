@@ -19,6 +19,7 @@ use oramacore_lib::{
     pin_rules::PinRulesReader,
 };
 use serde::{Deserialize, Serialize};
+use serde_json::{Map, Value};
 use tokio::time::Instant;
 use tracing::{debug, error, info, warn};
 
@@ -26,7 +27,8 @@ use crate::{
     ai::advanced_autoquery::{AdvancedAutoQuery, AdvancedAutoQuerySteps, QueryMappedSearchResult},
     collection_manager::sides::{
         read::{
-            analytics::SearchAnalyticEventOrigin, context::ReadSideContext,
+            analytics::SearchAnalyticEventOrigin,
+            collection_document_storage::CollectionDocumentStorage, context::ReadSideContext,
             CommittedDateFieldStats, CommittedGeoPointFieldStats, CommittedStringFieldStats,
             ReadError, UncommittedDateFieldStats, UncommittedGeoPointFieldStats,
         },
@@ -35,7 +37,7 @@ use crate::{
     },
     lock::{OramaAsyncLock, OramaAsyncLockReadGuard, OramaAsyncLockWriteGuard, OramaSyncLock},
     types::{
-        ApiKey, CollectionId, CollectionStatsRequest, DocumentId, FieldId, IndexId,
+        ApiKey, CollectionId, CollectionStatsRequest, Document, DocumentId, FieldId, IndexId,
         InteractionMessage, Number, OramaDate, Role,
     },
 };
@@ -145,12 +147,14 @@ pub struct CollectionReader {
     last_commit_time: OramaSyncLock<Instant>,
 
     pin_rules_reader: OramaAsyncLock<PinRulesReader<DocumentId>>,
+
+    document_storage: Arc<CollectionDocumentStorage>,
 }
 
 impl CollectionReader {
     pub fn empty(
         data_dir: PathBuf,
-        id: CollectionId,
+        collection_id: CollectionId,
         description: Option<String>,
         mcp_description: Option<String>,
         default_locale: Locale,
@@ -160,8 +164,15 @@ impl CollectionReader {
         offload_config: OffloadFieldConfig,
         commit_config: CollectionCommitConfig,
     ) -> Result<Self> {
+        let document_storage = CollectionDocumentStorage::new(
+            context.global_document_storage.clone(),
+            data_dir.join("document_storage"),
+            collection_id,
+        )?;
+        let document_storage = Arc::new(document_storage);
+
         Ok(Self {
-            id,
+            id: collection_id,
             description,
             mcp_description: OramaAsyncLock::new("collection_mcp_description", mcp_description),
             default_locale,
@@ -202,6 +213,8 @@ impl CollectionReader {
             pin_rules_reader: OramaAsyncLock::new("pin_rules_reader", PinRulesReader::empty()),
 
             data_dir,
+
+            document_storage,
         })
     }
 
@@ -289,6 +302,13 @@ impl CollectionReader {
 
         let document_count_estimation = indexes.iter().map(|i| i.document_count()).sum::<u64>();
 
+        let document_storage = CollectionDocumentStorage::new(
+            context.global_document_storage.clone(),
+            data_dir.join("document_storage"),
+            dump.id,
+        )?;
+        let document_storage = Arc::new(document_storage);
+
         let s = Self {
             id: dump.id,
             description: dump.description,
@@ -334,6 +354,8 @@ impl CollectionReader {
             ),
 
             data_dir,
+
+            document_storage,
         };
 
         Ok(s)
@@ -373,6 +395,8 @@ impl CollectionReader {
 
         // Read current offset - this is what we actually processed
         let offset = **self.offset.read("commit").await;
+
+        self.document_storage.commit(offset).await?;
 
         let indexes_lock = self.indexes.read("commit").await;
         let mut index_ids = Vec::with_capacity(indexes_lock.len());
@@ -971,6 +995,12 @@ impl CollectionReader {
                     .context("Cannot apply pin rule operation")?;
                 drop(pin_rules_lock);
             }
+            CollectionWriteOperation::DocumentStorage(op) => {
+                self.document_storage
+                    .update(op)
+                    .await
+                    .context("Cannot apply document storage operation")?;
+            }
         }
 
         // Update offset after successful operation
@@ -993,6 +1023,10 @@ impl CollectionReader {
         }
 
         Ok(())
+    }
+
+    pub fn get_document_storage(&self) -> &CollectionDocumentStorage {
+        &self.document_storage
     }
 
     pub async fn stats(&self, _req: CollectionStatsRequest) -> Result<CollectionStats, ReadError> {
@@ -1048,6 +1082,32 @@ impl CollectionReader {
             created_at: self.created_at,
             updated_at: **self.updated_at.read("stats").await,
         })
+    }
+
+    /// Retrieves multiple documents by their string document IDs in a single batch operation.
+    /// Returns a HashMap where keys are document ID strings and values are Document objects.
+    /// Missing document IDs are silently omitted from the result.
+    pub async fn batch_get_documents(
+        &self,
+        doc_id_strs: Vec<String>,
+    ) -> Result<HashMap<String, Document>, ReadError> {
+        // Retrieve raw documents from storage
+        let raw_docs = self
+            .document_storage
+            .get_documents_by_str_ids(doc_id_strs)
+            .await
+            .map_err(ReadError::Generic)?;
+
+        // Convert Arc<RawJSONDocument> to Document for API response
+        let mut result = HashMap::new();
+        for (doc_id_str, raw_doc) in raw_docs {
+            let inner: Map<String, Value> = serde_json::from_str(raw_doc.inner.get())
+                .context("Cannot deserialize document")
+                .map_err(ReadError::Generic)?;
+            result.insert(doc_id_str, Document { inner });
+        }
+
+        Ok(result)
     }
 
     pub async fn get_filterable_fields(

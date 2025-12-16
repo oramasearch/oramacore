@@ -20,6 +20,7 @@ const PAGE_SIZE: u64 = 1024 * 1024 * 1024;
 
 pub struct DocumentStorage {
     zebo: Arc<OramaAsyncLock<Zebo<1_000_000, PAGE_SIZE, DocumentId>>>,
+    last_document_id: OramaAsyncLock<Option<DocumentId>>,
 }
 
 impl DocumentStorage {
@@ -40,27 +41,17 @@ impl DocumentStorage {
                 .context("Cannot migrate to zebo")?
         };
 
+        let last = zebo
+            .get_last_inserted_document_id()
+            .context("Cannot get last inserted document id from zebo")?;
+
         Ok(Self {
             zebo: Arc::new(OramaAsyncLock::new("zebo", zebo)),
+            last_document_id: OramaAsyncLock::new("last_document_id", last),
         })
     }
 
-    pub async fn insert_many(&self, docs: &[(DocumentId, ZeboDocument<'_>)]) -> Result<()> {
-        if docs.is_empty() {
-            return Ok(());
-        }
-
-        let mut zebo = self.zebo.write("insert_many").await;
-        let space = zebo
-            .reserve_space_for(docs)
-            .context("Cannot reserve space in zebo")?;
-        drop(zebo);
-
-        space.write_all().context("Cannot write documents")?;
-
-        Ok(())
-    }
-
+    #[deprecated = "Use per collection DocumentStorage instead"]
     pub async fn remove(&self, ids: Vec<DocumentId>) {
         if !ids.is_empty() {
             let mut zebo = self.zebo.write("remove").await;
@@ -68,6 +59,7 @@ impl DocumentStorage {
         }
     }
 
+    #[deprecated = "Use per collection DocumentStorage instead"]
     pub async fn stream_documents(
         &self,
         ids: Vec<DocumentId>,
@@ -120,6 +112,31 @@ impl DocumentStorage {
         });
 
         ReceiverStream::new(rx)
+    }
+
+    pub async fn get_last_inserted_document_id(&self) -> Result<Option<DocumentId>> {
+        let lock = self
+            .last_document_id
+            .read("get_last_inserted_document_id")
+            .await;
+        if let Some(doc_id) = lock.as_ref() {
+            return Ok(Some(*doc_id));
+        }
+        drop(lock);
+
+        let zebo = self.zebo.read("get_last_inserted_document_id").await;
+        let last = zebo
+            .get_last_inserted_document_id()
+            .context("Cannot get last inserted document id from zebo")?;
+
+        let mut lock = self
+            .last_document_id
+            .write("get_last_inserted_document_id")
+            .await;
+        **lock = last;
+        drop(lock);
+
+        Ok(last)
     }
 }
 
@@ -250,7 +267,7 @@ pub async fn migrate_to_zebo(data_dir: &PathBuf) -> Result<Zebo<1_000_000, PAGE_
 
 static ZERO: &[u8] = b"\0";
 
-pub struct ZeboDocument<'s>(Cow<'s, str>, Cow<'s, str>);
+pub struct ZeboDocument<'s>(pub Cow<'s, str>, pub Cow<'s, str>);
 
 impl zebo::Document for ZeboDocument<'_> {
     fn as_bytes(&self, v: &mut Vec<u8>) {
@@ -269,7 +286,7 @@ impl<'s> ZeboDocument<'s> {
         Self(id, content)
     }
 
-    fn from_bytes(bytes: Vec<u8>) -> Result<Self> {
+    pub fn from_bytes(bytes: Vec<u8>) -> Result<Self> {
         let mut parts = bytes.split(|b| *b == b'\0');
         let id = parts
             .next()
