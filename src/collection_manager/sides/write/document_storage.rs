@@ -20,6 +20,7 @@ const PAGE_SIZE: u64 = 1024 * 1024 * 1024;
 
 pub struct DocumentStorage {
     zebo: Arc<OramaAsyncLock<Zebo<1_000_000, PAGE_SIZE, DocumentId>>>,
+    last_document_id: OramaAsyncLock<Option<DocumentId>>,
 }
 
 impl DocumentStorage {
@@ -40,8 +41,13 @@ impl DocumentStorage {
                 .context("Cannot migrate to zebo")?
         };
 
+        let last = zebo
+            .get_last_inserted_document_id()
+            .context("Cannot get last inserted document id from zebo")?;
+
         Ok(Self {
             zebo: Arc::new(OramaAsyncLock::new("zebo", zebo)),
+            last_document_id: OramaAsyncLock::new("last_document_id", last),
         })
     }
 
@@ -106,6 +112,31 @@ impl DocumentStorage {
         });
 
         ReceiverStream::new(rx)
+    }
+
+    pub async fn get_last_inserted_document_id(&self) -> Result<Option<DocumentId>> {
+        let lock = self
+            .last_document_id
+            .read("get_last_inserted_document_id")
+            .await;
+        if let Some(doc_id) = lock.as_ref() {
+            return Ok(Some(*doc_id));
+        }
+        drop(lock);
+
+        let zebo = self.zebo.read("get_last_inserted_document_id").await;
+        let last = zebo
+            .get_last_inserted_document_id()
+            .context("Cannot get last inserted document id from zebo")?;
+
+        let mut lock = self
+            .last_document_id
+            .write("get_last_inserted_document_id")
+            .await;
+        **lock = last;
+        drop(lock);
+
+        Ok(last)
     }
 }
 

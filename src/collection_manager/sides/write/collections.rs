@@ -37,7 +37,6 @@ impl CollectionsWriter {
     pub async fn try_load(
         config: CollectionsWriterConfig,
         context: WriteSideContext,
-        global_document_id: u64,
     ) -> Result<Self> {
         let mut collections: HashMap<CollectionId, CollectionWriter> = Default::default();
         let default_model = config.default_embedding_model;
@@ -74,9 +73,7 @@ impl CollectionsWriter {
             // and we abort the start up process
             // Should we instead ignore it?
             // TODO: think about it
-            let collection =
-                CollectionWriter::try_load(collection_dir, context.clone(), global_document_id)
-                    .await?;
+            let collection = CollectionWriter::try_load(collection_dir, context.clone()).await?;
             collections.insert(collection_id, collection);
         }
 
@@ -106,7 +103,6 @@ impl CollectionsWriter {
         &self,
         collection_option: CreateCollection,
         sender: OperationSender,
-        global_document_id: u64,
     ) -> Result<(), WriteError> {
         let CreateCollection {
             id,
@@ -131,12 +127,9 @@ impl CollectionsWriter {
             write_api_key,
             read_api_key,
         };
-        let collection = CollectionWriter::empty(
-            self.data_dir.join(id.as_str()),
-            req,
-            self.context.clone(),
-            global_document_id,
-        )?;
+        let collection =
+            CollectionWriter::empty(self.data_dir.join(id.as_str()), req, self.context.clone())
+                .await?;
 
         let mut collections = self.collections.write("create_collection").await;
 

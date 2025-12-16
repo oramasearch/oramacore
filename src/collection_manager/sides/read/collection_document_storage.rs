@@ -1,8 +1,8 @@
-use std::{collections::HashMap, io::Seek, path::PathBuf, sync::Arc};
+use std::{collections::HashMap, path::PathBuf, sync::Arc};
 
 use anyhow::{Context, Result};
 use debug_panic::debug_panic;
-use oramacore_lib::fs::create_if_not_exists;
+use oramacore_lib::fs::{create_if_not_exists, BufferedFile};
 use serde::{Deserialize, Serialize};
 use tracing::{error, info};
 use zebo::Zebo;
@@ -367,14 +367,12 @@ impl DocumentIdStrMap {
     pub fn try_new(doc_id_str_map_path: PathBuf) -> Result<Self> {
         // Initialize empty map file if it does not exist
         if !doc_id_str_map_path.exists() {
-            let f = std::fs::OpenOptions::new()
-                .write(true)
-                .create(true)
-                .open(&doc_id_str_map_path)
-                .context("Cannot create doc_id_str_map file")?;
-            let empty_map: HashMap<String, DocumentId> = HashMap::new();
-            bincode::serialize_into(&f, &empty_map)
-                .context("Cannot serialize empty doc_id_str_map")?;
+            BufferedFile::create_or_overwrite(doc_id_str_map_path.clone())
+                .with_context(|| format!("Cannot create or overwrite {:?}", doc_id_str_map_path))?
+                .write_bincode_data(&DocumentIdStrMapDump::V1(
+                    HashMap::<String, DocumentId>::new(),
+                ))
+                .context("Cannot serialize DocumentIdStrMap")?;
         }
 
         Ok(Self {
@@ -413,13 +411,11 @@ impl DocumentIdStrMap {
 
     async fn commit(&self) -> Result<()> {
         let lock = self.doc_id_str_map_path.write("commit").await;
-        let mut f = std::fs::OpenOptions::new()
-            .read(true)
-            .write(true)
-            .open(&**lock)
-            .context("Cannot open doc_id_str_map file")?;
-        let mut map: HashMap<String, DocumentId> =
-            bincode::deserialize_from(&f).context("Cannot deserialize doc_id_str_map")?;
+
+        let mut map: HashMap<String, DocumentId> = BufferedFile::open(&**lock)
+            .with_context(|| format!("Cannot open {:?}", **lock))?
+            .read_bincode_data()
+            .context("Cannot deserialize DocumentIdStrMap")?;
 
         let mut uncommitted_lock = self.uncommitted.write("commit").await;
         for change in uncommitted_lock.drain(..) {
@@ -434,16 +430,20 @@ impl DocumentIdStrMap {
                                 "Trying to delete doc_id_str mapping for different DocumentId"
                             );
                             error!("Trying to delete doc_id_str mapping for different DocumentId");
+                        } else {
+                            map.remove(&doc_id_str);
                         }
-                        map.remove(&doc_id_str);
                     }
                 }
             }
         }
         drop(uncommitted_lock);
 
-        f.seek(std::io::SeekFrom::Start(0))?;
-        bincode::serialize_into(&f, &map).context("Cannot serialize doc_id_str_map")?;
+        BufferedFile::create_or_overwrite(lock.clone())
+            .with_context(|| format!("Cannot create or overwrite {:?}", **lock))?
+            .write_bincode_data(&map)
+            .context("Cannot serialize DocumentIdStrMap")?;
+
         drop(lock);
 
         Ok(())
@@ -485,8 +485,9 @@ impl DocumentIdStrMap {
                                 "Trying to delete doc_id_str mapping for different DocumentId"
                             );
                             error!("Trying to delete doc_id_str mapping for different DocumentId");
+                        } else {
+                            ret.remove(doc_id_str);
                         }
-                        ret.remove(doc_id_str);
                     }
                 }
             }
@@ -506,4 +507,9 @@ enum Dump {
 #[derive(Deserialize, Serialize, Debug)]
 struct DumpV1 {
     document_id: u64,
+}
+
+#[derive(Deserialize, Serialize, Debug)]
+enum DocumentIdStrMapDump {
+    V1(HashMap<String, DocumentId>),
 }

@@ -15,7 +15,7 @@ use zebo::Zebo;
 
 use crate::{
     collection_manager::sides::write::document_storage::{DocumentStorage, ZeboDocument},
-    lock::{OramaAsyncLock, OramaSyncLock},
+    lock::OramaAsyncLock,
     types::{DocumentId, RawJSONDocument},
 };
 
@@ -26,15 +26,14 @@ pub struct CollectionDocumentStorage {
     base_dir: PathBuf,
     zebo: Arc<OramaAsyncLock<Zebo<1_000_000, PAGE_SIZE, DocumentId>>>,
     global_document_storage: Arc<DocumentStorage>,
-    first_non_global_doc_id: OramaSyncLock<DocumentId>,
     collection_document_id: AtomicU64,
+    last_global_document_id: u64,
 }
 
 impl CollectionDocumentStorage {
-    pub fn new(
+    pub async fn new(
         global_document_storage: Arc<DocumentStorage>,
         base_dir: PathBuf,
-        first_non_global_doc_id: DocumentId,
     ) -> Result<Self> {
         create_if_not_exists(&base_dir).context("Cannot create base dir for collection storage")?;
 
@@ -44,9 +43,19 @@ impl CollectionDocumentStorage {
                 .read_json_data()
                 .context("Cannot read doc_storage.json")?
         } else {
+            let doc_id = global_document_storage
+                .get_last_inserted_document_id()
+                .await
+                .context("Cannot get last document id from global storage")?;
+            let document_id = doc_id.map(|id| id.0 + 1).unwrap_or(1);
             Dump::V1(DumpV1 {
-                document_id: first_non_global_doc_id.0,
+                document_id,
+                last_global_document_id: doc_id.map(|id| id.0).unwrap_or(0),
             })
+        };
+
+        let (collection_document_id, last_global_document_id) = match dump {
+            Dump::V1(d) => (AtomicU64::new(d.document_id), d.last_global_document_id),
         };
 
         Ok(Self {
@@ -56,13 +65,8 @@ impl CollectionDocumentStorage {
                 Zebo::try_new(base_dir).context("Cannot create collection zebo")?,
             )),
             global_document_storage,
-            first_non_global_doc_id: OramaSyncLock::new(
-                "first_non_global_doc_id",
-                first_non_global_doc_id,
-            ),
-            collection_document_id: AtomicU64::new(match dump {
-                Dump::V1(d) => d.document_id,
-            }),
+            collection_document_id,
+            last_global_document_id,
         })
     }
 
@@ -93,14 +97,9 @@ impl CollectionDocumentStorage {
         &self,
         ids: Vec<DocumentId>,
     ) -> (Vec<DocumentId>, Vec<DocumentId>) {
-        let first_non_global_doc_id = self
-            .first_non_global_doc_id
-            .read("split_into_local_and_global")
-            .unwrap();
-        let (global_ids, local_ids): (Vec<DocumentId>, Vec<DocumentId>) = ids
+        let (local_ids, global_ids): (Vec<DocumentId>, Vec<DocumentId>) = ids
             .into_iter()
-            .partition(|id| *id < **first_non_global_doc_id);
-        drop(first_non_global_doc_id);
+            .partition(|id| *id > DocumentId(self.last_global_document_id));
         (local_ids, global_ids)
     }
 
@@ -200,6 +199,7 @@ impl CollectionDocumentStorage {
             document_id: self
                 .collection_document_id
                 .load(std::sync::atomic::Ordering::SeqCst),
+            last_global_document_id: self.last_global_document_id,
         });
         BufferedFile::create_or_overwrite(self.base_dir.join("doc_storage.json"))
             .context("Cannot create or overwrite doc_storage.json")?
@@ -217,4 +217,5 @@ enum Dump {
 #[derive(Deserialize, Serialize, Debug)]
 struct DumpV1 {
     document_id: u64,
+    last_global_document_id: u64,
 }

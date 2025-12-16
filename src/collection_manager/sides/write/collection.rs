@@ -66,11 +66,10 @@ pub struct CollectionWriter {
 }
 
 impl CollectionWriter {
-    pub fn empty(
+    pub async fn empty(
         data_dir: PathBuf,
         req: CreateEmptyCollection,
         context: WriteSideContext,
-        global_document_id: u64,
     ) -> Result<Self> {
         let id = req.id;
 
@@ -104,8 +103,8 @@ impl CollectionWriter {
             document_storage: CollectionDocumentStorage::new(
                 context.global_document_storage.clone(),
                 data_dir.join("documents"),
-                DocumentId(global_document_id),
-            )?,
+            )
+            .await?,
 
             context,
 
@@ -123,11 +122,7 @@ impl CollectionWriter {
         })
     }
 
-    pub async fn try_load(
-        data_dir: PathBuf,
-        context: WriteSideContext,
-        global_document_id: u64,
-    ) -> Result<Self> {
+    pub async fn try_load(data_dir: PathBuf, context: WriteSideContext) -> Result<Self> {
         let dump: CollectionDump = BufferedFile::open(data_dir.join("info.json"))
             .context("Cannot open info.json file")?
             .read_json_data()
@@ -184,8 +179,8 @@ impl CollectionWriter {
             document_storage: CollectionDocumentStorage::new(
                 context.global_document_storage.clone(),
                 data_dir.join("documents"),
-                DocumentId(global_document_id),
-            )?,
+            )
+            .await?,
 
             context,
             indexes: OramaAsyncLock::new("indexes", indexes),

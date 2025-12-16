@@ -140,9 +140,7 @@ pub struct WriteSideConfig {
 pub struct WriteSide {
     op_sender: OperationSender,
     collections: CollectionsWriter,
-    // This will not used anymore,
-    // because each collection has its own document storage
-    document_count: u64,
+
     data_dir: PathBuf,
     operation_counter: OramaAsyncLock<u64>,
     insert_batch_commit_size: u64,
@@ -201,15 +199,12 @@ impl WriteSide {
             embedding_queue_limit as usize,
         );
 
-        let mut document_count = 0;
-
         let write_side_info_path = data_dir.join("info.json");
         let r = BufferedFile::open(write_side_info_path)
             .and_then(|f| f.read_json_data::<WriteSideInfo>());
 
         let op_sender = if let Ok(info) = r {
             let WriteSideInfo::V1(info) = info;
-            document_count = info.document_count;
             op_sender_creator
                 .create(info.offset)
                 .await
@@ -254,7 +249,7 @@ impl WriteSide {
         let tools = ToolsRuntime::new(kv.clone(), context.llm_service.clone());
 
         let collections_writer =
-            CollectionsWriter::try_load(collections_writer_config, context.clone(), document_count)
+            CollectionsWriter::try_load(collections_writer_config, context.clone())
                 .await
                 .context("Cannot load collections")?;
 
@@ -271,7 +266,6 @@ impl WriteSide {
         let training_sets = TrainingSetInterface::new(kv.clone());
 
         let write_side = Self {
-            document_count,
             collections: collections_writer,
             _document_storage: document_storage,
             data_dir,
@@ -353,9 +347,8 @@ impl WriteSide {
 
         let offset = self.op_sender.get_offset();
 
-        let document_count = self.document_count;
         let info = WriteSideInfo::V1(WriteSideInfoV1 {
-            document_count,
+            document_count: 0, // Don't care anymore after https://github.com/oramasearch/oramacore/pull/291
             offset,
         });
         BufferedFile::create_or_overwrite(self.data_dir.join("info.json"))
@@ -378,7 +371,7 @@ impl WriteSide {
         self.write_operation_counter.fetch_add(1, Ordering::Relaxed);
         let res = self
             .collections
-            .create_collection(option, self.op_sender.clone(), self.document_count)
+            .create_collection(option, self.op_sender.clone())
             .await;
         self.write_operation_counter.fetch_sub(1, Ordering::Relaxed);
 

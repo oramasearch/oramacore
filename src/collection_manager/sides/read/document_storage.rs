@@ -144,6 +144,13 @@ impl DocumentStorage {
             .await
             .context("Cannot create CommittedDiskDocumentStorage")?;
 
+        let last = committed
+            .zebo
+            .read("try_new")
+            .await
+            .get_last_inserted_document_id()
+            .context("Cannot get last inserted document id from zebo")?;
+
         Ok(Self {
             uncommitted: OramaAsyncLock::new("uncommitted", Default::default()),
             committed,
@@ -151,7 +158,7 @@ impl DocumentStorage {
                 "uncommitted_document_deletions",
                 Default::default(),
             ),
-            last_document_id: OramaAsyncLock::new("last_document_id", None),
+            last_document_id: OramaAsyncLock::new("last_document_id", last),
         })
     }
 
