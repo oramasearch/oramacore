@@ -69,11 +69,7 @@ async fn test_empty_index_reload() {
 
     let test_context = test_context.reload().await;
     let collection_client = test_context
-        .get_test_collection_client(
-            collection_id,
-            write_api_key,
-            read_api_key,
-        )
+        .get_test_collection_client(collection_id, write_api_key, read_api_key)
         .unwrap();
 
     let stats = collection_client.reader_stats().await.unwrap();
@@ -105,11 +101,7 @@ async fn test_empty_collection_reload() {
 
     let test_context = test_context.reload().await;
     let collection_client = test_context
-        .get_test_collection_client(
-            collection_id,
-            write_api_key,
-            read_api_key,
-        )
+        .get_test_collection_client(collection_id, write_api_key, read_api_key)
         .unwrap();
 
     let stats = collection_client
@@ -151,11 +143,7 @@ async fn test_collection_continue_commit() {
 
     let test_context = test_context.reload().await;
     let collection_client = test_context
-        .get_test_collection_client(
-            collection_id,
-            write_api_key,
-            read_api_key,
-        )
+        .get_test_collection_client(collection_id, write_api_key, read_api_key)
         .unwrap();
 
     let search_result = collection_client

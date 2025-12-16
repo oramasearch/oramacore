@@ -1,9 +1,12 @@
-use pyo3::prelude::*;
+use anyhow::Result;
+use pyo3::{prelude::*, types::PyDict};
 use serde::{Deserialize, Serialize};
 use std::{
     fmt::{Display, Formatter},
     str::FromStr,
 };
+
+use crate::ai::{AIServiceConfig, PythonLoggingLevel};
 
 #[derive(Serialize, Deserialize, Clone, Copy, Hash, PartialEq, Eq, Debug)]
 pub enum Model {
@@ -139,27 +142,18 @@ pub struct EmbeddingsService {
 }
 
 impl EmbeddingsService {
-    pub fn new(providers: Vec<String>) -> PyResult<Self> {
+    pub fn new(orama_config: AIServiceConfig) -> PyResult<Self> {
         Python::attach(|py| {
-            let utils_module = py.import("src.utils")?;
-            let config_class = utils_module.getattr("OramaAIConfig")?;
-            let config = config_class.call0()?;
-            let embeddings_config = config.getattr("embeddings")?;
-
-            // This is bad. We overwrite the config instead of passing it as parameter.
-            // But for now it works.
-            config.setattr("dynamically_load_models", true)?;
-            embeddings_config.setattr("dynamically_load_models", true)?;
-            embeddings_config.setattr("execution_providers", providers)?;
-
             let models_module = py.import("src.embeddings.models")?;
 
-            let logger = models_module.getattr("logger")?;
-            let sel_logger_level = logger.getattr("setLevel")?;
-            sel_logger_level.call1((20, ))?;
+            Self::configure_logging_level(&models_module, &orama_config)?;
 
+            // Instanciate the EmbeddingsModels with the appropriate configuration
+            let python_config = get_python_config(py, orama_config)?;
+            let embeddings_config_class = models_module.getattr("EmbeddingsModelsConfiguration")?;
+            let instance_config = embeddings_config_class.call((), Some(&python_config))?;
             let embeddings_class = models_module.getattr("EmbeddingsModels")?;
-            let instance = embeddings_class.call1((config,))?;
+            let instance = embeddings_class.call1((instance_config,))?;
 
             Ok(EmbeddingsService {
                 instance: instance.unbind(),
@@ -184,17 +178,69 @@ impl EmbeddingsService {
             result.extract()
         })
     }
+
+    fn configure_logging_level(
+        models_module: &Bound<'_, PyModule>,
+        orama_config: &AIServiceConfig,
+    ) -> PyResult<()> {
+        let logging_module = models_module.getattr("logging")?;
+        let module_level = logging_module.getattr(
+            orama_config
+                .embeddings
+                .as_ref()
+                .map(|e| e.level.to_string())
+                .unwrap_or(PythonLoggingLevel::Info.to_string()),
+        )?;
+        let logger = models_module.getattr("logger")?;
+        let sel_logger_level = logger.getattr("setLevel")?;
+        sel_logger_level.call1((module_level,))?;
+
+        Ok(())
+    }
+}
+
+fn get_python_config(py: Python<'_>, orama_config: AIServiceConfig) -> PyResult<Bound<'_, PyDict>> {
+    let kwargs = PyDict::new(py);
+    kwargs.set_item(
+        "execution_providers",
+        orama_config
+            .embeddings
+            .as_ref()
+            .map(|e| e.execution_providers.clone())
+            .unwrap_or_default(),
+    )?;
+    kwargs.set_item(
+        "dynamically_load_models",
+        orama_config
+            .embeddings
+            .as_ref()
+            .map(|e| e.dynamically_load_models)
+            .unwrap_or(true),
+    )?;
+    kwargs.set_item(
+        "default_model_group",
+        orama_config
+            .embeddings
+            .as_ref()
+            .map(|e| e.default_model_group.clone())
+            .unwrap_or("all".to_string()),
+    )?;
+    Ok(kwargs)
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::python::PythonService;
+    use crate::{python::PythonService, tests::utils::create_oramacore_config};
     use std::sync::{Arc, LazyLock};
 
     use super::*;
 
     static PYTHON_SERVICE: LazyLock<Arc<PythonService>> = LazyLock::new(|| {
-        Arc::new(PythonService::new(vec!["CPUExecutionProvider".to_string()]).expect("Failed to initialize PythonService for tests"))
+        let config = create_oramacore_config();
+        Arc::new(
+            PythonService::new(config.ai_server)
+                .expect("Failed to initialize PythonService for tests"),
+        )
     });
 
     fn get_embeddings_service() -> Arc<EmbeddingsService> {

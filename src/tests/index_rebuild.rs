@@ -149,11 +149,7 @@ async fn test_change_language_with_commit() {
 
     let test_context = test_context.reload().await;
     let collection_client = test_context
-        .get_test_collection_client(
-            collection_id,
-            write_api_key,
-            read_api_key,
-        )
+        .get_test_collection_client(collection_id, write_api_key, read_api_key)
         .unwrap();
 
     let output = collection_client

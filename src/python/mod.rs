@@ -1,7 +1,9 @@
 use include_dir::{include_dir, Dir};
-use pyo3::prelude::*;
+use pyo3::{prelude::*, types::PyDict};
 use std::{path::PathBuf, sync::Arc};
 use tracing::info;
+
+use crate::ai::AIServiceConfig;
 
 pub mod embeddings;
 pub mod mcp;
@@ -15,7 +17,7 @@ pub struct PythonService {
 }
 
 impl PythonService {
-    pub fn new(providers: Vec<String>) -> PyResult<Self> {
+    pub fn new(orama_config: AIServiceConfig) -> PyResult<Self> {
         Python::initialize();
 
         let python_scripts_dir = Self::extract_python_scripts().map_err(|e| {
@@ -32,7 +34,9 @@ impl PythonService {
 
             Self::initialize_python_env(py, &python_scripts_dir)?;
 
-            let embeddings_serivce = embeddings::EmbeddingsService::new(providers)?;
+            Self::set_global_logging_level(py)?;
+
+            let embeddings_serivce = embeddings::EmbeddingsService::new(orama_config)?;
 
             Ok(PythonService {
                 embeddings_service: Arc::new(embeddings_serivce),
@@ -109,5 +113,17 @@ impl PythonService {
                 }
             }
         }
+    }
+
+    /// Set the global logging level for Python modules to WARN
+    /// Which mean we will not see dependency logs unless they are errors or warnings
+    fn set_global_logging_level(py: Python<'_>) -> PyResult<()> {
+        let logging_module = py.import("logging")?;
+        let basic_config = logging_module.getattr("basicConfig")?;
+        let kwargs = PyDict::new(py);
+        kwargs.set_item("level", logging_module.getattr("WARN")?)?;
+        basic_config.call((), Some(&kwargs))?;
+
+        Ok(())
     }
 }

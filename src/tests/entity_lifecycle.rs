@@ -97,11 +97,7 @@ async fn test_delete_collection() {
 
     let test_context = test_context.reload().await;
     let collection_client = test_context
-        .get_test_collection_client(
-            collection_id,
-            write_api_key,
-            read_api_key,
-        )
+        .get_test_collection_client(collection_id, write_api_key, read_api_key)
         .unwrap();
 
     let err = collection_client
@@ -251,11 +247,7 @@ async fn test_delete_index_committed() {
 
     let test_context = test_context.reload().await;
     let collection_client = test_context
-        .get_test_collection_client(
-            collection_id,
-            write_api_key,
-            read_api_key,
-        )
+        .get_test_collection_client(collection_id, write_api_key, read_api_key)
         .unwrap();
 
     let result = collection_client
@@ -438,18 +430,13 @@ async fn test_unchanged_field_path_after_reload() {
 
     println!("offset-0: {offset_0_count}, offset-1: {offset_1_count}, offset-2: {offset_2_count}");
 
-
     let collection_id = collection_client.collection_id;
     let write_api_key = collection_client.write_api_key;
     let read_api_key = collection_client.read_api_key;
     // Reload
     let test_context = test_context.reload().await;
     let collection_client = test_context
-        .get_test_collection_client(
-            collection_id,
-            write_api_key,
-            read_api_key,
-        )
+        .get_test_collection_client(collection_id, write_api_key, read_api_key)
         .unwrap();
 
     // Try to search - this should work if paths are correct

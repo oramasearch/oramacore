@@ -109,16 +109,12 @@ async fn test_fulltext_search_should_work_after_commit() {
     let collection_id = collection_client.collection_id;
     let write_api_key = collection_client.write_api_key;
     let read_api_key = collection_client.read_api_key;
-    let index_id = index_client.index_id.clone();
+    let index_id = index_client.index_id;
 
     let test_context = test_context.reload().await;
 
     let collection_client = test_context
-        .get_test_collection_client(
-            collection_id,
-            write_api_key,
-            read_api_key,
-        )
+        .get_test_collection_client(collection_id, write_api_key, read_api_key)
         .unwrap();
 
     let output3 = collection_client
@@ -133,10 +129,7 @@ async fn test_fulltext_search_should_work_after_commit() {
         .unwrap();
     assert_eq!(output3.count, 1);
     assert_eq!(output3.hits.len(), 1);
-    assert_eq!(
-        output3.hits[0].id,
-        format!("{}:{}", index_id, "1")
-    );
+    assert_eq!(output3.hits[0].id, format!("{}:{}", index_id, "1"));
     assert!(output3.hits[0].score > 0.);
 
     // Committed before and after the reload should be the same
@@ -938,11 +931,7 @@ async fn test_fulltext_empty_term() {
     let test_context = test_context.reload().await;
 
     let collection_client = test_context
-        .get_test_collection_client(
-            collection_id,
-            write_api_key,
-            read_api_key,
-        )
+        .get_test_collection_client(collection_id, write_api_key, read_api_key)
         .unwrap();
 
     let output = collection_client

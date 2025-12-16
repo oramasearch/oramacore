@@ -138,7 +138,7 @@ pub async fn build_orama(
     }
 
     let llm_service = match LLMService::try_new(
-        config.ai_server.llm,
+        config.ai_server.llm.clone(),
         config.ai_server.remote_llms.clone(),
         local_gpu_manager.clone(),
     ) {
@@ -165,9 +165,7 @@ pub async fn build_orama(
     let nlp_service = Arc::new(nlp::NLPService::new());
 
     info!("Building Python service");
-    let python_service = Arc::new(python::PythonService::new(
-        config.ai_server.embeddings.as_ref().and_then(|e| e.execution_providers.clone()).unwrap_or_default()
-    )?);
+    let python_service = Arc::new(python::PythonService::new(config.ai_server.clone())?);
 
     #[cfg(feature = "writer")]
     let write_side = {

@@ -15,6 +15,7 @@ use tokio_stream::wrappers::ReceiverStream;
 use tracing::warn;
 
 use crate::ai::AIServiceEmbeddingsConfig;
+use crate::ai::PythonLoggingLevel;
 use crate::{
     ai::{AIServiceConfig, AIServiceLLMConfig},
     build_orama,
@@ -60,21 +61,6 @@ pub fn generate_new_path() -> PathBuf {
     dir
 }
 
-/*
-pub fn hooks_runtime_config() -> HooksRuntimeConfig {
-    HooksRuntimeConfig {
-        select_embeddings_properties: SelectEmbeddingsPropertiesHooksRuntimeConfig {
-            check_interval: DurationString::from_str("1s").unwrap(),
-            max_idle_time: DurationString::from_str("1s").unwrap(),
-            instances_count_per_code: 1,
-            queue_capacity: 1,
-            max_execution_time: DurationString::from_str("1s").unwrap(),
-            max_startup_time: DurationString::from_str("1s").unwrap(),
-        },
-    }
-}
-*/
-
 pub fn create_oramacore_config() -> OramacoreConfig {
     OramacoreConfig {
         log: Default::default(),
@@ -85,9 +71,15 @@ pub fn create_oramacore_config() -> OramacoreConfig {
             with_prometheus: false,
         },
         ai_server: AIServiceConfig {
+            models_cache_dir: "/tmp/fastembed_cache".to_string(),
+            total_threads: 4,
             embeddings: Some(AIServiceEmbeddingsConfig {
                 automatic_embeddings_selector: None,
-                execution_providers: Some(vec!["CPUExecutionProvider".to_string()]),
+                execution_providers: vec!["CPUExecutionProvider".to_string()],
+                default_model_group: "all".to_string(),
+                total_threads: 4,
+                dynamically_load_models: true,
+                level: PythonLoggingLevel::Error,
             }),
             llm: AIServiceLLMConfig {
                 local: true,
@@ -468,8 +460,8 @@ impl TestCollectionClient<'_> {
             index_id,
             write_api_key: self.write_api_key,
             read_api_key: self.read_api_key,
-            reader: &self.reader,
-            writer: &self.writer,
+            reader: self.reader,
+            writer: self.writer,
         })
     }
 
@@ -504,7 +496,7 @@ impl TestCollectionClient<'_> {
             .await?;
 
         wait_for(self, |s| {
-            let reader = s.reader.clone();
+            let reader = s.reader;
             let read_api_key = s.read_api_key;
             let collection_id = s.collection_id;
             async move {
@@ -539,7 +531,7 @@ impl TestCollectionClient<'_> {
             .await?;
 
         wait_for(self, |s| {
-            let reader = s.reader.clone();
+            let reader = s.reader;
             let read_api_key = s.read_api_key;
             let collection_id = s.collection_id;
             async move {
@@ -671,7 +663,7 @@ impl TestIndexClient<'_> {
             .await?;
 
         wait_for(self, |s| {
-            let reader = s.reader.clone();
+            let reader = s.reader;
             let read_api_key = s.read_api_key;
             let collection_id = s.collection_id;
             async move {
@@ -726,7 +718,7 @@ impl TestIndexClient<'_> {
             .await?;
 
         wait_for(self, |s| {
-            let reader = s.reader.clone();
+            let reader = s.reader;
             let read_api_key = s.read_api_key;
             let collection_id = s.collection_id;
             async move {
@@ -766,7 +758,7 @@ impl TestIndexClient<'_> {
             .await?;
 
         wait_for(self, |s| {
-            let reader = s.reader.clone();
+            let reader = s.reader;
             let read_api_key = s.read_api_key;
             let collection_id = s.collection_id;
             async move {
@@ -829,7 +821,7 @@ impl TestIndexClient<'_> {
             .context("Failed to insert pin_rule")?;
 
         wait_for(self, |s| {
-            let reader = s.reader.clone();
+            let reader = s.reader;
             let read_api_key = s.read_api_key;
             let collection_id = s.collection_id;
             let r = &rule_id;

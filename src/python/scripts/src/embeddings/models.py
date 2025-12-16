@@ -3,8 +3,8 @@ import logging
 import threading
 from typing import List, Optional
 from fastembed import TextEmbedding
+from pydantic import BaseModel, Field
 
-from src.utils import OramaAIConfig
 from src.embeddings.embeddings import embed_alternative, ModelGroups, OramaModelInfo
 
 logger = logging.getLogger(__name__)
@@ -40,17 +40,22 @@ MODEL_PASSAGE_INSTRUCTIONS_MAP = {
     "JinaEmbeddingsV2BaseCode": JINAEMBEDDINGSV2BASECODE_PASSAGE_INSTRUCTIONS,
 }
 
+class EmbeddingsModelsConfiguration(BaseModel):
+    """EmbeddingsModels configuration."""
+    execution_providers: List[str] = Field(description="execution_providers for the model")
+    dynamically_load_models: bool = Field(description="Whether to dynamically load models on demand")
+    default_model_group: str = Field(default="all", description="Default model group to use if no models are specified")
+
 
 class EmbeddingsModels:
-    def __init__(self, config: OramaAIConfig, selected_models: Optional[List[OramaModelInfo]] = None):
-        logger.info("Initializing EmbeddingsModels...", config.embeddings.execution_providers)
+    def __init__(self, config: EmbeddingsModelsConfiguration):
+        logger.info("Initializing EmbeddingsModels: %s", config)
         self.config = config
 
-        # Use ModelGroups.all as default if no models are provided
-        self.selected_models = selected_models if selected_models is not None else ModelGroups.all.value
+        self.selected_models = ModelGroups[self.config.default_model_group].value
         self.selected_model_names = [item.name for item in self.selected_models]
 
-        logger.info(f"Configured execution providers: {self.config.embeddings.execution_providers}")
+        logger.info(f"Configured execution providers: {self.config.execution_providers}")
 
         logger.info(f"Creating cache directory: /tmp/fastembed_cache")
         os.makedirs("/tmp/fastembed_cache", exist_ok=True)
@@ -69,11 +74,11 @@ class EmbeddingsModels:
         loaded_models = {}
 
         if not getattr(self.config, "dynamically_load_models", False):
-            logger.info(f"Pre-loading models with execution providers: {self.config.embeddings.execution_providers}")
+            logger.info(f"Pre-loading models with execution providers: {self.config.execution_providers}")
             loaded_models = {
                 item.name: TextEmbedding(
                     model_name=item.value["model_name"],
-                    providers=self.config.embeddings.execution_providers,
+                    providers=self.config.execution_providers,
                 )
                 for item in self.selected_models
             }
@@ -102,12 +107,12 @@ class EmbeddingsModels:
         if model_name in self.loaded_models:
             return list(embed_alternative(self.loaded_models[model_name], input_with_instructions))
 
-        if self.config.embeddings.dynamically_load_models:
+        if self.config.dynamically_load_models:
             with self.model_loading_lock:
                 if model_name not in self.loaded_models:
                     self.loaded_models[model_name] = TextEmbedding(
                         model_name=OramaModelInfo[model_name].value["model_name"],
-                        providers=self.config.embeddings.execution_providers,
+                        providers=self.config.execution_providers,
                     )
 
                 return list(embed_alternative(self.loaded_models[model_name], input_with_instructions))
