@@ -4,7 +4,7 @@ use anyhow::{Context, Result};
 use debug_panic::debug_panic;
 use oramacore_lib::fs::create_if_not_exists;
 use serde::{Deserialize, Serialize};
-use tracing::info;
+use tracing::{error, info};
 use zebo::Zebo;
 
 use crate::{
@@ -327,14 +327,22 @@ impl CollectionDocumentStorage {
                 .write_all()
                 .context("Cannot write documents")?;
         }
-        zebo.remove_documents(to_delete, false)
+        zebo.remove_documents(to_delete.clone(), false)
             .context("Cannot remove documents")?;
 
         self.uncommitted.clear();
 
         let mut deleted_documents_lock = self.deleted_documents.write("commit").await;
-        deleted_documents_lock.clear();
+        // We drop the memory used for tracking deletions
+        // NB: this operation is not atomic but commit stops writes, so it is safe
+        // otherwise we should remove only the committed deletions
+        **deleted_documents_lock = vec![];
         drop(deleted_documents_lock);
+
+        self.doc_id_map
+            .commit()
+            .await
+            .context("Cannot commit doc_id_str_map")?;
 
         drop(m);
 
@@ -346,8 +354,14 @@ impl CollectionDocumentStorage {
     }
 }
 
+enum DocumentIdStrMapUncommittedChange {
+    Insert(String, DocumentId),
+    Delete(String, DocumentId),
+}
+
 struct DocumentIdStrMap {
     doc_id_str_map_path: OramaAsyncLock<PathBuf>,
+    uncommitted: OramaAsyncLock<Vec<DocumentIdStrMapUncommittedChange>>,
 }
 impl DocumentIdStrMap {
     pub fn try_new(doc_id_str_map_path: PathBuf) -> Result<Self> {
@@ -365,31 +379,40 @@ impl DocumentIdStrMap {
 
         Ok(Self {
             doc_id_str_map_path: OramaAsyncLock::new("doc_id_str_map_path", doc_id_str_map_path),
+            uncommitted: OramaAsyncLock::new("uncommitted", Vec::new()),
         })
     }
 
     async fn update_doc_id_str_map<T>(&self, docs: &[(DocumentId, String, T)]) -> Result<()> {
-        // Update the doc_id_str map
-        let lock = self.doc_id_str_map_path.write("insert_document").await;
-        let mut f = std::fs::OpenOptions::new()
-            .read(true)
-            .write(true)
-            .open(&**lock)
-            .context("Cannot open doc_id_str_map file")?;
-        let mut map: HashMap<String, DocumentId> =
-            bincode::deserialize_from(&f).context("Cannot deserialize doc_id_str_map")?;
+        let mut lock = self.uncommitted.write("update_doc_id_str_map").await;
+        lock.reserve(docs.len());
         for (doc_id, doc_id_str, _) in docs {
-            map.insert(doc_id_str.clone(), *doc_id);
+            lock.push(DocumentIdStrMapUncommittedChange::Insert(
+                doc_id_str.clone(),
+                *doc_id,
+            ));
         }
-        f.seek(std::io::SeekFrom::Start(0))?;
-        bincode::serialize_into(&f, &map).context("Cannot serialize doc_id_str_map")?;
         drop(lock);
 
         Ok(())
     }
 
     async fn delete_doc_id_str_map(&self, doc_id_pairs: &[(DocumentId, String)]) -> Result<()> {
-        let lock = self.doc_id_str_map_path.write("insert_document").await;
+        let mut lock = self.uncommitted.write("update_doc_id_str_map").await;
+        lock.reserve(doc_id_pairs.len());
+        for (doc_id, doc_id_str) in doc_id_pairs {
+            lock.push(DocumentIdStrMapUncommittedChange::Delete(
+                doc_id_str.clone(),
+                *doc_id,
+            ));
+        }
+        drop(lock);
+
+        Ok(())
+    }
+
+    async fn commit(&self) -> Result<()> {
+        let lock = self.doc_id_str_map_path.write("commit").await;
         let mut f = std::fs::OpenOptions::new()
             .read(true)
             .write(true)
@@ -397,24 +420,32 @@ impl DocumentIdStrMap {
             .context("Cannot open doc_id_str_map file")?;
         let mut map: HashMap<String, DocumentId> =
             bincode::deserialize_from(&f).context("Cannot deserialize doc_id_str_map")?;
-        for (doc_id, doc_id_str) in doc_id_pairs {
-            if let Some(stored_doc_id) = map.get(doc_id_str) {
-                // Remove only if the stored ID matches the one being deleted
-                if stored_doc_id == doc_id {
-                    map.remove(doc_id_str);
-                } else {
-                    debug_panic!(
-                        "DocumentId mismatch for doc_id_str {}: expected {}, found {}",
-                        doc_id_str,
-                        doc_id.0,
-                        stored_doc_id.0
-                    );
+
+        let mut uncommitted_lock = self.uncommitted.write("commit").await;
+        for change in uncommitted_lock.drain(..) {
+            match change {
+                DocumentIdStrMapUncommittedChange::Insert(doc_id_str, doc_id) => {
+                    map.insert(doc_id_str, doc_id);
+                }
+                DocumentIdStrMapUncommittedChange::Delete(doc_id_str, doc_id) => {
+                    if let Some(existing_doc_id) = map.get(&doc_id_str) {
+                        if existing_doc_id != &doc_id {
+                            debug_panic!(
+                                "Trying to delete doc_id_str mapping for different DocumentId"
+                            );
+                            error!("Trying to delete doc_id_str mapping for different DocumentId");
+                        }
+                        map.remove(&doc_id_str);
+                    }
                 }
             }
         }
+        drop(uncommitted_lock);
+
         f.seek(std::io::SeekFrom::Start(0))?;
         bincode::serialize_into(&f, &map).context("Cannot serialize doc_id_str_map")?;
         drop(lock);
+
         Ok(())
     }
 
@@ -425,10 +456,10 @@ impl DocumentIdStrMap {
         doc_id_str: &[String],
     ) -> Result<HashMap<String, DocumentId>> {
         let mut ret = HashMap::with_capacity(doc_id_str.len());
-        let lock = self.doc_id_str_map_path.write("insert_document").await;
+        let file_path_lock = self.doc_id_str_map_path.write("insert_document").await;
         let f = std::fs::OpenOptions::new()
             .read(true)
-            .open(&**lock)
+            .open(&**file_path_lock)
             .context("Cannot open doc_id_str_map file")?;
         let map: HashMap<String, DocumentId> =
             bincode::deserialize_from(&f).context("Cannot deserialize doc_id_str_map")?;
@@ -438,6 +469,30 @@ impl DocumentIdStrMap {
                 ret.insert(doc_id_str.clone(), doc_id);
             }
         }
+
+        let uncommitted_lock = self.uncommitted.read("get_document_ids_by_str").await;
+        for change in &**uncommitted_lock {
+            match change {
+                DocumentIdStrMapUncommittedChange::Insert(doc_id_str_change, doc_id) => {
+                    if doc_id_str.contains(doc_id_str_change) {
+                        ret.insert(doc_id_str_change.clone(), *doc_id);
+                    }
+                }
+                DocumentIdStrMapUncommittedChange::Delete(doc_id_str, doc_id) => {
+                    if let Some(existing_doc_id) = map.get(doc_id_str) {
+                        if existing_doc_id != doc_id {
+                            debug_panic!(
+                                "Trying to delete doc_id_str mapping for different DocumentId"
+                            );
+                            error!("Trying to delete doc_id_str mapping for different DocumentId");
+                        }
+                        ret.remove(doc_id_str);
+                    }
+                }
+            }
+        }
+        drop(uncommitted_lock);
+        drop(file_path_lock);
 
         Ok(ret)
     }
