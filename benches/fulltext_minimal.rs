@@ -59,6 +59,8 @@ pub fn create_minimal_config() -> OramacoreConfig {
                 api_key: String::new(),
             },
             remote_llms: None,
+            models_cache_dir: "/tmp/fastembed_cache".to_string(),
+            total_threads: 12,
         },
         writer_side: WriteSideConfig {
             master_api_key: ApiKey::try_new("bench-master-key").unwrap(),

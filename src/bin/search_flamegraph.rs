@@ -110,6 +110,8 @@ fn create_test_config(build: bool) -> OramacoreConfig {
                 api_key: String::new(),
             },
             remote_llms: None,
+            models_cache_dir: "/tmp/fastembed_cache".to_string(),
+            total_threads: 4,
         },
         writer_side: WriteSideConfig {
             master_api_key: ApiKey::try_new("master-key").unwrap(),
