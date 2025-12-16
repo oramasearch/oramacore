@@ -122,13 +122,17 @@ async fn test_geosearch_commit() {
 
     test_context.commit_all().await.unwrap();
 
+    let collection_id = collection_client.collection_id;
+    let write_api_key = collection_client.write_api_key;
+    let read_api_key = collection_client.read_api_key;
+
     let test_context = test_context.reload().await;
 
     let collection_client = test_context
         .get_test_collection_client(
-            collection_client.collection_id,
-            collection_client.write_api_key,
-            collection_client.read_api_key,
+            collection_id,
+            write_api_key,
+            read_api_key,
         )
         .unwrap();
 
@@ -235,13 +239,18 @@ async fn test_add_delete_commit_reload_search() {
     // Commit changes
     test_context.commit_all().await.unwrap();
 
+    let collection_id = collection_client.collection_id;
+    let write_api_key = collection_client.write_api_key;
+    let read_api_key = collection_client.read_api_key;
+    let index_id = index_client.index_id.clone();
+
     // Reload context
     let test_context = test_context.reload().await;
     let collection_client = test_context
         .get_test_collection_client(
-            collection_client.collection_id,
-            collection_client.write_api_key,
-            collection_client.read_api_key,
+            collection_id,
+            write_api_key,
+            read_api_key,
         )
         .unwrap();
 
@@ -264,7 +273,7 @@ async fn test_add_delete_commit_reload_search() {
 
     let output = collection_client.search(p).await.unwrap();
     assert_eq!(output.count, 1);
-    assert_eq!(output.hits[0].id, format!("{}:2", index_client.index_id));
+    assert_eq!(output.hits[0].id, format!("{}:2", index_id));
 
     drop(test_context);
 }
@@ -366,13 +375,18 @@ async fn test_add_commit_delete_commit_reload_search() {
         .unwrap();
     test_context.commit_all().await.unwrap();
 
+    let collection_id = collection_client.collection_id;
+    let write_api_key = collection_client.write_api_key;
+    let read_api_key = collection_client.read_api_key;
+    let index_id = index_client.index_id.clone();
+
     // Reload context
     let test_context = test_context.reload().await;
     let collection_client = test_context
         .get_test_collection_client(
-            collection_client.collection_id,
-            collection_client.write_api_key,
-            collection_client.read_api_key,
+            collection_id,
+            write_api_key,
+            read_api_key,
         )
         .unwrap();
 
@@ -395,7 +409,7 @@ async fn test_add_commit_delete_commit_reload_search() {
 
     let output = collection_client.search(p).await.unwrap();
     assert_eq!(output.count, 1);
-    assert_eq!(output.hits[0].id, format!("{}:2", index_client.index_id));
+    assert_eq!(output.hits[0].id, format!("{}:2", index_id));
 
     drop(test_context);
 }

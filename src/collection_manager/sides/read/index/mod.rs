@@ -2166,8 +2166,8 @@ impl Index {
                 .context
                 .python_service
                 .embeddings_service
-                .clone()
-                .calculate_embeddings(vec![term.to_string()], Intent::Query, model)?;
+                .calculate_embeddings(vec![term.to_string()], Intent::Query, model)
+                .context("Cannot calculate embeddings")?;
 
             for target in targets {
                 uncommitted.search(&target, similarity.0, search_document_context, &mut output)?;

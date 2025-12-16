@@ -43,8 +43,9 @@ MODEL_PASSAGE_INSTRUCTIONS_MAP = {
 
 class EmbeddingsModels:
     def __init__(self, config: OramaAIConfig, selected_models: Optional[List[OramaModelInfo]] = None):
-        logger.info("Initializing EmbeddingsModels...")
+        logger.info("Initializing EmbeddingsModels...", config.embeddings.execution_providers)
         self.config = config
+
         # Use ModelGroups.all as default if no models are provided
         self.selected_models = selected_models if selected_models is not None else ModelGroups.all.value
         self.selected_model_names = [item.name for item in self.selected_models]

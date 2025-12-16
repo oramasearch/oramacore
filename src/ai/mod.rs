@@ -76,6 +76,7 @@ pub struct RemoteLLMsConfig {
 #[derive(Debug, Deserialize, Clone)]
 pub struct AIServiceEmbeddingsConfig {
     pub automatic_embeddings_selector: Option<InteractionLLMConfig>,
+    pub execution_providers: Option<Vec<String>>,
 }
 
 #[derive(Debug, Deserialize, Clone)]

@@ -15,7 +15,7 @@ pub struct PythonService {
 }
 
 impl PythonService {
-    pub fn new() -> PyResult<Self> {
+    pub fn new(providers: Vec<String>) -> PyResult<Self> {
         Python::initialize();
 
         let python_scripts_dir = Self::extract_python_scripts().map_err(|e| {
@@ -32,7 +32,7 @@ impl PythonService {
 
             Self::initialize_python_env(py, &python_scripts_dir)?;
 
-            let embeddings_serivce = embeddings::EmbeddingsService::new()?;
+            let embeddings_serivce = embeddings::EmbeddingsService::new(providers)?;
 
             Ok(PythonService {
                 embeddings_service: Arc::new(embeddings_serivce),

@@ -14,6 +14,7 @@ use tokio::{
 use tokio_stream::wrappers::ReceiverStream;
 use tracing::warn;
 
+use crate::ai::AIServiceEmbeddingsConfig;
 use crate::{
     ai::{AIServiceConfig, AIServiceLLMConfig},
     build_orama,
@@ -84,7 +85,10 @@ pub fn create_oramacore_config() -> OramacoreConfig {
             with_prometheus: false,
         },
         ai_server: AIServiceConfig {
-            embeddings: None,
+            embeddings: Some(AIServiceEmbeddingsConfig {
+                automatic_embeddings_selector: None,
+                execution_providers: Some(vec!["CPUExecutionProvider".to_string()]),
+            }),
             llm: AIServiceLLMConfig {
                 local: true,
                 host: "localhost".to_string(),
@@ -246,6 +250,7 @@ pub struct TestContext {
     pub writer: Arc<WriteSide>,
     pub master_api_key: ApiKey,
 }
+
 impl TestContext {
     pub async fn new() -> Self {
         let mut config: OramacoreConfig = create_oramacore_config();
@@ -340,8 +345,8 @@ impl TestContext {
             write_api_key,
             read_api_key,
             master_api_key: self.master_api_key,
-            reader: self.reader.clone(),
-            writer: self.writer.clone(),
+            reader: self.reader.as_ref(),
+            writer: self.writer.as_ref(),
         })
     }
 
@@ -352,11 +357,11 @@ impl TestContext {
         Ok(())
     }
 
-    fn generate_collection_id() -> CollectionId {
+    pub fn generate_collection_id() -> CollectionId {
         let id: String = Faker.fake();
         CollectionId::try_new(id).unwrap()
     }
-    fn generate_api_key() -> ApiKey {
+    pub fn generate_api_key() -> ApiKey {
         let id: String = Faker.fake();
         ApiKey::try_new(id).unwrap()
     }
@@ -378,15 +383,15 @@ impl Drop for TestContext {
     }
 }
 
-pub struct TestCollectionClient {
+pub struct TestCollectionClient<'test> {
     pub collection_id: CollectionId,
     pub write_api_key: WriteApiKey,
     pub read_api_key: ApiKey,
     master_api_key: ApiKey,
-    pub reader: Arc<ReadSide>,
-    pub writer: Arc<WriteSide>,
+    pub reader: &'test ReadSide,
+    pub writer: &'test WriteSide,
 }
-impl TestCollectionClient {
+impl TestCollectionClient<'_> {
     pub async fn create_index(&self) -> Result<TestIndexClient> {
         self.create_index_with_explicit_type_strategy(TypeParsingStrategies::default())
             .await
@@ -410,7 +415,7 @@ impl TestCollectionClient {
             .await?;
 
         wait_for(self, |s| {
-            let reader = s.reader.clone();
+            let reader = s.reader;
             let read_api_key = s.read_api_key;
             let collection_id = s.collection_id;
             async move {
@@ -463,8 +468,8 @@ impl TestCollectionClient {
             index_id,
             write_api_key: self.write_api_key,
             read_api_key: self.read_api_key,
-            reader: self.reader.clone(),
-            writer: self.writer.clone(),
+            reader: &self.reader,
+            writer: &self.writer,
         })
     }
 
@@ -615,15 +620,15 @@ impl TestCollectionClient {
     }
 }
 
-pub struct TestIndexClient {
+pub struct TestIndexClient<'test> {
     pub collection_id: CollectionId,
     pub index_id: IndexId,
     pub write_api_key: WriteApiKey,
     pub read_api_key: ApiKey,
-    pub reader: Arc<ReadSide>,
-    pub writer: Arc<WriteSide>,
+    pub reader: &'test ReadSide,
+    pub writer: &'test WriteSide,
 }
-impl TestIndexClient {
+impl TestIndexClient<'_> {
     pub async fn unchecked_insert_documents(
         &self,
         documents: DocumentList,

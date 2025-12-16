@@ -165,7 +165,9 @@ pub async fn build_orama(
     let nlp_service = Arc::new(nlp::NLPService::new());
 
     info!("Building Python service");
-    let python_service = Arc::new(python::PythonService::new()?);
+    let python_service = Arc::new(python::PythonService::new(
+        config.ai_server.embeddings.as_ref().and_then(|e| e.execution_providers.clone()).unwrap_or_default()
+    )?);
 
     #[cfg(feature = "writer")]
     let write_side = {

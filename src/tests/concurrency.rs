@@ -40,6 +40,12 @@ async fn test_insert_create_collection_concurrency() {
         .collect();
     let docs: DocumentList = docs.try_into().unwrap();
 
+    // Extract the Arc clones and data needed for thread 1
+    let writer1 = test_context.writer.clone();
+    let collection_id1 = index_client.collection_id;
+    let index_id1 = index_client.index_id;
+    let write_api_key1 = index_client.write_api_key;
+
     let events1 = events.clone();
     let mut receiver1 = sender.subscribe();
     let insert_document_handler = std::thread::spawn(move || {
@@ -48,7 +54,10 @@ async fn test_insert_create_collection_concurrency() {
             receiver1.recv().await.unwrap();
 
             let start = Utc::now();
-            index_client.insert_documents(docs).await.unwrap();
+            writer1
+                .insert_documents(write_api_key1, collection_id1, index_id1, docs)
+                .await
+                .unwrap();
             events1.lock().unwrap().push(LogType::InsertDocument {
                 start,
                 end: Utc::now(),
@@ -63,6 +72,10 @@ async fn test_insert_create_collection_concurrency() {
             .block_on(local)
     });
 
+    // Extract the Arc clones and data needed for thread 2
+    let writer2 = test_context.writer.clone();
+    let master_api_key2 = test_context.master_api_key;
+
     let events2 = events.clone();
     let mut receiver2 = sender.subscribe();
     let insert_collections_handler = std::thread::spawn(move || {
@@ -72,16 +85,33 @@ async fn test_insert_create_collection_concurrency() {
 
             for _ in 0..30 {
                 let start = Utc::now();
-                test_context.create_collection().await.unwrap();
+
+                // Inline collection creation logic
+                let id = crate::tests::utils::TestContext::generate_collection_id();
+                let write_api_key = crate::tests::utils::TestContext::generate_api_key();
+                let read_api_key = crate::tests::utils::TestContext::generate_api_key();
+
+                writer2
+                    .create_collection(
+                        master_api_key2,
+                        crate::types::CreateCollection {
+                            id,
+                            description: None,
+                            mcp_description: None,
+                            read_api_key,
+                            write_api_key,
+                            language: None,
+                            embeddings_model: Some(crate::python::embeddings::Model::BGESmall),
+                        },
+                    )
+                    .await
+                    .unwrap();
+
                 events2.lock().unwrap().push(LogType::CreateCollection {
                     start,
                     end: Utc::now(),
                 });
             }
-
-            // Leak the test_context to avoid run `drop`
-            // We don't care too much in tests...
-            Box::leak(Box::new(test_context));
         });
 
         // Let's tell the local set to run the async code and wait for it to finish.

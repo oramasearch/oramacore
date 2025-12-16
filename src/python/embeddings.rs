@@ -139,17 +139,25 @@ pub struct EmbeddingsService {
 }
 
 impl EmbeddingsService {
-    pub fn new() -> PyResult<Self> {
+    pub fn new(providers: Vec<String>) -> PyResult<Self> {
         Python::attach(|py| {
             let utils_module = py.import("src.utils")?;
             let config_class = utils_module.getattr("OramaAIConfig")?;
             let config = config_class.call0()?;
             let embeddings_config = config.getattr("embeddings")?;
 
+            // This is bad. We overwrite the config instead of passing it as parameter.
+            // But for now it works.
             config.setattr("dynamically_load_models", true)?;
             embeddings_config.setattr("dynamically_load_models", true)?;
+            embeddings_config.setattr("execution_providers", providers)?;
 
             let models_module = py.import("src.embeddings.models")?;
+
+            let logger = models_module.getattr("logger")?;
+            let sel_logger_level = logger.getattr("setLevel")?;
+            sel_logger_level.call1((20, ))?;
+
             let embeddings_class = models_module.getattr("EmbeddingsModels")?;
             let instance = embeddings_class.call1((config,))?;
 
@@ -186,7 +194,7 @@ mod tests {
     use super::*;
 
     static PYTHON_SERVICE: LazyLock<Arc<PythonService>> = LazyLock::new(|| {
-        Arc::new(PythonService::new().expect("Failed to initialize PythonService for tests"))
+        Arc::new(PythonService::new(vec!["CPUExecutionProvider".to_string()]).expect("Failed to initialize PythonService for tests"))
     });
 
     fn get_embeddings_service() -> Arc<EmbeddingsService> {
