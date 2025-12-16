@@ -368,7 +368,7 @@ impl DocumentIdStrMap {
         // Initialize empty map file if it does not exist
         if !doc_id_str_map_path.exists() {
             BufferedFile::create_or_overwrite(doc_id_str_map_path.clone())
-                .with_context(|| format!("Cannot create or overwrite {:?}", doc_id_str_map_path))?
+                .with_context(|| format!("Cannot create or overwrite {doc_id_str_map_path:?}"))?
                 .write_bincode_data(&DocumentIdStrMapDump::V1(
                     HashMap::<String, DocumentId>::new(),
                 ))
