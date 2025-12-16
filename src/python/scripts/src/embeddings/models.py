@@ -49,6 +49,8 @@ class EmbeddingsModels:
         self.selected_models = selected_models if selected_models is not None else ModelGroups.all.value
         self.selected_model_names = [item.name for item in self.selected_models]
 
+        logger.info(f"Configured execution providers: {self.config.embeddings.execution_providers}")
+
         logger.info(f"Creating cache directory: /tmp/fastembed_cache")
         os.makedirs("/tmp/fastembed_cache", exist_ok=True)
 
@@ -66,6 +68,7 @@ class EmbeddingsModels:
         loaded_models = {}
 
         if not getattr(self.config, "dynamically_load_models", False):
+            logger.info(f"Pre-loading models with execution providers: {self.config.embeddings.execution_providers}")
             loaded_models = {
                 item.name: TextEmbedding(
                     model_name=item.value["model_name"],
@@ -73,6 +76,8 @@ class EmbeddingsModels:
                 )
                 for item in self.selected_models
             }
+        else:
+            logger.info("Dynamic model loading enabled - models will be loaded on demand")
 
         return loaded_models
 
