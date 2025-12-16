@@ -1,6 +1,6 @@
 static ORAMA_CORE_VERSION: &str = env!("CARGO_PKG_VERSION");
 
-static ORAMA_CORE_COMMIT: Option<&str> = option_env!("GIT_COMMIT");
+static ORAMA_CORE_COMMIT: Option<&'static str> = option_env!("GIT_COMMIT");
 static GITHUB_SHA: Option<&'static str> = option_env!("GITHUB_SHA");
 
 pub fn get_mode() -> &'static str {
@@ -16,14 +16,14 @@ pub fn get_mode() -> &'static str {
 }
 
 pub fn get_build_info() -> String {
-    let version = GITHUB_SHA.unwrap_or(ORAMA_CORE_VERSION);
-    let commit = ORAMA_CORE_COMMIT.unwrap_or("unknown");
+    let version = ORAMA_CORE_VERSION;
+    let commit = GITHUB_SHA.or(ORAMA_CORE_COMMIT).unwrap_or("unknown");
     let mode = get_mode();
     format!("OramaCore version: {version} (commit: {commit}) - {mode}")
 }
 pub fn get_build_version() -> String {
-    let version = GITHUB_SHA.unwrap_or(ORAMA_CORE_VERSION);
-    let commit = ORAMA_CORE_COMMIT.unwrap_or("unknown");
+    let version = ORAMA_CORE_VERSION;
+    let commit = GITHUB_SHA.or(ORAMA_CORE_COMMIT).unwrap_or("unknown");
 
     let mode = get_mode();
     format!("{version}@{commit} - {mode}")
