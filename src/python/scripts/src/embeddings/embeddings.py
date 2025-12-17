@@ -11,7 +11,11 @@ _thread_executor = None
 def initialize_thread_executor(max_workers=None):
     global _thread_executor
     if _thread_executor is None:
-        _thread_executor = ThreadPoolExecutor(max_workers=max_workers)
+        _thread_executor = ThreadPoolExecutor(
+            max_workers=max_workers,
+            thread_name_prefix="embedding-worker-",
+            initializer=lambda: print("Thread initialized for embedding processing."),
+        )
 
 
 def set_thread_executor(executor):
