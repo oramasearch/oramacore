@@ -20,7 +20,8 @@ impl PythonService {
     pub fn new(orama_config: AIServiceConfig) -> PyResult<Self> {
         // This initialization could not be required because it is already called in main function
         // `initialize` has to be called in the main thread.
-        // We don't know here if we are in the main thread or not, but calling it multiple times is safe.
+        // Don't call it here to avoid issues.
+        // Don't uncomment the next line even if you know what you're doing.
         // Python::initialize();
 
         let python_scripts_dir = Self::extract_python_scripts().map_err(|e| {

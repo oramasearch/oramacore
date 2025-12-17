@@ -62,8 +62,9 @@ impl WebServer {
             router
         };
 
-        let listener = tokio::net::TcpListener::bind(addr).await
-            .map_err(|e| anyhow::anyhow!("Failed to bind to address {}: {}", addr, e))?;
+        let listener = tokio::net::TcpListener::bind(addr)
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to bind to address {addr}: {e}"))?;
 
         info!("Address binded. Starting web server on http://{}", addr);
         let output = axum::serve(listener, router)
