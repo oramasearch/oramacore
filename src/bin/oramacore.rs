@@ -7,6 +7,7 @@ use config::Config;
 use itertools::Itertools;
 use oramacore::build_info::get_build_version;
 use oramacore::{start, OramacoreConfig};
+use pyo3::Python;
 use tracing::level_filters::LevelFilter;
 use tracing::{error, instrument, warn};
 use tracing_subscriber::layer::SubscriberExt;
@@ -35,6 +36,13 @@ fn load_config() -> Result<OramacoreConfig> {
 }
 
 fn main() -> anyhow::Result<()> {
+    // `initialize` invocation is required to setup the Python interpreter correctly.
+    // We do it here to ensure it is called from the main thread.
+    // If it doesn't initialize on the main thread,
+    // bad stuff happens.
+    // So, don't remove the next line.
+    Python::initialize();
+
     let build_info = oramacore::build_info::get_build_info();
     println!("{build_info}",);
 
