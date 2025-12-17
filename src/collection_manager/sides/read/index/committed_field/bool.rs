@@ -10,7 +10,7 @@ use tracing::info;
 use crate::{
     collection_manager::sides::read::{
         index::{
-            merge::{CommittedField, CommittedFieldMetadata, Field},
+            merge::{CommittedField, CommittedFieldMetadata, Field, Filterable},
             uncommitted_field::UncommittedBoolField,
         },
         OffloadFieldConfig,
@@ -206,6 +206,27 @@ impl Field for CommittedBoolField {
             false_count: self.map.get(&false).map_or(0, |set| set.len()),
             true_count: self.map.get(&true).map_or(0, |set| set.len()),
         }
+    }
+}
+
+impl Filterable for CommittedBoolField {
+    type FilterParam = bool;
+
+    fn filter<'s, 'iter>(
+        &'s self,
+        filter_param: Self::FilterParam,
+    ) -> Result<Box<dyn Iterator<Item = DocumentId> + 'iter>>
+    where
+        's: 'iter,
+    {
+        // The existing filter uses .unwrap(), but we should handle the case where the key might not exist
+        // This can happen with corrupted data or during transition states
+        let docs = self
+            .map
+            .get(&filter_param)
+            .ok_or_else(|| anyhow::anyhow!("Boolean value {} not found in index", filter_param))?;
+
+        Ok(Box::new(docs.iter().copied()))
     }
 }
 

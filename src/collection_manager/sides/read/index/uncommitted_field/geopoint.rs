@@ -1,9 +1,11 @@
 use oramacore_lib::bkd::{haversine_distance, BKDTree, Coord, Point};
 use serde::Serialize;
 
+use anyhow::Result;
+
 use crate::{
     collection_manager::sides::{
-        read::index::merge::{Field, UncommittedField},
+        read::index::merge::{Field, Filterable, UncommittedField},
         write::index::GeoPoint,
     },
     types::{DocumentId, GeoSearchFilter},
@@ -111,4 +113,48 @@ impl Field for UncommittedGeoPointFilterField {
 #[derive(Serialize, Debug)]
 pub struct UncommittedGeoPointFieldStats {
     pub count: usize,
+}
+
+impl Filterable for UncommittedGeoPointFilterField {
+    type FilterParam = GeoSearchFilter;
+
+    fn filter<'s, 'iter>(
+        &'s self,
+        filter_param: Self::FilterParam,
+    ) -> Result<Box<dyn Iterator<Item = DocumentId> + 'iter>>
+    where
+        's: 'iter,
+    {
+        // The existing filter method already returns Box<dyn Iterator>
+        // We just need to wrap it in Ok() since our trait returns Result
+        self.inner.display(0);
+
+        let iter = match &filter_param {
+            GeoSearchFilter::Radius(filter) => Box::new(
+                self.inner
+                    .search_by_radius(
+                        Coord::new(filter.coordinates.lat, filter.coordinates.lon),
+                        filter.value.to_meter(filter.unit),
+                        haversine_distance,
+                        filter.inside,
+                    )
+                    .copied(),
+            ) as Box<dyn Iterator<Item = DocumentId>>,
+            GeoSearchFilter::Polygon(filter) => {
+                let iter = self
+                    .inner
+                    .search_by_polygon(
+                        filter
+                            .coordinates
+                            .iter()
+                            .map(|g| Coord::new(g.lat, g.lon))
+                            .collect(),
+                        false,
+                    )
+                    .copied();
+                Box::new(iter) as Box<dyn Iterator<Item = DocumentId>>
+            }
+        };
+        Ok(iter)
+    }
 }

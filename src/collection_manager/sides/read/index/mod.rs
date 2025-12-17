@@ -25,7 +25,7 @@ use crate::{
                         CommittedVectorField, DateFieldInfo, GeoPointFieldInfo, StringFieldInfo,
                     },
                     merge::{
-                        merge_field, CommittedField, CommittedFieldMetadata, Field,
+                        merge_field, CommittedField, CommittedFieldMetadata, Field, Filterable,
                         UncommittedField,
                     },
                 },
@@ -1647,6 +1647,71 @@ impl Index {
             uncommitted_fields: &UncommittedFields,
             committed_fields: &CommittedFields,
         ) -> Result<FilterResult<DocumentId>> {
+            /// Generic helper function to filter documents across uncommitted and committed fields.
+            ///
+            /// This function:
+            /// 1. Retrieves the uncommitted field and applies the filter
+            /// 2. Retrieves the committed field (if it exists) and applies the filter
+            /// 3. Combines results using OR logic (documents match if in either uncommitted or committed)
+            ///
+            /// # Arguments
+            /// - `document_count_estimate`: Estimated total document count for optimization
+            /// - `uncommitted_fields`: HashMap of uncommitted fields by FieldId
+            /// - `committed_fields`: HashMap of committed fields by FieldId
+            /// - `field_id`: The specific field to filter on
+            /// - `filter_param`: The filter criteria
+            /// - `field_name`: Human-readable field name for error messages
+            fn apply_filter_generic<UF, CF, FP>(
+                document_count_estimate: u64,
+                uncommitted_fields: &HashMap<FieldId, UF>,
+                committed_fields: &HashMap<FieldId, CF>,
+                field_id: FieldId,
+                filter_param: FP,
+                field_name: &str,
+            ) -> Result<FilterResult<DocumentId>>
+            where
+                UF: Filterable<FilterParam = FP>,
+                CF: Filterable<FilterParam = FP>,
+                FP: Clone,
+            {
+                // Get uncommitted field (must exist)
+                let uncommitted_field = uncommitted_fields
+                    .get(&field_id)
+                    .ok_or_else(|| {
+                        anyhow::anyhow!("Cannot filter by \"{}\": unknown field", field_name)
+                    })?;
+
+                // Filter uncommitted documents
+                let uncommitted_docs = uncommitted_field
+                    .filter(filter_param.clone())
+                    .context("Failed to filter uncommitted field")?;
+
+                let mut filtered = FilterResult::Filter(PlainFilterResult::from_iter(
+                    document_count_estimate,
+                    uncommitted_docs,
+                ));
+
+                // Filter committed documents if they exist
+                if let Some(committed_field) = committed_fields.get(&field_id) {
+                    let committed_docs = committed_field
+                        .filter(filter_param)
+                        .with_context(|| {
+                            format!("Cannot filter by \"{}\": unknown field", field_name)
+                        })?;
+
+                    // Combine uncommitted and committed results with OR
+                    filtered = FilterResult::or(
+                        filtered,
+                        FilterResult::Filter(PlainFilterResult::from_iter(
+                            document_count_estimate,
+                            committed_docs,
+                        )),
+                    );
+                }
+
+                Ok(filtered)
+            }
+
             let mut results = Vec::new();
 
             for (k, filter) in &where_filter.filter_on_fields {
@@ -1661,164 +1726,51 @@ impl Index {
                     Some((field_id, field_type)) => (field_id, field_type),
                 };
 
-                match (field_type, filter) {
-                    (FieldType::Bool, Filter::Bool(filter_bool)) => {
-                        let uncommitted_field = uncommitted_fields
-                            .bool_fields
-                            .get(&field_id)
-                            .ok_or_else(|| {
-                                anyhow::anyhow!("Cannot filter by \"{}\": unknown field", &k)
-                            })?;
-
-                        // We could check if uncommitted_field is empty
-                        // If so, we could skip the filter and the `and` operation
-                        // TODO: improve this
-
-                        let filtered = PlainFilterResult::from_iter(
-                            document_count_estimate,
-                            uncommitted_field.filter(*filter_bool),
-                        );
-                        let mut filtered = FilterResult::Filter(filtered);
-
-                        let committed_field = committed_fields.bool_fields.get(&field_id);
-                        if let Some(committed_field) = committed_field {
-                            let committed_docs =
-                                committed_field.filter(*filter_bool).with_context(|| {
-                                    format!("Cannot filter by \"{}\": unknown field", &k)
-                                })?;
-
-                            filtered = FilterResult::or(
-                                filtered,
-                                FilterResult::Filter(PlainFilterResult::from_iter(
-                                    document_count_estimate,
-                                    committed_docs,
-                                )),
-                            );
-                        }
-
-                        results.push(filtered);
-                    }
-                    (FieldType::Date, Filter::Date(filter_date)) => {
-                        let uncommitted_field = uncommitted_fields
-                            .date_fields
-                            .get(&field_id)
-                            .ok_or_else(|| {
-                                anyhow::anyhow!("Cannot filter by \"{}\": unknown field", &k)
-                            })?;
-
-                        let filtered = PlainFilterResult::from_iter(
-                            document_count_estimate,
-                            uncommitted_field.filter(filter_date),
-                        );
-                        let mut filtered = FilterResult::Filter(filtered);
-
-                        let committed_field = committed_fields.date_fields.get(&field_id);
-                        if let Some(committed_field) = committed_field {
-                            let committed_docs =
-                                committed_field.filter(filter_date).with_context(|| {
-                                    format!("Cannot filter by \"{}\": unknown field", &k)
-                                })?;
-
-                            filtered = FilterResult::or(
-                                filtered,
-                                FilterResult::Filter(PlainFilterResult::from_iter(
-                                    document_count_estimate,
-                                    committed_docs,
-                                )),
-                            );
-                        }
-
-                        results.push(filtered);
-                    }
-                    (FieldType::Number, Filter::Number(filter_number)) => {
-                        let uncommitted_field = uncommitted_fields
-                            .number_fields
-                            .get(&field_id)
-                            .ok_or_else(|| {
-                                anyhow::anyhow!("Cannot filter by \"{}\": unknown field", &k)
-                            })?;
-
-                        let filtered = PlainFilterResult::from_iter(
-                            document_count_estimate,
-                            uncommitted_field.filter(filter_number),
-                        );
-                        let mut filtered = FilterResult::Filter(filtered);
-
-                        let committed_field = committed_fields.number_fields.get(&field_id);
-                        if let Some(committed_field) = committed_field {
-                            let committed_docs =
-                                committed_field.filter(filter_number).with_context(|| {
-                                    format!("Cannot filter by \"{}\": unknown field", &k)
-                                })?;
-
-                            filtered = FilterResult::or(
-                                filtered,
-                                FilterResult::Filter(PlainFilterResult::from_iter(
-                                    document_count_estimate,
-                                    committed_docs,
-                                )),
-                            );
-                        }
-
-                        results.push(filtered);
-                    }
+                // Use generic filter helper to eliminate code duplication
+                let filtered = match (field_type, filter) {
+                    (FieldType::Bool, Filter::Bool(filter_bool)) => apply_filter_generic(
+                        document_count_estimate,
+                        &uncommitted_fields.bool_fields,
+                        &committed_fields.bool_fields,
+                        field_id,
+                        *filter_bool,
+                        k,
+                    )?,
+                    (FieldType::Number, Filter::Number(filter_number)) => apply_filter_generic(
+                        document_count_estimate,
+                        &uncommitted_fields.number_fields,
+                        &committed_fields.number_fields,
+                        field_id,
+                        filter_number.clone(),
+                        k,
+                    )?,
+                    (FieldType::Date, Filter::Date(filter_date)) => apply_filter_generic(
+                        document_count_estimate,
+                        &uncommitted_fields.date_fields,
+                        &committed_fields.date_fields,
+                        field_id,
+                        filter_date.clone(),
+                        k,
+                    )?,
                     (FieldType::StringFilter, Filter::String(filter_string)) => {
-                        let uncommitted_field = uncommitted_fields
-                            .string_filter_fields
-                            .get(&field_id)
-                            .ok_or_else(|| {
-                                anyhow::anyhow!("Cannot filter by \"{}\": unknown field", &k)
-                            })?;
-
-                        let filtered = PlainFilterResult::from_iter(
+                        apply_filter_generic(
                             document_count_estimate,
-                            uncommitted_field.filter(filter_string),
-                        );
-                        let mut filtered = FilterResult::Filter(filtered);
-
-                        let committed_field = committed_fields.string_filter_fields.get(&field_id);
-                        if let Some(committed_field) = committed_field {
-                            let committed_docs = committed_field.filter(filter_string);
-
-                            filtered = FilterResult::or(
-                                filtered,
-                                FilterResult::Filter(PlainFilterResult::from_iter(
-                                    document_count_estimate,
-                                    committed_docs,
-                                )),
-                            );
-                        }
-
-                        results.push(filtered);
+                            &uncommitted_fields.string_filter_fields,
+                            &committed_fields.string_filter_fields,
+                            field_id,
+                            filter_string.clone(),
+                            k,
+                        )?
                     }
                     (FieldType::GeoPoint, Filter::GeoPoint(geopoint_filter)) => {
-                        let uncommitted_field = uncommitted_fields
-                            .geopoint_fields
-                            .get(&field_id)
-                            .ok_or_else(|| {
-                            anyhow::anyhow!("Cannot filter by \"{}\": unknown field", &k)
-                        })?;
-
-                        let filtered = PlainFilterResult::from_iter(
+                        apply_filter_generic(
                             document_count_estimate,
-                            uncommitted_field.filter(geopoint_filter),
-                        );
-                        let mut filtered = FilterResult::Filter(filtered);
-
-                        let committed_field = committed_fields.geopoint_fields.get(&field_id);
-                        if let Some(committed_field) = committed_field {
-                            let committed_docs = committed_field.filter(geopoint_filter);
-
-                            filtered = FilterResult::or(
-                                filtered,
-                                FilterResult::Filter(PlainFilterResult::from_iter(
-                                    document_count_estimate,
-                                    committed_docs,
-                                )),
-                            );
-                        }
-
-                        results.push(filtered);
+                            &uncommitted_fields.geopoint_fields,
+                            &committed_fields.geopoint_fields,
+                            field_id,
+                            geopoint_filter.clone(),
+                            k,
+                        )?
                     }
                     _ => {
                         // If the user specified a field that is not in the index,
@@ -1827,7 +1779,9 @@ impl Index {
                             document_count_estimate,
                         )));
                     }
-                }
+                };
+
+                results.push(filtered);
             }
 
             if let Some(filter) = where_filter.and.as_ref() {

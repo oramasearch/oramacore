@@ -5,8 +5,10 @@ use std::{
 
 use serde::Serialize;
 
+use anyhow::Result;
+
 use crate::{
-    collection_manager::sides::read::index::merge::{Field, UncommittedField},
+    collection_manager::sides::read::index::merge::{Field, Filterable, UncommittedField},
     types::{DateFilter, DocumentId, OramaDate},
 };
 
@@ -144,4 +146,20 @@ pub struct UncommittedDateFieldStats {
     pub min: Option<OramaDate>,
     pub max: Option<OramaDate>,
     pub count: usize,
+}
+
+impl Filterable for UncommittedDateFilterField {
+    type FilterParam = DateFilter;
+
+    fn filter<'s, 'iter>(
+        &'s self,
+        filter_param: Self::FilterParam,
+    ) -> Result<Box<dyn Iterator<Item = DocumentId> + 'iter>>
+    where
+        's: 'iter,
+    {
+        // Reuse the existing inner_filter function
+        let iter = inner_filter(&self.inner, &filter_param);
+        Ok(Box::new(iter))
+    }
 }

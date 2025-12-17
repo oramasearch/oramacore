@@ -2,8 +2,10 @@ use std::collections::HashSet;
 
 use serde::Serialize;
 
+use anyhow::Result;
+
 use crate::{
-    collection_manager::sides::read::index::merge::{Field, UncommittedField},
+    collection_manager::sides::read::index::merge::{Field, Filterable, UncommittedField},
     types::DocumentId,
 };
 
@@ -83,4 +85,24 @@ impl Field for UncommittedBoolField {
 pub struct UncommittedBoolFieldStats {
     pub false_count: usize,
     pub true_count: usize,
+}
+
+impl Filterable for UncommittedBoolField {
+    type FilterParam = bool;
+
+    fn filter<'s, 'iter>(
+        &'s self,
+        filter_param: Self::FilterParam,
+    ) -> Result<Box<dyn Iterator<Item = DocumentId> + 'iter>>
+    where
+        's: 'iter,
+    {
+        // Use the existing filter logic: true docs are in inner.0, false docs in inner.1
+        let iter: Box<dyn Iterator<Item = DocumentId> + 'iter> = if filter_param {
+            Box::new(self.inner.0.iter().copied())
+        } else {
+            Box::new(self.inner.1.iter().copied())
+        };
+        Ok(iter)
+    }
 }

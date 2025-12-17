@@ -7,7 +7,7 @@ use crate::{
     collection_manager::sides::read::{
         index::{
             committed_field::number::get_iter,
-            merge::{CommittedField, CommittedFieldMetadata, Field},
+            merge::{CommittedField, CommittedFieldMetadata, Field, Filterable},
             uncommitted_field::UncommittedDateFilterField,
         },
         OffloadFieldConfig,
@@ -203,6 +203,42 @@ impl Field for CommittedDateField {
         let max = OramaDate::try_from_i64(max);
 
         CommittedDateFieldStats { min, max }
+    }
+}
+
+impl Filterable for CommittedDateField {
+    type FilterParam = DateFilter;
+
+    fn filter<'s, 'iter>(
+        &'s self,
+        filter_param: Self::FilterParam,
+    ) -> Result<Box<dyn Iterator<Item = DocumentId> + 'iter>>
+    where
+        's: 'iter,
+    {
+        // Reuse the existing filter logic with get_iter from number.rs
+        let iter = match &filter_param {
+            DateFilter::Equal(value) => {
+                let timestamp = value.as_i64();
+                get_iter(&self.vec, (true, timestamp), (true, timestamp))
+            }
+            DateFilter::Between((min, max)) => {
+                get_iter(&self.vec, (true, min.as_i64()), (true, max.as_i64()))
+            }
+            DateFilter::GreaterThan(min) => {
+                get_iter(&self.vec, (false, min.as_i64()), (false, i64::MAX))
+            }
+            DateFilter::GreaterThanOrEqual(min) => {
+                get_iter(&self.vec, (true, min.as_i64()), (false, i64::MAX))
+            }
+            DateFilter::LessThan(max) => {
+                get_iter(&self.vec, (false, i64::MIN), (false, max.as_i64()))
+            }
+            DateFilter::LessThanOrEqual(max) => {
+                get_iter(&self.vec, (false, i64::MIN), (true, max.as_i64()))
+            }
+        };
+        Ok(Box::new(iter))
     }
 }
 

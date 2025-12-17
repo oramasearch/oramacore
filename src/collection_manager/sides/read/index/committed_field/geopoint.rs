@@ -6,7 +6,7 @@ use oramacore_lib::bkd::{haversine_distance, BKDTree, Coord};
 use serde::{Deserialize, Serialize};
 
 use crate::collection_manager::sides::read::index::merge::{
-    CommittedField, CommittedFieldMetadata, Field,
+    CommittedField, CommittedFieldMetadata, Field, Filterable,
 };
 use crate::collection_manager::sides::read::index::uncommitted_field::UncommittedGeoPointFilterField;
 use crate::collection_manager::sides::read::OffloadFieldConfig;
@@ -176,6 +176,48 @@ impl Field for CommittedGeoPointField {
         CommittedGeoPointFieldStats {
             count: self.tree.len(),
         }
+    }
+}
+
+impl Filterable for CommittedGeoPointField {
+    type FilterParam = GeoSearchFilter;
+
+    fn filter<'s, 'iter>(
+        &'s self,
+        filter_param: Self::FilterParam,
+    ) -> Result<Box<dyn Iterator<Item = DocumentId> + 'iter>>
+    where
+        's: 'iter,
+    {
+        // The existing filter method already returns Box<dyn Iterator>
+        // We just need to wrap it in Ok() since our trait returns Result
+        let iter = match &filter_param {
+            GeoSearchFilter::Radius(filter) => Box::new(
+                self.tree
+                    .search_by_radius(
+                        Coord::new(filter.coordinates.lat, filter.coordinates.lon),
+                        filter.value.to_meter(filter.unit),
+                        haversine_distance,
+                        filter.inside,
+                    )
+                    .copied(),
+            ) as Box<dyn Iterator<Item = DocumentId>>,
+            GeoSearchFilter::Polygon(filter) => {
+                let iter = self
+                    .tree
+                    .search_by_polygon(
+                        filter
+                            .coordinates
+                            .iter()
+                            .map(|g| Coord::new(g.lat, g.lon))
+                            .collect(),
+                        false,
+                    )
+                    .copied();
+                Box::new(iter) as Box<dyn Iterator<Item = DocumentId>>
+            }
+        };
+        Ok(iter)
     }
 }
 
