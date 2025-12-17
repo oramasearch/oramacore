@@ -53,44 +53,54 @@ def embed_alternative(model, input_strings, batch_size=256):
 
 def extend_supported_models():
     from fastembed.text.onnx_embedding import supported_onnx_models
+    from fastembed.common.model_description import DenseModelDescription, ModelSource
 
     new_models = [
-        {
-            "model": "intfloat/multilingual-e5-small",
-            "dim": 384,
-            "description": "Text embeddings, Multilingual (~100 languages)",
-            "license": "mit",
-            "size_in_GB": 0.4,
-            "sources": {"hf": "intfloat/multilingual-e5-small"},
-            "model_file": "onnx/model.onnx",
-        },
-        {
-            "model": "intfloat/multilingual-e5-base",
-            "dim": 768,
-            "description": "Text embeddings, Multilingual (~100 languages)",
-            "license": "mit",
-            "size_in_GB": 1.11,
-            "sources": {"hf": "intfloat/multilingual-e5-base"},
-            "model_file": "onnx/model.onnx",
-        },
-        {
-            "model": "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
-            "dim": 768,
-            "description": "Text embeddings in many languages",
-            "license": "apache-2.0",
-            "size_in_GB": 0.4,
-            "sources": {"hf": "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"},
-            "model_file": "onnx/model.onnx",
-        },
-        {
-            "model": "jinaai/jina-embeddings-v2-base-code",
-            "dim": 768,
-            "description": "Text embeddings for code and english",
-            "license": "apache-2.0",
-            "size_in_GB": 0.6,
-            "sources": {"hf": "jinaai/jina-embeddings-v2-base-code"},
-            "model_file": "onnx/model.onnx",
-        },
+        DenseModelDescription(
+            model="intfloat/multilingual-e5-large",
+            sources=ModelSource(hf="intfloat/multilingual-e5-large"),
+            model_file="onnx/model.onnx",
+            description="Text embeddings, Multilingual (~100 languages)",
+            license="mit",
+            size_in_GB=0.4,
+            dim=1024,
+        ),
+        DenseModelDescription(
+            model="intfloat/multilingual-e5-base",
+            sources=ModelSource(hf="intfloat/multilingual-e5-base"),
+            model_file="onnx/model.onnx",
+            description="Text embeddings, Multilingual (~100 languages)",
+            license="mit",
+            size_in_GB=1.11,
+            dim=768,
+        ),
+        DenseModelDescription(
+            model="intfloat/multilingual-e5-small",
+            sources=ModelSource(hf="intfloat/multilingual-e5-small"),
+            model_file="onnx/model.onnx",
+            description="Text embeddings, Multilingual (~100 languages)",
+            license="mit",
+            size_in_GB=1.11,
+            dim=768,
+        ),
+        DenseModelDescription(
+            model="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+            sources=ModelSource(hf="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"),
+            model_file="onnx/model.onnx",
+            description="Text embeddings in many languages",
+            license="apache-2.0",
+            size_in_GB=0.4,
+            dim=768,
+        ),
+        DenseModelDescription(
+            model="jinaai/jina-embeddings-v2-base-code",
+            sources=ModelSource(hf="jinaai/jina-embeddings-v2-base-code"),
+            model_file="onnx/model.onnx",
+            description="Text embeddings for code and english",
+            license="apache-2.0",
+            size_in_GB=0.6,
+            dim=768,
+        )
     ]
 
     for model in new_models:
