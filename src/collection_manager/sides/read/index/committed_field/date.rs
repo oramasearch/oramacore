@@ -33,32 +33,6 @@ impl CommittedDateField {
         Ok(())
     }
 
-    pub fn filter(
-        &self,
-        filter_date: &DateFilter,
-    ) -> Result<impl Iterator<Item = DocumentId> + '_> {
-        Ok(match filter_date {
-            DateFilter::Equal(value) => {
-                get_iter(&self.vec, (true, value.as_i64()), (true, value.as_i64()))
-            }
-            DateFilter::Between((min, max)) => {
-                get_iter(&self.vec, (true, min.as_i64()), (true, max.as_i64()))
-            }
-            DateFilter::GreaterThan(min) => {
-                get_iter(&self.vec, (false, min.as_i64()), (false, i64::MAX))
-            }
-            DateFilter::GreaterThanOrEqual(min) => {
-                get_iter(&self.vec, (true, min.as_i64()), (false, i64::MAX))
-            }
-            DateFilter::LessThan(max) => {
-                get_iter(&self.vec, (false, i64::MIN), (false, max.as_i64()))
-            }
-            DateFilter::LessThanOrEqual(max) => {
-                get_iter(&self.vec, (false, i64::MIN), (true, max.as_i64()))
-            }
-        })
-    }
-
     pub fn iter(&self) -> impl DoubleEndedIterator<Item = (i64, HashSet<DocumentId>)> + '_ {
         self.vec.iter().cloned()
     }

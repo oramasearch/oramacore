@@ -38,16 +38,6 @@ impl UncommittedDateFilterField {
         self.inner.entry(value).or_default().insert(doc_id);
     }
 
-    pub fn filter<'s, 'iter>(
-        &'s self,
-        filter_date: &DateFilter,
-    ) -> impl Iterator<Item = DocumentId> + 'iter
-    where
-        's: 'iter,
-    {
-        inner_filter(&self.inner, filter_date)
-    }
-
     pub fn iter(&self) -> impl DoubleEndedIterator<Item = (i64, HashSet<DocumentId>)> + '_ {
         self.inner
             .iter()

@@ -48,43 +48,6 @@ impl UncommittedGeoPointFilterField {
     pub fn iter(&self) -> impl Iterator<Item = &Point<f32, DocumentId>> + '_ {
         self.inner.iter()
     }
-
-    pub fn filter<'s, 'iter>(
-        &'s self,
-        filter_geopoint: &GeoSearchFilter,
-    ) -> Box<dyn Iterator<Item = DocumentId> + 'iter>
-    where
-        's: 'iter,
-    {
-        self.inner.display(0);
-
-        match filter_geopoint {
-            GeoSearchFilter::Radius(filter) => Box::new(
-                self.inner
-                    .search_by_radius(
-                        Coord::new(filter.coordinates.lat, filter.coordinates.lon),
-                        filter.value.to_meter(filter.unit),
-                        haversine_distance,
-                        filter.inside,
-                    )
-                    .copied(),
-            ),
-            GeoSearchFilter::Polygon(filter) => {
-                let iter = self
-                    .inner
-                    .search_by_polygon(
-                        filter
-                            .coordinates
-                            .iter()
-                            .map(|g| Coord::new(g.lat, g.lon))
-                            .collect(),
-                        false,
-                    )
-                    .copied();
-                Box::new(iter)
-            }
-        }
-    }
 }
 
 impl UncommittedField for UncommittedGeoPointFilterField {
