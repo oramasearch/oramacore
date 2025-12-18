@@ -76,18 +76,6 @@ pub trait Field {
 /// - Some fields return `Box<dyn Iterator>` (GeoPoint)
 ///
 /// By returning `Result<Box<dyn Iterator>>`, the trait provides a uniform interface.
-///
-/// # Examples
-///
-/// ```ignore
-/// // Bool field filtering
-/// let bool_field: UncommittedBoolField = ...;
-/// let matching_docs = bool_field.filter(true)?;
-///
-/// // Number field filtering with range
-/// let number_field: UncommittedNumberField = ...;
-/// let matching_docs = number_field.filter(NumberFilter::Between((10, 20)))?;
-/// ```
 pub trait Filterable {
     /// The type of filter parameter this field accepts.
     ///
@@ -117,7 +105,6 @@ pub trait Filterable {
     ///
     /// Returns an error if:
     /// - The underlying index data is corrupted
-    /// - The filter parameter is invalid for this field type
     /// - I/O errors occur when reading committed data from disk
     fn filter<'s, 'iter>(
         &'s self,
