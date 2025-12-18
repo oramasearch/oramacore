@@ -168,7 +168,6 @@ fn calculate_filter_on_field<UF, CF, FP>(
 where
     UF: Filterable<FilterParam = FP>,
     CF: Filterable<FilterParam = FP>,
-    FP: Clone,
 {
     let filter_param: FP = match filter_param
         .try_into() {
@@ -192,7 +191,7 @@ where
     };
 
     let uncommitted_docs = uncommitted_field
-        .filter(filter_param.clone())
+        .filter(&filter_param)
         .context("Failed to filter uncommitted field")?;
 
     let mut filtered = FilterResult::Filter(PlainFilterResult::from_iter(
@@ -202,7 +201,7 @@ where
 
     // Combine uncommitted and committed results using OR logic
     if let Some(committed_field) = committed_field {
-        let committed_docs = committed_field.filter(filter_param)?;
+        let committed_docs = committed_field.filter(&filter_param)?;
         filtered = FilterResult::or(
             filtered,
             FilterResult::Filter(PlainFilterResult::from_iter(

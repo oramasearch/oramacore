@@ -92,13 +92,13 @@ impl Filterable for UncommittedBoolField {
 
     fn filter<'s, 'iter>(
         &'s self,
-        filter_param: Self::FilterParam,
+        filter_param: &Self::FilterParam,
     ) -> Result<Box<dyn Iterator<Item = DocumentId> + 'iter>>
     where
         's: 'iter,
     {
         // Use the existing filter logic: true docs are in inner.0, false docs in inner.1
-        let iter: Box<dyn Iterator<Item = DocumentId> + 'iter> = if filter_param {
+        let iter: Box<dyn Iterator<Item = DocumentId> + 'iter> = if *filter_param {
             Box::new(self.inner.0.iter().copied())
         } else {
             Box::new(self.inner.1.iter().copied())

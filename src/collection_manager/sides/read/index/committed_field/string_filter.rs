@@ -189,7 +189,7 @@ impl Filterable for CommittedStringFilterField {
 
     fn filter<'s, 'iter>(
         &'s self,
-        filter_param: Self::FilterParam,
+        filter_param: &Self::FilterParam,
     ) -> Result<Box<dyn Iterator<Item = DocumentId> + 'iter>>
     where
         's: 'iter,
