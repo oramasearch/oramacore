@@ -199,7 +199,9 @@ impl Filterable for CommittedStringFilterField {
         let iter = self
             .inner
             .get(filter_param.as_str())
-            .map(|doc_ids| Box::new(doc_ids.iter().copied()) as Box<dyn Iterator<Item = DocumentId>>)
+            .map(|doc_ids| {
+                Box::new(doc_ids.iter().copied()) as Box<dyn Iterator<Item = DocumentId>>
+            })
             .unwrap_or_else(|| Box::new(std::iter::empty()));
         Ok(iter)
     }

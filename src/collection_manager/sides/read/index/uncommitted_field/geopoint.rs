@@ -102,7 +102,8 @@ impl Filterable for UncommittedGeoPointFilterField {
                         filter.inside,
                     )
                     .copied(),
-            ) as Box<dyn Iterator<Item = DocumentId>>,
+            )
+                as Box<dyn Iterator<Item = DocumentId>>,
             GeoSearchFilter::Polygon(filter) => {
                 let iter = self
                     .inner

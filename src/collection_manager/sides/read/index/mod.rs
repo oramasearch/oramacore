@@ -159,18 +159,18 @@ pub struct Index {
 /// 1. Retrieves the uncommitted field and applies the filter
 /// 2. Retrieves the committed field (if it exists) and applies the filter
 /// 3. Combines results using OR logic (documents match if in either uncommitted or committed)
-fn calculate_filter_on_field<UF, CF, FP>(
+fn calculate_filter_on_field<'a, UF, CF, FP>(
     document_count_estimate: u64,
     uncommitted_field: &UF,
     committed_field: Option<&CF>,
-    filter_param: impl TryInto<FP>,
+    filter_param: &Filter,
 ) -> Result<FilterResult<DocumentId>>
 where
     UF: Filterable<FilterParam = FP>,
     CF: Filterable<FilterParam = FP>,
+    FP: TryFromFilter,
 {
-    let filter_param: FP = match filter_param
-        .try_into() {
+    let filter_param: &FP = match FP::try_from_filter(filter_param) {
         Ok(p) => p,
         Err(_) => {
             // If the conversion fails, return empty set
@@ -186,12 +186,12 @@ where
             // TODO: return a warning to the user
             return Ok(FilterResult::Filter(PlainFilterResult::new(
                 document_count_estimate,
-            )))
+            )));
         }
     };
 
     let uncommitted_docs = uncommitted_field
-        .filter(&filter_param)
+        .filter(filter_param)
         .context("Failed to filter uncommitted field")?;
 
     let mut filtered = FilterResult::Filter(PlainFilterResult::from_iter(
@@ -201,7 +201,7 @@ where
 
     // Combine uncommitted and committed results using OR logic
     if let Some(committed_field) = committed_field {
-        let committed_docs = committed_field.filter(&filter_param)?;
+        let committed_docs = committed_field.filter(filter_param)?;
         filtered = FilterResult::or(
             filtered,
             FilterResult::Filter(PlainFilterResult::from_iter(
@@ -221,8 +221,7 @@ fn calculate_filter_for_fields(
     committed_fields: &CommittedFields,
     key: &str,
     filter: &Filter,
-) -> Result<FilterResult<DocumentId>>
-{
+) -> Result<FilterResult<DocumentId>> {
     let Some((field_id, field_type)) = path_to_index_id_map.get_filter_field(key) else {
         bail!("Field not found in index");
     };
@@ -302,62 +301,72 @@ fn calculate_filter_for_fields(
     }
 }
 
-impl TryFrom<&Filter> for bool {
+trait TryFromFilter {
+    type Error;
+
+    fn try_from_filter(filter: &Filter) -> Result<&Self, Self::Error>
+    where
+        Self: Sized;
+}
+
+impl TryFromFilter for bool {
     type Error = anyhow::Error;
 
-    fn try_from(value: &Filter) -> Result<Self, Self::Error> {
-        if let Filter::Bool(b) = value {
-            Ok(*b)
+    fn try_from_filter(filter: &Filter) -> Result<&Self, Self::Error> {
+        if let Filter::Bool(b) = filter {
+            Ok(b)
         } else {
             Err(anyhow::anyhow!("Failed to convert filter to bool"))
         }
     }
 }
 
-impl TryFrom<&Filter> for NumberFilter {
+impl TryFromFilter for NumberFilter {
     type Error = anyhow::Error;
 
-    fn try_from(value: &Filter) -> Result<Self, Self::Error> {
-        if let Filter::Number(num_filter) = value {
-            Ok(num_filter.clone())
+    fn try_from_filter(filter: &Filter) -> Result<&Self, Self::Error> {
+        if let Filter::Number(num_filter) = filter {
+            Ok(num_filter)
         } else {
-            Err(anyhow::anyhow!("Failed to convert filter to NumberFilter"))
+            Err(anyhow::anyhow!("Failed to convert filter to number filter"))
         }
     }
 }
 
-impl TryFrom<&Filter> for DateFilter {
+impl TryFromFilter for DateFilter {
     type Error = anyhow::Error;
 
-    fn try_from(value: &Filter) -> Result<Self, Self::Error> {
-        if let Filter::Date(date_filter) = value {
-            Ok(date_filter.clone())
+    fn try_from_filter(filter: &Filter) -> Result<&Self, Self::Error> {
+        if let Filter::Date(date_filter) = filter {
+            Ok(date_filter)
         } else {
-            Err(anyhow::anyhow!("Failed to convert filter to DateFilter"))
+            Err(anyhow::anyhow!("Failed to convert filter to date filter"))
         }
     }
 }
 
-impl TryFrom<&Filter> for String {
+impl TryFromFilter for String {
     type Error = anyhow::Error;
 
-    fn try_from(value: &Filter) -> Result<Self, Self::Error> {
-        if let Filter::String(string) = value {
-            Ok(string.clone())
+    fn try_from_filter(filter: &Filter) -> Result<&Self, Self::Error> {
+        if let Filter::String(string_filter) = filter {
+            Ok(string_filter)
         } else {
-            Err(anyhow::anyhow!("Failed to convert filter to String"))
+            Err(anyhow::anyhow!("Failed to convert filter to string"))
         }
     }
 }
 
-impl TryFrom<&Filter> for GeoSearchFilter {
+impl TryFromFilter for GeoSearchFilter {
     type Error = anyhow::Error;
 
-    fn try_from(value: &Filter) -> Result<Self, Self::Error> {
-        if let Filter::GeoPoint(geo_filter) = value {
-            Ok(geo_filter.clone())
+    fn try_from_filter(filter: &Filter) -> Result<&Self, Self::Error> {
+        if let Filter::GeoPoint(geo_search_filter) = filter {
+            Ok(geo_search_filter)
         } else {
-            Err(anyhow::anyhow!("Failed to convert filter to GeoSearchFilter"))
+            Err(anyhow::anyhow!(
+                "Failed to convert filter to geo search filter"
+            ))
         }
     }
 }

@@ -223,8 +223,8 @@ impl Filterable for CommittedBoolField {
         // This can happen with corrupted data or during transition states
         let docs = self
             .map
-            .get(&filter_param)
-            .ok_or_else(|| anyhow::anyhow!("Boolean value {} not found in index", filter_param))?;
+            .get(filter_param)
+            .ok_or_else(|| anyhow::anyhow!("Boolean value {filter_param} not found in index"))?;
 
         Ok(Box::new(docs.iter().copied()))
     }
