@@ -25,9 +25,10 @@ use crate::{
                         CommittedVectorField, DateFieldInfo, GeoPointFieldInfo, StringFieldInfo,
                     },
                     merge::{
-                        merge_field, CommittedField, CommittedFieldMetadata, Field, Filterable,
+                        merge_field, CommittedField, CommittedFieldMetadata, Field,
                         UncommittedField,
                     },
+                    filter::Filterable,
                 },
                 search::SearchDocumentContext,
                 ReadError,
@@ -56,6 +57,7 @@ use oramacore_lib::nlp::{locales::Locale, TextParser};
 use super::collection::{IndexFieldStats, IndexFieldStatsType};
 use super::OffloadFieldConfig;
 mod committed_field;
+mod filter;
 mod group;
 mod merge;
 mod path_to_index_id_map;

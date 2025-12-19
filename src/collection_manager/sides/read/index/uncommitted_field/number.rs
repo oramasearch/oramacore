@@ -9,7 +9,10 @@ use serde::Serialize;
 use anyhow::Result;
 
 use crate::{
-    collection_manager::sides::read::index::merge::{Field, Filterable, UncommittedField},
+    collection_manager::sides::read::index::{
+        merge::{Field, UncommittedField},
+        filter::Filterable,
+    },
     types::{DocumentId, Number, NumberFilter},
 };
 

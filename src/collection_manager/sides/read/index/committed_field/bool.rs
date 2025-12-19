@@ -10,7 +10,8 @@ use tracing::info;
 use crate::{
     collection_manager::sides::read::{
         index::{
-            merge::{CommittedField, CommittedFieldMetadata, Field, Filterable},
+            merge::{CommittedField, CommittedFieldMetadata, Field},
+            filter::Filterable,
             uncommitted_field::UncommittedBoolField,
         },
         OffloadFieldConfig,

@@ -5,7 +5,10 @@ use anyhow::Result;
 
 use crate::{
     collection_manager::sides::{
-        read::index::merge::{Field, Filterable, UncommittedField},
+        read::index::{
+            merge::{Field, UncommittedField},
+            filter::Filterable,
+        },
         write::index::GeoPoint,
     },
     types::{DocumentId, GeoSearchFilter},
