@@ -9,8 +9,8 @@ use anyhow::Result;
 
 use crate::{
     collection_manager::sides::read::index::{
-        merge::{Field, UncommittedField},
         filter::Filterable,
+        merge::{Field, UncommittedField},
     },
     types::{DateFilter, DocumentId, OramaDate},
 };

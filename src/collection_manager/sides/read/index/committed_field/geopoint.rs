@@ -5,10 +5,11 @@ use oramacore_lib::bkd;
 use oramacore_lib::bkd::{haversine_distance, BKDTree, Coord};
 use serde::{Deserialize, Serialize};
 
-use crate::collection_manager::sides::read::index::{merge::{
-    CommittedField, CommittedFieldMetadata, Field,
-}, filter::Filterable};
 use crate::collection_manager::sides::read::index::uncommitted_field::UncommittedGeoPointFilterField;
+use crate::collection_manager::sides::read::index::{
+    filter::Filterable,
+    merge::{CommittedField, CommittedFieldMetadata, Field},
+};
 use crate::collection_manager::sides::read::OffloadFieldConfig;
 use crate::types::{DocumentId, GeoSearchFilter};
 use oramacore_lib::fs::BufferedFile;

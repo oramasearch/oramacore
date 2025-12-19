@@ -7,8 +7,8 @@ use crate::{
     collection_manager::sides::read::{
         index::{
             committed_field::number::get_iter,
-            merge::{CommittedField, CommittedFieldMetadata, Field},
             filter::Filterable,
+            merge::{CommittedField, CommittedFieldMetadata, Field},
             uncommitted_field::UncommittedDateFilterField,
         },
         OffloadFieldConfig,

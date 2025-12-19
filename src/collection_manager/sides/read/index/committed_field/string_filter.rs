@@ -9,8 +9,8 @@ use serde::{Deserialize, Serialize};
 use crate::{
     collection_manager::sides::read::{
         index::{
-            merge::{CommittedField, CommittedFieldMetadata, Field},
             filter::Filterable,
+            merge::{CommittedField, CommittedFieldMetadata, Field},
             uncommitted_field::UncommittedStringFilterField,
         },
         OffloadFieldConfig,

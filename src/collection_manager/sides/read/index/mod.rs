@@ -28,7 +28,6 @@ use crate::{
                         merge_field, CommittedField, CommittedFieldMetadata, Field,
                         UncommittedField,
                     },
-                    filter::Filterable,
                 },
                 search::SearchDocumentContext,
                 ReadError,
@@ -45,10 +44,9 @@ use crate::{
     },
     python::embeddings::{Intent, Model},
     types::{
-        CollectionId, DateFilter, DocumentId, FacetDefinition, FacetResult, Filter, FulltextMode,
-        GeoSearchFilter, HybridMode, IndexId, Limit, Number, NumberFilter, Properties, SearchMode,
-        SearchModeResult, SearchParams, Similarity, SortOrder, Threshold, TypeParsingStrategies,
-        VectorMode, WhereFilter,
+        CollectionId, DocumentId, FacetDefinition, FacetResult, FulltextMode, HybridMode, IndexId,
+        Limit, Number, NumberFilter, Properties, SearchMode, SearchModeResult, SearchParams,
+        Similarity, SortOrder, Threshold, TypeParsingStrategies, VectorMode, WhereFilter,
     },
 };
 use oramacore_lib::fs::{create_if_not_exists, BufferedFile};
@@ -102,25 +100,25 @@ pub enum DeletionReason {
 }
 
 #[derive(Default)]
-struct UncommittedFields {
-    bool_fields: HashMap<FieldId, UncommittedBoolField>,
-    number_fields: HashMap<FieldId, UncommittedNumberField>,
-    string_filter_fields: HashMap<FieldId, UncommittedStringFilterField>,
-    date_fields: HashMap<FieldId, UncommittedDateFilterField>,
-    geopoint_fields: HashMap<FieldId, UncommittedGeoPointFilterField>,
-    string_fields: HashMap<FieldId, UncommittedStringField>,
-    vector_fields: HashMap<FieldId, UncommittedVectorField>,
+pub struct UncommittedFields {
+    pub bool_fields: HashMap<FieldId, UncommittedBoolField>,
+    pub number_fields: HashMap<FieldId, UncommittedNumberField>,
+    pub string_filter_fields: HashMap<FieldId, UncommittedStringFilterField>,
+    pub date_fields: HashMap<FieldId, UncommittedDateFilterField>,
+    pub geopoint_fields: HashMap<FieldId, UncommittedGeoPointFilterField>,
+    pub string_fields: HashMap<FieldId, UncommittedStringField>,
+    pub vector_fields: HashMap<FieldId, UncommittedVectorField>,
 }
 
 #[derive(Default)]
-struct CommittedFields {
-    bool_fields: HashMap<FieldId, CommittedBoolField>,
-    number_fields: HashMap<FieldId, CommittedNumberField>,
-    string_filter_fields: HashMap<FieldId, CommittedStringFilterField>,
-    date_fields: HashMap<FieldId, CommittedDateField>,
-    geopoint_fields: HashMap<FieldId, CommittedGeoPointField>,
-    string_fields: HashMap<FieldId, CommittedStringField>,
-    vector_fields: HashMap<FieldId, CommittedVectorField>,
+pub struct CommittedFields {
+    pub bool_fields: HashMap<FieldId, CommittedBoolField>,
+    pub number_fields: HashMap<FieldId, CommittedNumberField>,
+    pub string_filter_fields: HashMap<FieldId, CommittedStringFilterField>,
+    pub date_fields: HashMap<FieldId, CommittedDateField>,
+    pub geopoint_fields: HashMap<FieldId, CommittedGeoPointField>,
+    pub string_fields: HashMap<FieldId, CommittedStringField>,
+    pub vector_fields: HashMap<FieldId, CommittedVectorField>,
 }
 
 pub struct Index {
@@ -153,326 +151,6 @@ pub struct Index {
     updated_at: DateTime<Utc>,
 
     enum_strategy: EnumStrategy,
-}
-
-/// Generic helper function to filter documents across uncommitted and committed fields.
-///
-/// This function:
-/// 1. Retrieves the uncommitted field and applies the filter
-/// 2. Retrieves the committed field (if it exists) and applies the filter
-/// 3. Combines results using OR logic (documents match if in either uncommitted or committed)
-fn calculate_filter_on_field<'a, UF, CF, FP>(
-    document_count_estimate: u64,
-    uncommitted_field: &UF,
-    committed_field: Option<&CF>,
-    filter_param: &Filter,
-) -> Result<FilterResult<DocumentId>>
-where
-    UF: Filterable<FilterParam = FP>,
-    CF: Filterable<FilterParam = FP>,
-    FP: TryFromFilter,
-{
-    let filter_param: &FP = match FP::try_from_filter(filter_param) {
-        Ok(p) => p,
-        Err(_) => {
-            // If the conversion fails, return empty set
-            // This handles the following case:
-            // - create a collection
-            // - create an index1
-            // - insert { "a": 10 } in index1
-            // - create an index2
-            // - insert { "a": "string" } in index2
-            // - search with { where: { a: { gt: 5 } } }
-            // In this case we consider only the index1
-            // So, we return an empty set for index2
-            // TODO: return a warning to the user
-            return Ok(FilterResult::Filter(PlainFilterResult::new(
-                document_count_estimate,
-            )));
-        }
-    };
-
-    let uncommitted_docs = uncommitted_field
-        .filter(filter_param)
-        .context("Failed to filter uncommitted field")?;
-
-    let mut filtered = FilterResult::Filter(PlainFilterResult::from_iter(
-        document_count_estimate,
-        uncommitted_docs,
-    ));
-
-    // Combine uncommitted and committed results using OR logic
-    if let Some(committed_field) = committed_field {
-        let committed_docs = committed_field.filter(filter_param)?;
-        filtered = FilterResult::or(
-            filtered,
-            FilterResult::Filter(PlainFilterResult::from_iter(
-                document_count_estimate,
-                committed_docs,
-            )),
-        );
-    }
-
-    Ok(filtered)
-}
-
-fn calculate_filter_for_fields(
-    document_count_estimate: u64,
-    path_to_index_id_map: &PathToIndexId,
-    uncommitted_fields: &UncommittedFields,
-    committed_fields: &CommittedFields,
-    key: &str,
-    filter: &Filter,
-) -> Result<FilterResult<DocumentId>> {
-    let Some((field_id, field_type)) = path_to_index_id_map.get_filter_field(key) else {
-        bail!("Field not found in index");
-    };
-
-    match field_type {
-        FieldType::Bool => {
-            let uncommitted_field = uncommitted_fields
-                .bool_fields
-                .get(&field_id)
-                .ok_or_else(|| anyhow::anyhow!("Field not found in index"))?;
-
-            calculate_filter_on_field(
-                document_count_estimate,
-                uncommitted_field,
-                committed_fields.bool_fields.get(&field_id),
-                filter,
-            )
-        }
-        FieldType::Number => {
-            let uncommitted_field = uncommitted_fields
-                .number_fields
-                .get(&field_id)
-                .ok_or_else(|| anyhow::anyhow!("Field not found in index"))?;
-
-            calculate_filter_on_field(
-                document_count_estimate,
-                uncommitted_field,
-                committed_fields.number_fields.get(&field_id),
-                filter,
-            )
-        }
-        FieldType::Date => {
-            let uncommitted_field = uncommitted_fields
-                .date_fields
-                .get(&field_id)
-                .ok_or_else(|| anyhow::anyhow!("Field not found in index"))?;
-
-            calculate_filter_on_field(
-                document_count_estimate,
-                uncommitted_field,
-                committed_fields.date_fields.get(&field_id),
-                filter,
-            )
-        }
-        FieldType::StringFilter => {
-            let uncommitted_field = uncommitted_fields
-                .string_filter_fields
-                .get(&field_id)
-                .ok_or_else(|| anyhow::anyhow!("Field not found in index"))?;
-
-            calculate_filter_on_field(
-                document_count_estimate,
-                uncommitted_field,
-                committed_fields.string_filter_fields.get(&field_id),
-                filter,
-            )
-        }
-        FieldType::GeoPoint => {
-            let uncommitted_field = uncommitted_fields
-                .geopoint_fields
-                .get(&field_id)
-                .ok_or_else(|| anyhow::anyhow!("Field not found in index"))?;
-
-            calculate_filter_on_field(
-                document_count_estimate,
-                uncommitted_field,
-                committed_fields.geopoint_fields.get(&field_id),
-                filter,
-            )
-        }
-        _ => {
-            // Unsupported field type - return empty set
-            Ok(FilterResult::Filter(PlainFilterResult::new(
-                document_count_estimate,
-            )))
-        }
-    }
-}
-
-trait TryFromFilter {
-    type Error;
-
-    fn try_from_filter(filter: &Filter) -> Result<&Self, Self::Error>
-    where
-        Self: Sized;
-}
-
-impl TryFromFilter for bool {
-    type Error = anyhow::Error;
-
-    fn try_from_filter(filter: &Filter) -> Result<&Self, Self::Error> {
-        if let Filter::Bool(b) = filter {
-            Ok(b)
-        } else {
-            Err(anyhow::anyhow!("Failed to convert filter to bool"))
-        }
-    }
-}
-
-impl TryFromFilter for NumberFilter {
-    type Error = anyhow::Error;
-
-    fn try_from_filter(filter: &Filter) -> Result<&Self, Self::Error> {
-        if let Filter::Number(num_filter) = filter {
-            Ok(num_filter)
-        } else {
-            Err(anyhow::anyhow!("Failed to convert filter to number filter"))
-        }
-    }
-}
-
-impl TryFromFilter for DateFilter {
-    type Error = anyhow::Error;
-
-    fn try_from_filter(filter: &Filter) -> Result<&Self, Self::Error> {
-        if let Filter::Date(date_filter) = filter {
-            Ok(date_filter)
-        } else {
-            Err(anyhow::anyhow!("Failed to convert filter to date filter"))
-        }
-    }
-}
-
-impl TryFromFilter for String {
-    type Error = anyhow::Error;
-
-    fn try_from_filter(filter: &Filter) -> Result<&Self, Self::Error> {
-        if let Filter::String(string_filter) = filter {
-            Ok(string_filter)
-        } else {
-            Err(anyhow::anyhow!("Failed to convert filter to string"))
-        }
-    }
-}
-
-impl TryFromFilter for GeoSearchFilter {
-    type Error = anyhow::Error;
-
-    fn try_from_filter(filter: &Filter) -> Result<&Self, Self::Error> {
-        if let Filter::GeoPoint(geo_search_filter) = filter {
-            Ok(geo_search_filter)
-        } else {
-            Err(anyhow::anyhow!(
-                "Failed to convert filter to geo search filter"
-            ))
-        }
-    }
-}
-
-/// Calculates the filtered document IDs based on the provided where filter.
-///
-/// This function processes a `WhereFilter` and returns a `FilterResult` containing
-/// the document IDs that match the filter criteria.
-fn calculate_filter(
-    document_count_estimate: u64,
-    path_to_index_id_map: &PathToIndexId,
-    where_filter: &WhereFilter,
-    uncommitted_fields: &UncommittedFields,
-    committed_fields: &CommittedFields,
-) -> Result<FilterResult<DocumentId>> {
-    let mut results = Vec::new();
-
-    for (k, filter) in &where_filter.filter_on_fields {
-        // Check if field exists in the index
-        if path_to_index_id_map.get_filter_field(k).is_none() {
-            // If the user specified a field that is not in the index,
-            // we should return an empty set.
-            return Ok(FilterResult::Filter(PlainFilterResult::new(
-                document_count_estimate,
-            )));
-        }
-
-        // Use the new unified filtering approach with explicit type conversion
-        let filtered = calculate_filter_for_fields(
-            document_count_estimate,
-            path_to_index_id_map,
-            uncommitted_fields,
-            committed_fields,
-            k,
-            filter,
-        )?;
-
-        results.push(filtered);
-    }
-
-    if let Some(filter) = where_filter.and.as_ref() {
-        for f in filter {
-            let result = calculate_filter(
-                document_count_estimate,
-                path_to_index_id_map,
-                f,
-                uncommitted_fields,
-                committed_fields,
-            )?;
-            results.push(result);
-        }
-    }
-
-    if let Some(filter) = where_filter.or.as_ref() {
-        let mut or = vec![];
-        for f in filter {
-            let result = calculate_filter(
-                document_count_estimate,
-                path_to_index_id_map,
-                f,
-                uncommitted_fields,
-                committed_fields,
-            )?;
-            or.push(result);
-        }
-
-        if or.is_empty() {
-            return Ok(FilterResult::Filter(PlainFilterResult::new(
-                document_count_estimate,
-            )));
-        }
-
-        let mut result = or.pop().expect("we should have at least one result");
-        for f in or {
-            result = FilterResult::or(result, f);
-        }
-
-        results.push(result);
-    }
-
-    if let Some(filter) = where_filter.not.as_ref() {
-        let result = calculate_filter(
-            document_count_estimate,
-            path_to_index_id_map,
-            filter,
-            uncommitted_fields,
-            committed_fields,
-        )?;
-        results.push(FilterResult::Not(Box::new(result)));
-    }
-
-    // Is this correct????
-    if results.is_empty() {
-        return Ok(FilterResult::Filter(PlainFilterResult::new(
-            document_count_estimate,
-        )));
-    }
-
-    let mut result = results.pop().expect("we should have at least one result");
-    for f in results {
-        result = FilterResult::and(result, f);
-    }
-
-    Ok(result)
 }
 
 impl Index {
@@ -1127,6 +805,20 @@ impl Index {
 
     pub fn is_deleted(&self) -> bool {
         self.deleted.is_some()
+    }
+
+    pub async fn get_fields(
+        &self,
+    ) -> (
+        OramaAsyncLockReadGuard<'_, CommittedFields>,
+        OramaAsyncLockReadGuard<'_, UncommittedFields>,
+    ) {
+        let (committed_fields, uncommitted_fields) = tokio::join!(
+            self.committed_fields.read("get_fields"),
+            self.uncommitted_fields.read("get_fields"),
+        );
+
+        (committed_fields, uncommitted_fields)
     }
 
     pub fn update(&mut self, op: IndexWriteOperation) -> Result<()> {
@@ -1962,7 +1654,7 @@ impl Index {
         let uncommitted_fields = self.uncommitted_fields.read("filters").await;
         let committed_fields = self.committed_fields.read("filters").await;
 
-        let mut output = calculate_filter(
+        let mut output = filter::calculate_filter(
             self.document_count,
             &self.path_to_index_id_map,
             where_filter,
