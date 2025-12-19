@@ -5,7 +5,7 @@ use committed_field::{
 };
 use futures::join;
 use group::Groupable;
-use oramacore_lib::filters::{FilterResult, PlainFilterResult};
+use oramacore_lib::filters::FilterResult;
 use path_to_index_id_map::PathToIndexId;
 use search_context::FullTextSearchContext;
 use serde::{Deserialize, Serialize};
@@ -805,20 +805,6 @@ impl Index {
 
     pub fn is_deleted(&self) -> bool {
         self.deleted.is_some()
-    }
-
-    pub async fn get_fields(
-        &self,
-    ) -> (
-        OramaAsyncLockReadGuard<'_, CommittedFields>,
-        OramaAsyncLockReadGuard<'_, UncommittedFields>,
-    ) {
-        let (committed_fields, uncommitted_fields) = tokio::join!(
-            self.committed_fields.read("get_fields"),
-            self.uncommitted_fields.read("get_fields"),
-        );
-
-        (committed_fields, uncommitted_fields)
     }
 
     pub fn update(&mut self, op: IndexWriteOperation) -> Result<()> {
@@ -1651,30 +1637,23 @@ impl Index {
 
         trace!("Calculating filtered doc ids");
 
-        let uncommitted_fields = self.uncommitted_fields.read("filters").await;
-        let committed_fields = self.committed_fields.read("filters").await;
+        // Acquire field locks
+        let (committed_fields, uncommitted_fields) = tokio::join!(
+            self.committed_fields.read("filters"),
+            self.uncommitted_fields.read("filters"),
+        );
 
-        let mut output = filter::calculate_filter(
+        // Create filter context with gathered data
+        let context = filter::FilterContext::new(
             self.document_count,
             &self.path_to_index_id_map,
-            where_filter,
-            &uncommitted_fields,
-            &committed_fields,
-        )?;
+            uncommitted_fields,
+            committed_fields,
+            uncommitted_deleted_documents,
+        );
 
-        if !uncommitted_deleted_documents.is_empty() {
-            output = FilterResult::and(
-                output,
-                FilterResult::Not(Box::new(FilterResult::Filter(
-                    PlainFilterResult::from_iter(
-                        self.document_count,
-                        uncommitted_deleted_documents.iter().copied(),
-                    ),
-                ))),
-            );
-        }
-
-        Ok(Some(output))
+        // Delegate to filter logic
+        context.execute_filter(where_filter)
     }
 
     fn calculate_boost(&self, boost: &HashMap<String, f32>) -> HashMap<FieldId, f32> {
@@ -2267,7 +2246,6 @@ fn merge_type<
     Ok(merged_fields)
 }
 
-#[allow(unused_variables)]
 fn overwrite_committed<
     UF: UncommittedField,
     CFM: CommittedFieldMetadata,

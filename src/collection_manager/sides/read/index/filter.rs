@@ -1,7 +1,12 @@
+use std::collections::HashSet;
+
 use anyhow::{bail, Context, Result};
 use oramacore_lib::filters::{FilterResult, PlainFilterResult};
 
-use crate::types::{DateFilter, DocumentId, Filter, GeoSearchFilter, NumberFilter, WhereFilter};
+use crate::{
+    lock::OramaAsyncLockReadGuard,
+    types::{DateFilter, DocumentId, Filter, GeoSearchFilter, NumberFilter, WhereFilter},
+};
 
 use super::{path_to_index_id_map::PathToIndexId, CommittedFields, FieldType, UncommittedFields};
 
@@ -162,7 +167,7 @@ impl TryFromFilter for GeoSearchFilter {
 ///
 /// # Returns
 /// A FilterResult containing the union of matching document IDs from both fields
-pub(crate) fn calculate_filter_on_field<'a, UF, CF, FP>(
+fn calculate_filter_on_field<'a, UF, CF, FP>(
     document_count_estimate: u64,
     uncommitted_field: &UF,
     committed_field: Option<&CF>,
@@ -235,7 +240,7 @@ where
 /// # Returns
 /// A FilterResult containing matching document IDs, or an error if the field
 /// is not found or has an unsupported type.
-pub(crate) fn calculate_filter_for_fields(
+fn calculate_filter_for_fields(
     document_count_estimate: u64,
     path_to_index_id_map: &PathToIndexId,
     uncommitted_fields: &UncommittedFields,
@@ -343,7 +348,7 @@ pub(crate) fn calculate_filter_for_fields(
 /// # Returns
 /// A FilterResult containing document IDs that match the filter criteria.
 /// Returns an empty set if any specified field doesn't exist in the index.
-pub fn calculate_filter(
+fn calculate_filter(
     document_count_estimate: u64,
     path_to_index_id_map: &PathToIndexId,
     where_filter: &WhereFilter,
@@ -439,4 +444,82 @@ pub fn calculate_filter(
     }
 
     Ok(result)
+}
+
+/// Context required for executing filter operations on an index.
+///
+/// This struct encapsulates all the data needed to filter documents,
+/// allowing filter logic to be executed without direct Index coupling.
+/// Index is responsible for gathering the data and passing it to the
+/// FilterContext constructor, maintaining proper encapsulation.
+pub struct FilterContext<'index> {
+    document_count: u64,
+    path_to_index_id_map: &'index PathToIndexId,
+    uncommitted_fields: OramaAsyncLockReadGuard<'index, UncommittedFields>,
+    committed_fields: OramaAsyncLockReadGuard<'index, CommittedFields>,
+    uncommitted_deleted_documents: &'index HashSet<DocumentId>,
+}
+
+impl<'index> FilterContext<'index> {
+    /// Creates a new FilterContext with the provided filter dependencies.
+    ///
+    /// This constructor accepts all necessary data as parameters, ensuring
+    /// that Index internals are not directly accessed. The caller (Index)
+    /// is responsible for gathering the data and passing it in.
+    pub fn new(
+        document_count: u64,
+        path_to_index_id_map: &'index PathToIndexId,
+        uncommitted_fields: OramaAsyncLockReadGuard<'index, UncommittedFields>,
+        committed_fields: OramaAsyncLockReadGuard<'index, CommittedFields>,
+        uncommitted_deleted_documents: &'index HashSet<DocumentId>,
+    ) -> Self {
+        Self {
+            document_count,
+            path_to_index_id_map,
+            uncommitted_fields,
+            committed_fields,
+            uncommitted_deleted_documents,
+        }
+    }
+
+    /// Executes filter logic and returns filtered document IDs.
+    ///
+    /// This is the main entry point for filtering within a FilterContext.
+    /// It applies the WhereFilter criteria and integrates deleted documents.
+    ///
+    /// # Returns
+    /// * `Ok(Some(FilterResult))` - If filter was applied successfully
+    /// * `Ok(None)` - If the where_filter is empty (no filtering needed)
+    /// * `Err(...)` - If filtering failed
+    pub fn execute_filter(
+        self,
+        where_filter: &WhereFilter,
+    ) -> Result<Option<FilterResult<DocumentId>>> {
+        if where_filter.is_empty() {
+            return Ok(None);
+        }
+
+        let mut output = calculate_filter(
+            self.document_count,
+            self.path_to_index_id_map,
+            where_filter,
+            &self.uncommitted_fields,
+            &self.committed_fields,
+        )?;
+
+        // Integrate deleted documents using AND + NOT logic
+        if !self.uncommitted_deleted_documents.is_empty() {
+            output = FilterResult::and(
+                output,
+                FilterResult::Not(Box::new(FilterResult::Filter(
+                    PlainFilterResult::from_iter(
+                        self.document_count,
+                        self.uncommitted_deleted_documents.iter().copied(),
+                    ),
+                ))),
+            );
+        }
+
+        Ok(Some(output))
+    }
 }
