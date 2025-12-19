@@ -156,7 +156,6 @@ impl Filterable for UncommittedNumberField {
     where
         's: 'iter,
     {
-        // Reuse the existing inner_filter function
         let iter = inner_filter(&self.inner, filter_param);
         Ok(Box::new(iter))
     }

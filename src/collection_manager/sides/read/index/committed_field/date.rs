@@ -51,7 +51,6 @@ impl CommittedField for CommittedDateField {
     ) -> Result<Self> {
         let vec: Vec<_> = uncommitted
             .iter()
-            // .map(|(n, v)| (SerializableNumber(n), v))
             .map(|(k, mut d)| {
                 d.retain(|doc_id| !uncommitted_document_deletions.contains(doc_id));
                 (k, d)
@@ -191,8 +190,7 @@ impl Filterable for CommittedDateField {
     where
         's: 'iter,
     {
-        // Reuse the existing filter logic with get_iter from number.rs
-        let iter = match &filter_param {
+        let iter = match filter_param {
             DateFilter::Equal(value) => {
                 let timestamp = value.as_i64();
                 get_iter(&self.vec, (true, timestamp), (true, timestamp))

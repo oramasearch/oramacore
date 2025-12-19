@@ -100,7 +100,6 @@ impl Filterable for UncommittedBoolField {
     where
         's: 'iter,
     {
-        // Use the existing filter logic: true docs are in inner.0, false docs in inner.1
         let iter: Box<dyn Iterator<Item = DocumentId> + 'iter> = if *filter_param {
             Box::new(self.inner.0.iter().copied())
         } else {

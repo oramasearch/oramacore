@@ -103,6 +103,7 @@ fn inner_filter<'tree, 'iter>(
 where
     'tree: 'iter,
 {
+    #[inline]
     fn flat_doc<'tree>(
         (_, doc_ids): (&'tree i64, &'tree HashSet<DocumentId>),
     ) -> impl Iterator<Item = DocumentId> + 'tree {
@@ -151,7 +152,6 @@ impl Filterable for UncommittedDateFilterField {
     where
         's: 'iter,
     {
-        // Reuse the existing inner_filter function
         let iter = inner_filter(&self.inner, filter_param);
         Ok(Box::new(iter))
     }

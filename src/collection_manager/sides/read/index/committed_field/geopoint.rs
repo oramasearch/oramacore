@@ -155,9 +155,7 @@ impl Filterable for CommittedGeoPointField {
     where
         's: 'iter,
     {
-        // The existing filter method already returns Box<dyn Iterator>
-        // We just need to wrap it in Ok() since our trait returns Result
-        let iter = match &filter_param {
+        let iter = match filter_param {
             GeoSearchFilter::Radius(filter) => Box::new(
                 self.tree
                     .search_by_radius(

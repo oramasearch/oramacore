@@ -108,8 +108,6 @@ impl Filterable for UncommittedStringFilterField {
     where
         's: 'iter,
     {
-        // Convert String to &str and use existing filter logic
-        // The existing filter returns an empty iterator if the key is not found (unwrap_or_default)
         let iter = self
             .inner
             .get(filter_param.as_str())

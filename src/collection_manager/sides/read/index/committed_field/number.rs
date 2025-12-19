@@ -236,8 +236,7 @@ impl Filterable for CommittedNumberField {
     where
         's: 'iter,
     {
-        // Reuse the existing filter logic by calling the existing method
-        let iter = match &filter_param {
+        let iter = match filter_param {
             NumberFilter::Equal(value) => get_iter(
                 &self.vec,
                 (true, SerializableNumber(*value)),

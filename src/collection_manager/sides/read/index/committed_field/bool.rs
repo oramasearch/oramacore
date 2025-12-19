@@ -220,8 +220,6 @@ impl Filterable for CommittedBoolField {
     where
         's: 'iter,
     {
-        // The existing filter uses .unwrap(), but we should handle the case where the key might not exist
-        // This can happen with corrupted data or during transition states
         let docs = self
             .map
             .get(filter_param)
