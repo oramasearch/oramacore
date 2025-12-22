@@ -16,6 +16,7 @@ async fn test_pin_rules_after_insert_simple() {
             json!({
                 "id": format!("{}", i),
                 "c": format!("c-{}", i),
+                "run": format!("run-{}", i),
             })
         })
         .collect();
@@ -32,6 +33,11 @@ async fn test_pin_rules_after_insert_simple() {
                     {
                         "pattern": "c",
                         "anchoring": "is"
+                    },
+                    {
+                        "pattern": "running",
+                        "anchoring": "is",
+                        "normalization": "stem",
                     }
                 ],
                 "consequence": {
@@ -79,6 +85,20 @@ async fn test_pin_rules_after_insert_simple() {
 
     let ids = extrapolate_ids_from_result(&result);
     assert_eq!(&ids, &["0", "5", "7", "1", "2", "3", "4", "6", "8", "9"]);
+
+    let stemmed_result = collection_client
+        .search(
+            json!({
+                "term": "runs"
+            })
+            .try_into()
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    let stemmed_ids = extrapolate_ids_from_result(&stemmed_result);
+    assert_eq!(&stemmed_ids, &ids);
 
     drop(test_context);
 }
