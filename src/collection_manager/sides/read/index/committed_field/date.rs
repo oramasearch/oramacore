@@ -7,6 +7,7 @@ use crate::{
     collection_manager::sides::read::{
         index::{
             committed_field::number::get_iter,
+            filter::Filterable,
             merge::{CommittedField, CommittedFieldMetadata, Field},
             uncommitted_field::UncommittedDateFilterField,
         },
@@ -33,32 +34,6 @@ impl CommittedDateField {
         Ok(())
     }
 
-    pub fn filter(
-        &self,
-        filter_date: &DateFilter,
-    ) -> Result<impl Iterator<Item = DocumentId> + '_> {
-        Ok(match filter_date {
-            DateFilter::Equal(value) => {
-                get_iter(&self.vec, (true, value.as_i64()), (true, value.as_i64()))
-            }
-            DateFilter::Between((min, max)) => {
-                get_iter(&self.vec, (true, min.as_i64()), (true, max.as_i64()))
-            }
-            DateFilter::GreaterThan(min) => {
-                get_iter(&self.vec, (false, min.as_i64()), (false, i64::MAX))
-            }
-            DateFilter::GreaterThanOrEqual(min) => {
-                get_iter(&self.vec, (true, min.as_i64()), (false, i64::MAX))
-            }
-            DateFilter::LessThan(max) => {
-                get_iter(&self.vec, (false, i64::MIN), (false, max.as_i64()))
-            }
-            DateFilter::LessThanOrEqual(max) => {
-                get_iter(&self.vec, (false, i64::MIN), (true, max.as_i64()))
-            }
-        })
-    }
-
     pub fn iter(&self) -> impl DoubleEndedIterator<Item = (i64, HashSet<DocumentId>)> + '_ {
         self.vec.iter().cloned()
     }
@@ -76,7 +51,6 @@ impl CommittedField for CommittedDateField {
     ) -> Result<Self> {
         let vec: Vec<_> = uncommitted
             .iter()
-            // .map(|(n, v)| (SerializableNumber(n), v))
             .map(|(k, mut d)| {
                 d.retain(|doc_id| !uncommitted_document_deletions.contains(doc_id));
                 (k, d)
@@ -203,6 +177,41 @@ impl Field for CommittedDateField {
         let max = OramaDate::try_from_i64(max);
 
         CommittedDateFieldStats { min, max }
+    }
+}
+
+impl Filterable for CommittedDateField {
+    type FilterParam = DateFilter;
+
+    fn filter<'s, 'iter>(
+        &'s self,
+        filter_param: &Self::FilterParam,
+    ) -> Result<Box<dyn Iterator<Item = DocumentId> + 'iter>>
+    where
+        's: 'iter,
+    {
+        let iter = match filter_param {
+            DateFilter::Equal(value) => {
+                let timestamp = value.as_i64();
+                get_iter(&self.vec, (true, timestamp), (true, timestamp))
+            }
+            DateFilter::Between((min, max)) => {
+                get_iter(&self.vec, (true, min.as_i64()), (true, max.as_i64()))
+            }
+            DateFilter::GreaterThan(min) => {
+                get_iter(&self.vec, (false, min.as_i64()), (false, i64::MAX))
+            }
+            DateFilter::GreaterThanOrEqual(min) => {
+                get_iter(&self.vec, (true, min.as_i64()), (false, i64::MAX))
+            }
+            DateFilter::LessThan(max) => {
+                get_iter(&self.vec, (false, i64::MIN), (false, max.as_i64()))
+            }
+            DateFilter::LessThanOrEqual(max) => {
+                get_iter(&self.vec, (false, i64::MIN), (true, max.as_i64()))
+            }
+        };
+        Ok(Box::new(iter))
     }
 }
 

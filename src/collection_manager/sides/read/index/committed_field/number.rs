@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     collection_manager::sides::read::index::{
+        filter::Filterable,
         merge::{CommittedField, CommittedFieldMetadata, Field},
         uncommitted_field::UncommittedNumberField,
     },
@@ -222,6 +223,52 @@ impl Field for CommittedNumberField {
         };
 
         CommittedNumberFieldStats { min, max }
+    }
+}
+
+impl Filterable for CommittedNumberField {
+    type FilterParam = NumberFilter;
+
+    fn filter<'s, 'iter>(
+        &'s self,
+        filter_param: &Self::FilterParam,
+    ) -> Result<Box<dyn Iterator<Item = DocumentId> + 'iter>>
+    where
+        's: 'iter,
+    {
+        let iter = match filter_param {
+            NumberFilter::Equal(value) => get_iter(
+                &self.vec,
+                (true, SerializableNumber(*value)),
+                (true, SerializableNumber(*value)),
+            ),
+            NumberFilter::Between((min, max)) => get_iter(
+                &self.vec,
+                (true, SerializableNumber(*min)),
+                (true, SerializableNumber(*max)),
+            ),
+            NumberFilter::GreaterThan(min) => get_iter(
+                &self.vec,
+                (false, SerializableNumber(*min)),
+                (false, SerializableNumber::max_value()),
+            ),
+            NumberFilter::GreaterThanOrEqual(min) => get_iter(
+                &self.vec,
+                (true, SerializableNumber(*min)),
+                (false, SerializableNumber::max_value()),
+            ),
+            NumberFilter::LessThan(max) => get_iter(
+                &self.vec,
+                (false, SerializableNumber::min_value()),
+                (false, SerializableNumber(*max)),
+            ),
+            NumberFilter::LessThanOrEqual(max) => get_iter(
+                &self.vec,
+                (false, SerializableNumber::min_value()),
+                (true, SerializableNumber(*max)),
+            ),
+        };
+        Ok(Box::new(iter))
     }
 }
 

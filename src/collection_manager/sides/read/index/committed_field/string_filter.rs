@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
     collection_manager::sides::read::{
         index::{
+            filter::Filterable,
             merge::{CommittedField, CommittedFieldMetadata, Field},
             uncommitted_field::UncommittedStringFilterField,
         },
@@ -181,6 +182,29 @@ impl Field for CommittedStringFilterField {
             document_count: doc_count,
             keys,
         }
+    }
+}
+
+impl Filterable for CommittedStringFilterField {
+    type FilterParam = String;
+
+    fn filter<'s, 'iter>(
+        &'s self,
+        filter_param: &Self::FilterParam,
+    ) -> Result<Box<dyn Iterator<Item = DocumentId> + 'iter>>
+    where
+        's: 'iter,
+    {
+        // Convert String to &str and use existing filter logic
+        // The existing filter returns an empty iterator if the key is not found (unwrap_or_default)
+        let iter = self
+            .inner
+            .get(filter_param.as_str())
+            .map(|doc_ids| {
+                Box::new(doc_ids.iter().copied()) as Box<dyn Iterator<Item = DocumentId>>
+            })
+            .unwrap_or_else(|| Box::new(std::iter::empty()));
+        Ok(iter)
     }
 }
 

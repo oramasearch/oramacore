@@ -6,8 +6,13 @@ use std::{
 
 use serde::Serialize;
 
+use anyhow::Result;
+
 use crate::{
-    collection_manager::sides::read::index::merge::{Field, UncommittedField},
+    collection_manager::sides::read::index::{
+        filter::Filterable,
+        merge::{Field, UncommittedField},
+    },
     types::{DocumentId, Number, NumberFilter},
 };
 
@@ -138,5 +143,20 @@ impl Field for UncommittedNumberField {
             max: *max,
             count: self.len(),
         }
+    }
+}
+
+impl Filterable for UncommittedNumberField {
+    type FilterParam = NumberFilter;
+
+    fn filter<'s, 'iter>(
+        &'s self,
+        filter_param: &Self::FilterParam,
+    ) -> Result<Box<dyn Iterator<Item = DocumentId> + 'iter>>
+    where
+        's: 'iter,
+    {
+        let iter = inner_filter(&self.inner, filter_param);
+        Ok(Box::new(iter))
     }
 }

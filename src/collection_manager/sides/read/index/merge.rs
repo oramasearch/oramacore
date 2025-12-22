@@ -10,6 +10,8 @@ use oramacore_lib::fs::create_if_not_exists;
 
 use super::super::OffloadFieldConfig;
 
+// pub use super::filter::Filterable;
+
 pub trait CommittedFieldMetadata {
     fn data_dir(&self) -> &PathBuf;
     fn set_data_dir(&mut self, data_dir: PathBuf);

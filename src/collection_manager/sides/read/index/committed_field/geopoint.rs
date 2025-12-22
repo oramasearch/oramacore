@@ -5,10 +5,11 @@ use oramacore_lib::bkd;
 use oramacore_lib::bkd::{haversine_distance, BKDTree, Coord};
 use serde::{Deserialize, Serialize};
 
-use crate::collection_manager::sides::read::index::merge::{
-    CommittedField, CommittedFieldMetadata, Field,
-};
 use crate::collection_manager::sides::read::index::uncommitted_field::UncommittedGeoPointFilterField;
+use crate::collection_manager::sides::read::index::{
+    filter::Filterable,
+    merge::{CommittedField, CommittedFieldMetadata, Field},
+};
 use crate::collection_manager::sides::read::OffloadFieldConfig;
 use crate::types::{DocumentId, GeoSearchFilter};
 use oramacore_lib::fs::BufferedFile;
@@ -46,41 +47,6 @@ impl CommittedGeoPointField {
             .context("Cannot deserialize geopoint file")?;
 
         Ok(())
-    }
-
-    pub fn filter<'s, 'iter>(
-        &'s self,
-        filter_geopoint: &GeoSearchFilter,
-    ) -> Box<dyn Iterator<Item = DocumentId> + 'iter>
-    where
-        's: 'iter,
-    {
-        match filter_geopoint {
-            GeoSearchFilter::Radius(filter) => Box::new(
-                self.tree
-                    .search_by_radius(
-                        Coord::new(filter.coordinates.lat, filter.coordinates.lon),
-                        filter.value.to_meter(filter.unit),
-                        haversine_distance,
-                        filter.inside,
-                    )
-                    .copied(),
-            ),
-            GeoSearchFilter::Polygon(filter) => {
-                let iter = self
-                    .tree
-                    .search_by_polygon(
-                        filter
-                            .coordinates
-                            .iter()
-                            .map(|g| Coord::new(g.lat, g.lon))
-                            .collect(),
-                        false,
-                    )
-                    .copied();
-                Box::new(iter)
-            }
-        }
     }
 }
 
@@ -176,6 +142,47 @@ impl Field for CommittedGeoPointField {
         CommittedGeoPointFieldStats {
             count: self.tree.len(),
         }
+    }
+}
+
+impl Filterable for CommittedGeoPointField {
+    type FilterParam = GeoSearchFilter;
+
+    fn filter<'s, 'iter>(
+        &'s self,
+        filter_param: &Self::FilterParam,
+    ) -> Result<Box<dyn Iterator<Item = DocumentId> + 'iter>>
+    where
+        's: 'iter,
+    {
+        let iter = match filter_param {
+            GeoSearchFilter::Radius(filter) => Box::new(
+                self.tree
+                    .search_by_radius(
+                        Coord::new(filter.coordinates.lat, filter.coordinates.lon),
+                        filter.value.to_meter(filter.unit),
+                        haversine_distance,
+                        filter.inside,
+                    )
+                    .copied(),
+            )
+                as Box<dyn Iterator<Item = DocumentId>>,
+            GeoSearchFilter::Polygon(filter) => {
+                let iter = self
+                    .tree
+                    .search_by_polygon(
+                        filter
+                            .coordinates
+                            .iter()
+                            .map(|g| Coord::new(g.lat, g.lon))
+                            .collect(),
+                        false,
+                    )
+                    .copied();
+                Box::new(iter) as Box<dyn Iterator<Item = DocumentId>>
+            }
+        };
+        Ok(iter)
     }
 }
 

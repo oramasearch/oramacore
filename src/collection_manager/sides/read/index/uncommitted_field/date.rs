@@ -5,8 +5,13 @@ use std::{
 
 use serde::Serialize;
 
+use anyhow::Result;
+
 use crate::{
-    collection_manager::sides::read::index::merge::{Field, UncommittedField},
+    collection_manager::sides::read::index::{
+        filter::Filterable,
+        merge::{Field, UncommittedField},
+    },
     types::{DateFilter, DocumentId, OramaDate},
 };
 
@@ -34,16 +39,6 @@ impl UncommittedDateFilterField {
 
     pub fn insert(&mut self, doc_id: DocumentId, value: i64) {
         self.inner.entry(value).or_default().insert(doc_id);
-    }
-
-    pub fn filter<'s, 'iter>(
-        &'s self,
-        filter_date: &DateFilter,
-    ) -> impl Iterator<Item = DocumentId> + 'iter
-    where
-        's: 'iter,
-    {
-        inner_filter(&self.inner, filter_date)
     }
 
     pub fn iter(&self) -> impl DoubleEndedIterator<Item = (i64, HashSet<DocumentId>)> + '_ {
@@ -108,6 +103,7 @@ fn inner_filter<'tree, 'iter>(
 where
     'tree: 'iter,
 {
+    #[inline]
     fn flat_doc<'tree>(
         (_, doc_ids): (&'tree i64, &'tree HashSet<DocumentId>),
     ) -> impl Iterator<Item = DocumentId> + 'tree {
@@ -144,4 +140,19 @@ pub struct UncommittedDateFieldStats {
     pub min: Option<OramaDate>,
     pub max: Option<OramaDate>,
     pub count: usize,
+}
+
+impl Filterable for UncommittedDateFilterField {
+    type FilterParam = DateFilter;
+
+    fn filter<'s, 'iter>(
+        &'s self,
+        filter_param: &Self::FilterParam,
+    ) -> Result<Box<dyn Iterator<Item = DocumentId> + 'iter>>
+    where
+        's: 'iter,
+    {
+        let iter = inner_filter(&self.inner, filter_param);
+        Ok(Box::new(iter))
+    }
 }
