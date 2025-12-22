@@ -104,6 +104,139 @@ async fn test_pin_rules_after_insert_simple() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn test_pin_rules_multiple_indexes() {
+    init_log();
+
+    let test_context = TestContext::new().await;
+    let collection_client = test_context.create_collection().await.unwrap();
+    let index_client1 = collection_client.create_index().await.unwrap();
+    let index_client2 = collection_client.create_index().await.unwrap();
+
+    let docs: Vec<_> = (0_u8..10_u8)
+        .map(|i| {
+            json!({
+                "id": format!("{}", i),
+                "c": format!("c-{}", i),
+            })
+        })
+        .collect();
+    index_client1
+        .insert_documents(docs.try_into().unwrap())
+        .await
+        .unwrap();
+
+    let docs: Vec<_> = (10_u8..20_u8)
+        .map(|i| {
+            json!({
+                "id": format!("{}", i),
+                "c": format!("c-{}", i),
+            })
+        })
+        .collect();
+    index_client2
+        .insert_documents(docs.try_into().unwrap())
+        .await
+        .unwrap();
+
+    index_client1
+        .insert_pin_rules(
+            json!({
+                "id": "rule-1",
+                "conditions": [
+                    {
+                        "pattern": "c",
+                        "anchoring": "is"
+                    },
+                ],
+                "consequence": {
+                    "promote": [
+                        {
+                            "doc_id": "5",
+                            "position": 1
+                        },
+                        {
+                            "doc_id": "7",
+                            "position": 4
+                        }
+                    ]
+                }
+            })
+            .try_into()
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    index_client2
+        .insert_pin_rules(
+            json!({
+                "id": "rule-2",
+                "conditions": [
+                    {
+                        "pattern": "c",
+                        "anchoring": "startsWith",
+                    }
+                ],
+                "consequence": {
+                    "promote": [
+                        {
+                            "doc_id": "11",
+                            "position": 2
+                        },
+                        {
+                            "doc_id": "15",
+                            "position": 3
+                        }
+                    ]
+                }
+            })
+            .try_into()
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    let result = collection_client
+        .search(
+            json!({
+                "term": "c"
+            })
+            .try_into()
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    // The pin rule should promote document with id "5" to position 1
+    // The actual ID will be in format "index_id:5"
+    assert!(
+        result.hits[1].id.ends_with(":5"),
+        "Expected document ID ending with ':5', got: {}",
+        result.hits[1].id
+    );
+    assert!(
+        result.hits[2].id.ends_with(":11"),
+        "Expected document ID ending with ':7', got: {}",
+        result.hits[2].id
+    );
+    assert!(
+        result.hits[3].id.ends_with(":15"),
+        "Expected document ID ending with ':15', got: {}",
+        result.hits[3].id
+    );
+    assert!(
+        result.hits[4].id.ends_with(":7"),
+        "Expected document ID ending with ':7', got: {}",
+        result.hits[4].id
+    );
+
+    let ids = extrapolate_ids_from_result(&result);
+    assert_eq!(&ids, &["0", "5", "11", "15", "7", "1", "2", "3", "4", "6"]);
+
+    drop(test_context);
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn test_pin_rules_after_insert_already_returned() {
     init_log();
 

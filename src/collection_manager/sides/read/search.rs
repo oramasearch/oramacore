@@ -1,6 +1,6 @@
 use std::{
     borrow::Cow,
-    collections::{HashMap, HashSet},
+    collections::{BTreeSet, HashMap, HashSet},
     hash::Hash,
     time::Instant,
 };
@@ -319,15 +319,15 @@ async fn extract_pin_rules<'collection>(
     indexes: &ReadIndexesLockGuard<'collection, '_>,
 ) -> Vec<Consequence<DocumentId>> {
     let term = extract_term_from_search_mode(&search_params.mode);
-    let mut index_consequences: Vec<Consequence<DocumentId>> = Vec::new();
-    for index in indexes.iter() {
-        let text_parser = index.get_text_parser();
-        let mut cons = rules.apply(term, text_parser);
-        index_consequences.append(&mut cons);
-    }
-    index_consequences.dedup();
-
-    index_consequences
+    indexes
+        .iter()
+        .flat_map(|index| {
+            let text_parser = index.get_text_parser();
+            rules.apply(term, text_parser)
+        })
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect()
 }
 
 async fn calculate_token_score_for_indexes(
