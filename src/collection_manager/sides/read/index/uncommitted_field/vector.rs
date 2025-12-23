@@ -46,15 +46,11 @@ impl UncommittedVectorField {
         params: &VectorSearchParams<'_>,
         output: &mut HashMap<DocumentId, f32>,
     ) -> Result<()> {
-        println!(
-            "Searching uncommitted vector field with {} documents. Target vector length: {:?}",
-            self.data.len(),
-            params.target
-        );
         for (id, vectors) in &self.data {
+            // Skip documents that are NOT in the filter (when filter exists)
             if params
                 .filtered_doc_ids
-                .map_or(false, |filtered| filtered.contains(id))
+                .map_or(false, |filtered| !filtered.contains(id))
             {
                 continue;
             }
