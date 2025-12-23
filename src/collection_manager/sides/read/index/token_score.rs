@@ -413,13 +413,12 @@ impl<'index> TokenScoreContext<'index> {
         &self,
         mode: &HybridMode,
         properties: &Properties,
-        boost: &HashMap<String, f32>,
+        boost: HashMap<FieldId, f32>,
         limit: Limit,
         filtered_doc_ids: Option<&FilterResult<DocumentId>>,
     ) -> Result<HashMap<DocumentId, f32>> {
         let vector_properties = self.calculate_vector_properties().await?;
         let string_properties = self.calculate_string_properties(properties).await?;
-        let boost = self.calculate_boost(boost);
 
         // Execute both searches in parallel
         let (vector_res, fulltext_res) = join!(
@@ -565,7 +564,7 @@ impl<'index> TokenScoreContext<'index> {
                     self.search_hybrid(
                         &mode,
                         params.properties,
-                        params.boost,
+                        boost,
                         params.limit_hint,
                         params.filtered_doc_ids,
                     )
