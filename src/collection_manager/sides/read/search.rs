@@ -5,7 +5,7 @@ use oramacore_lib::{
 };
 use std::{
     borrow::Cow,
-    collections::{BTreeSet, HashMap, HashSet},
+    collections::{HashMap, HashSet},
     hash::Hash,
     time::Instant,
 };
@@ -246,15 +246,24 @@ async fn extract_pin_rules<'collection>(
     indexes: &ReadIndexesLockGuard<'collection, '_>,
 ) -> Vec<Consequence<DocumentId>> {
     let term = extract_term_from_search_mode(&search_params.mode);
-    indexes
+    let mut consequences: Vec<_> = indexes
         .iter()
         .flat_map(|index| {
             let text_parser = index.get_text_parser();
             rules.apply(term, text_parser)
         })
-        .collect::<BTreeSet<_>>()
-        .into_iter()
-        .collect()
+        .collect();
+
+    consequences.sort_by(|a, b| {
+        a.promote
+            .iter()
+            .map(|item| (item.position, item.doc_id))
+            .cmp(b.promote.iter().map(|item| (item.position, item.doc_id)))
+    });
+
+    consequences.dedup();
+
+    consequences
 }
 
 async fn search_on_indexes(
