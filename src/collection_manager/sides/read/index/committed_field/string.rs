@@ -816,8 +816,7 @@ impl CommittedFieldMetadata for StringFieldInfo {
 mod tests {
     use crate::{
         collection_manager::sides::{
-            read::index::uncommitted_field::UncommittedStringField,
-            Term, TermStringField,
+            read::index::uncommitted_field::UncommittedStringField, Term, TermStringField,
         },
         tests::utils::{generate_new_path, init_log},
     };
