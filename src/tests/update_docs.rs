@@ -1,11 +1,9 @@
-use std::time::Duration;
 
 use anyhow::bail;
 use serde_json::json;
-use tokio::time::sleep;
 
 use crate::{
-    tests::utils::{TestContext, init_log, wait_for},
+    tests::utils::{init_log, wait_for, TestContext},
     types::UpdateDocumentRequest,
 };
 
@@ -94,7 +92,9 @@ async fn test_update_docs_simple() {
                 bail!("Not updated yet")
             }
         })
-    }).await.unwrap();
+    })
+    .await
+    .unwrap();
 
     let output = collection_client
         .search(

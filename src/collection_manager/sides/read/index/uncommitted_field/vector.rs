@@ -50,13 +50,13 @@ impl UncommittedVectorField {
             // Skip documents that are NOT in the filter (when filter exists)
             if params
                 .filtered_doc_ids
-                .map_or(false, |filtered| !filtered.contains(id))
+                .is_some_and(|filtered| !filtered.contains(id))
             {
                 continue;
             }
 
             for (_m, vector) in vectors {
-                let score = score_vector(vector, &params.target)?;
+                let score = score_vector(vector, params.target)?;
                 let score = self.model.rescale_score(score);
 
                 if score < params.similarity {

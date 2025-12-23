@@ -102,7 +102,7 @@ impl StringLayout {
                         .filter(move |(doc_id, _)| {
                             params
                                 .filtered_doc_ids
-                                .map_or(true, |filtered| filtered.contains(doc_id))
+                                .is_none_or(|filtered| filtered.contains(doc_id))
                         })
                         .filter_map(move |(doc_id, positions)| {
                             let field_length = document_lengths_per_document.get_length(doc_id);
@@ -195,7 +195,7 @@ impl StringLayout {
                     postings
                         .iter()
                         .filter(move |(doc_id, _)| {
-                            params.filtered_doc_ids.map_or(true, |f| f.contains(doc_id))
+                            params.filtered_doc_ids.is_none_or(|f| f.contains(doc_id))
                         })
                         .filter_map(move |(doc_id, positions)| {
                             let field_lenght = document_lengths_per_document.get_length(doc_id);
@@ -816,9 +816,7 @@ impl CommittedFieldMetadata for StringFieldInfo {
 mod tests {
     use crate::{
         collection_manager::sides::{
-            read::{
-                index::uncommitted_field::UncommittedStringField, search::SearchDocumentContext,
-            },
+            read::index::uncommitted_field::UncommittedStringField,
             Term, TermStringField,
         },
         tests::utils::{generate_new_path, init_log},

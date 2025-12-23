@@ -1104,13 +1104,16 @@ impl Index {
             &self.path_to_index_id_map,
         );
         context
-            .execute(&TokenScoreParams {
-                mode: &search_params.mode,
-                boost: &search_params.boost,
-                properties: &search_params.properties,
-                limit_hint: search_params.limit,
-                filtered_doc_ids: filtered_doc_ids.as_ref(),
-            }, results)
+            .execute(
+                &TokenScoreParams {
+                    mode: &search_params.mode,
+                    boost: &search_params.boost,
+                    properties: &search_params.properties,
+                    limit_hint: search_params.limit,
+                    filtered_doc_ids: filtered_doc_ids.as_ref(),
+                },
+                results,
+            )
             .await
     }
 

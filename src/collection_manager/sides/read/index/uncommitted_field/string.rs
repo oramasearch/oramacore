@@ -168,7 +168,7 @@ impl UncommittedStringField {
                 for (doc_id, positions) in position_per_document {
                     if context
                         .filtered_doc_ids
-                        .map_or(false, |filtered| !filtered.contains(doc_id))
+                        .is_some_and(|filtered| !filtered.contains(doc_id))
                     {
                         continue;
                     }
