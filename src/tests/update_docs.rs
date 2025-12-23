@@ -1,10 +1,11 @@
 use std::time::Duration;
 
+use anyhow::bail;
 use serde_json::json;
 use tokio::time::sleep;
 
 use crate::{
-    tests::utils::{init_log, TestContext},
+    tests::utils::{TestContext, init_log, wait_for},
     types::UpdateDocumentRequest,
 };
 
@@ -75,20 +76,25 @@ async fn test_update_docs_simple() {
     assert_eq!(output.updated, 2);
     assert_eq!(output.failed, 0);
 
-    sleep(Duration::from_secs(1)).await;
-
-    let output = collection_client
-        .search(
-            json!({
-                "properties": [ "role" ],
-                "term": "juniordev",
-            })
-            .try_into()
-            .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(output.count, 1);
+    wait_for(&collection_client, |collection_client| {
+        Box::pin(async move {
+            let output = collection_client
+                .search(
+                    json!({
+                        "properties": [ "role" ],
+                        "term": "juniordev",
+                    })
+                    .try_into()
+                    .unwrap(),
+                )
+                .await?;
+            if output.count == 1 {
+                Ok(())
+            } else {
+                bail!("Not updated yet")
+            }
+        })
+    }).await.unwrap();
 
     let output = collection_client
         .search(

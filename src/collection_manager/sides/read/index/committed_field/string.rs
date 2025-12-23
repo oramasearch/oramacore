@@ -8,8 +8,8 @@ use std::{
 
 use anyhow::{anyhow, Context, Result};
 use invocation_counter::InvocationCounter;
-use oramacore_lib::data_structures::map::Map;
-use oramacore_lib::data_structures::{fst::FSTIndex, ShouldInclude};
+use oramacore_lib::data_structures::fst::FSTIndex;
+use oramacore_lib::{data_structures::map::Map, filters::FilterResult};
 use serde::{Deserialize, Serialize};
 use tracing::info;
 
@@ -23,7 +23,6 @@ use crate::{
                     create_counter, should_offload, update_invocation_counter, Cow,
                 },
                 merge::{CommittedField, CommittedFieldMetadata, Field},
-                search_context::FullTextSearchContext,
                 uncommitted_field::UncommittedStringField,
             },
             OffloadFieldConfig,
@@ -31,10 +30,20 @@ use crate::{
     },
     lock::OramaSyncLock,
     merger::MergedIterator,
-    types::DocumentId,
+    types::{DocumentId, FieldId},
 };
 
 const EXACT_MATCH_BOOST_MULTIPLIER: f32 = 3.0;
+
+pub struct StringSearchParams<'index, 'search> {
+    pub global_info: GlobalInfo,
+    pub exact_match: bool,
+    pub filtered_doc_ids: Option<&'index FilterResult<DocumentId>>,
+    pub field_id: FieldId,
+    pub boost: f32,
+    pub tokens: &'search [String],
+    pub tolerance: Option<u8>,
+}
 
 enum StringLayout {
     Fst(Box<(FSTIndex, PostingIdStorage, DocumentLengthsPerDocument)>),
@@ -54,22 +63,19 @@ impl StringLayout {
 
     fn search_without_phrase_match(
         &self,
-        context: &mut FullTextSearchContext<'_, '_>,
+        params: &StringSearchParams<'_, '_>,
         scorer: &mut BM25Scorer<DocumentId>,
-        tolerance: Option<u8>,
     ) -> Result<()> {
-        let total_field_length = context.global_info.total_document_length as f32;
-        let total_documents_with_field = context.global_info.total_documents as f32;
+        let total_field_length = params.global_info.total_document_length as f32;
+        let total_documents_with_field = params.global_info.total_documents as f32;
         let average_field_length = total_field_length / total_documents_with_field;
 
         let (index, posting_storage, document_lengths_per_document) = match self {
             StringLayout::Fst(boxed) => (&boxed.0, &boxed.1, &boxed.2),
         };
 
-        for token in context.tokens {
-            context.increment_term_count();
-
-            let iter: Box<dyn Iterator<Item = (bool, u64)>> = if context.exact_match {
+        for token in params.tokens {
+            let iter: Box<dyn Iterator<Item = (bool, u64)>> = if params.exact_match {
                 if let Some(posting_list_id) = index.search_exact(token) {
                     Box::new(vec![(true, posting_list_id)].into_iter())
                 } else {
@@ -77,7 +83,7 @@ impl StringLayout {
                 }
             } else {
                 index
-                    .search(token, tolerance)
+                    .search(token, params.tolerance)
                     .context("Cannot search in index")?
             };
 
@@ -89,12 +95,15 @@ impl StringLayout {
                         .map(move |posting| (is_exact, posting))
                 })
                 .flat_map(|(is_exact, postings)| {
-                    let search_document_context = context.search_document_context;
-                    let exact_match = context.exact_match;
+                    let exact_match = params.exact_match;
 
                     postings
                         .iter()
-                        .filter(move |(doc_id, _)| search_document_context.should_include(doc_id))
+                        .filter(move |(doc_id, _)| {
+                            params
+                                .filtered_doc_ids
+                                .map_or(true, |filtered| filtered.contains(doc_id))
+                        })
                         .filter_map(move |(doc_id, positions)| {
                             let field_length = document_lengths_per_document.get_length(doc_id);
                             let term_occurrence_in_field = if exact_match {
@@ -112,14 +121,14 @@ impl StringLayout {
                 });
 
             for (doc_id, term_occurrence_in_field, field_length, is_exact) in matches {
-                let field_id = context.field_id;
+                let field_id = params.field_id;
 
                 // User-defined field boost as BM25F weight
                 // But we boost more if the match is exact
                 let weight = if is_exact {
-                    context.boost * EXACT_MATCH_BOOST_MULTIPLIER
+                    params.boost * EXACT_MATCH_BOOST_MULTIPLIER
                 } else {
-                    context.boost
+                    params.boost
                 };
                 let field_params = BM25FFieldParams {
                     weight,
@@ -142,12 +151,11 @@ impl StringLayout {
 
     fn search_with_phrase_match(
         &self,
-        context: &mut FullTextSearchContext<'_, '_>,
+        params: &StringSearchParams<'_, '_>,
         scorer: &mut BM25Scorer<DocumentId>,
-        tolerance: Option<u8>,
     ) -> Result<()> {
-        let total_field_length = context.global_info.total_document_length as f32;
-        let total_documents_with_field = context.global_info.total_documents as f32;
+        let total_field_length = params.global_info.total_document_length as f32;
+        let total_documents_with_field = params.global_info.total_documents as f32;
         let average_field_length = total_field_length / total_documents_with_field;
         let (index, posting_storage, document_lengths_per_document) = match self {
             StringLayout::Fst(boxed) => (&boxed.0, &boxed.1, &boxed.2),
@@ -160,10 +168,8 @@ impl StringLayout {
         }
         let mut storage: HashMap<DocumentId, PhraseMatchStorage> = HashMap::new();
 
-        for (token_index, token) in context.tokens.iter().enumerate() {
-            context.increment_term_count();
-
-            let iter: Box<dyn Iterator<Item = (bool, u64)>> = if context.exact_match {
+        for (token_index, token) in params.tokens.iter().enumerate() {
+            let iter: Box<dyn Iterator<Item = (bool, u64)>> = if params.exact_match {
                 if let Some(posting_list_id) = index.search_exact(token) {
                     Box::new(vec![(true, posting_list_id)].into_iter())
                 } else {
@@ -171,7 +177,7 @@ impl StringLayout {
                 }
             } else {
                 index
-                    .search(token, tolerance)
+                    .search(token, params.tolerance)
                     .context("Cannot search in index")?
             };
 
@@ -184,12 +190,13 @@ impl StringLayout {
                 .flat_map(|(is_exact, postings)| {
                     let total_documents_with_term_in_field = postings.len();
 
-                    let search_document_context = context.search_document_context;
-                    let exact_match = context.exact_match;
+                    let exact_match = params.exact_match;
 
                     postings
                         .iter()
-                        .filter(move |(doc_id, _)| search_document_context.should_include(doc_id))
+                        .filter(move |(doc_id, _)| {
+                            params.filtered_doc_ids.map_or(true, |f| f.contains(doc_id))
+                        })
                         .filter_map(move |(doc_id, positions)| {
                             let field_lenght = document_lengths_per_document.get_length(doc_id);
 
@@ -275,10 +282,10 @@ impl StringLayout {
             let boost_sequence = sequences_count as f32 * 2.0;
             let _phrase_boost = boost_any_order + boost_sequence;
 
-            let field_id = context.field_id;
+            let field_id = params.field_id;
 
             let mut field_params = BM25FFieldParams {
-                weight: context.boost, // User-defined field boost as BM25F weight
+                weight: params.boost, // User-defined field boost as BM25F weight
                 b: 0.75, // Default normalization parameter @todo: make this configurable?
             };
 
@@ -356,12 +363,11 @@ impl CommittedStringField {
 
     pub fn search(
         &self,
-        context: &mut FullTextSearchContext<'_, '_>,
+        params: &StringSearchParams<'_, '_>,
         scorer: &mut BM25Scorer<DocumentId>,
-        tolerance: Option<u8>,
     ) -> Result<()> {
         update_invocation_counter(&self.invocation_counter);
-        if context.tokens.is_empty() {
+        if params.tokens.is_empty() {
             return Ok(());
         }
 
@@ -390,10 +396,10 @@ impl CommittedStringField {
             }
         };
 
-        if context.tokens.len() == 1 {
-            layout.search_without_phrase_match(context, scorer, tolerance)
+        if params.tokens.len() == 1 {
+            layout.search_without_phrase_match(params, scorer)
         } else {
-            layout.search_with_phrase_match(context, scorer, tolerance)
+            layout.search_with_phrase_match(params, scorer)
         }
     }
 }
@@ -858,21 +864,18 @@ mod tests {
             )]),
         );
 
-        let deleted_documents: HashSet<DocumentId> = HashSet::new();
-        let mut search_context = FullTextSearchContext {
+        let search_params = StringSearchParams {
             tokens: &["term1".to_string()],
             exact_match: false,
             boost: 1.0,
             field_id: FieldId(1), // Use test field ID
             global_info: uncommitted.global_info(),
-            search_document_context: &SearchDocumentContext::new(&deleted_documents, None),
-            total_term_count: 0,
+            filtered_doc_ids: None,
+            tolerance: None,
         };
-        use crate::types::FieldId;
+
         let mut scorer: BM25Scorer<DocumentId> = BM25Scorer::plain();
-        uncommitted
-            .search(&mut search_context, &mut scorer)
-            .unwrap();
+        uncommitted.search(&search_params, &mut scorer).unwrap();
 
         // Finalize the BM25F scoring process
         scorer.finalize_term_plain(
@@ -898,9 +901,7 @@ mod tests {
         .unwrap();
 
         let mut scorer: BM25Scorer<DocumentId> = BM25Scorer::plain();
-        committed
-            .search(&mut search_context, &mut scorer, None)
-            .unwrap();
+        committed.search(&search_params, &mut scorer).unwrap();
 
         // Finalize the BM25F scoring process
         scorer.finalize_term_plain(
@@ -920,9 +921,7 @@ mod tests {
         drop(status_lock);
 
         let mut scorer: BM25Scorer<DocumentId> = BM25Scorer::plain();
-        committed
-            .search(&mut search_context, &mut scorer, None)
-            .unwrap();
+        committed.search(&search_params, &mut scorer).unwrap();
 
         // Finalize the BM25F scoring process
         scorer.finalize_term_plain(

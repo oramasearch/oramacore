@@ -10,6 +10,7 @@ use anyhow::{anyhow, Context, Result};
 use invocation_counter::InvocationCounter;
 use oramacore_lib::{
     data_structures::{hnsw2::HNSW2Index, vector_bruteforce::VectorBruteForce, ShouldInclude},
+    filters::FilterResult,
     fs::{create_if_not_exists, BufferedFile},
 };
 use serde::{Deserialize, Serialize};
@@ -23,7 +24,6 @@ use crate::{
             merge::{CommittedField, CommittedFieldMetadata, Field},
             uncommitted_field::UncommittedVectorField,
         },
-        search::SearchDocumentContext,
         OffloadFieldConfig,
     },
     lock::OramaSyncLock,
@@ -146,10 +146,7 @@ impl VectorLayout {
     }
     fn search(
         &self,
-        target: &[f32],
-        similarity: f32,
-        limit: usize,
-        search_document_context: &SearchDocumentContext<'_, DocumentId>,
+        params: &VectorSearchParams,
         model: Model,
         output: &mut HashMap<DocumentId, f32>,
     ) -> Result<()> {
@@ -157,7 +154,6 @@ impl VectorLayout {
             VectorLayout::Hnsw(index) => {
                 // We filtered matches by:
                 // - `filtered_doc_ids`: removed by `search` method
-                // - `uncommitted_deleted_documents`: removed by `document deletion` method
                 // - `similarity` threshold: removed by `search` method
                 // If there're not uncomitted deletions or the user doesn't filter, the limit is ok:
                 // HNSW returns the most probable matches first, so we can stop when we reach the limit.
@@ -165,32 +161,41 @@ impl VectorLayout {
                 // Anyway, the implementation below returns a Vec, so we should redo the search till reach the limit.
                 // For now, we just double the limit.
                 // TODO: implement a better way to handle this.
-                let limit = if search_document_context.has_filtered() {
-                    limit * 2
+                let limit = if params.filtered_doc_ids.is_some() {
+                    params.limit * 2
                 } else {
-                    limit
+                    params.limit
                 };
 
-                let data = index.search(target, limit);
+                let data = index.search(params.target, limit);
 
                 for (doc_id, score) in data {
-                    if search_document_context.should_exclude(&doc_id) {
-                        continue;
+                    if let Some(filtered) = params.filtered_doc_ids {
+                        if !filtered.contains(&doc_id) {
+                            continue;
+                        }
                     }
                     let score = model.rescale_score(score);
 
-                    if score >= similarity {
+                    if score >= params.similarity {
                         let v = output.entry(doc_id).or_insert(0.0);
                         *v += score;
                     }
                 }
             }
             VectorLayout::BruteForce(index) => {
-                let data = index.search(target, limit, similarity, search_document_context);
+                let data = index.search(
+                    params.target,
+                    params.limit,
+                    params.similarity,
+                    &VectorBruteForceSearchResult {
+                        filtered_doc_ids: params.filtered_doc_ids,
+                    },
+                );
 
                 for (doc_id, score) in data {
                     let score = model.rescale_score(score);
-                    if score >= similarity {
+                    if score >= params.similarity {
                         let v = output.entry(doc_id).or_insert(0.0);
                         *v += score;
                     }
@@ -199,6 +204,27 @@ impl VectorLayout {
         }
 
         Ok(())
+    }
+}
+
+pub struct VectorSearchParams<'search> {
+    pub target: &'search [f32],
+    pub similarity: f32,
+    pub limit: usize,
+    pub filtered_doc_ids: Option<&'search FilterResult<DocumentId>>,
+}
+
+struct VectorBruteForceSearchResult<'search, DocumentId> {
+    pub filtered_doc_ids: Option<&'search FilterResult<DocumentId>>,
+}
+impl ShouldInclude<DocumentId> for VectorBruteForceSearchResult<'_, DocumentId>
+where
+    DocumentId: Eq + std::hash::Hash,
+{
+    fn should_include(&self, item: &DocumentId) -> bool {
+        self.filtered_doc_ids
+            .map(|filtered| filtered.contains(item))
+            .unwrap_or(true)
     }
 }
 
@@ -395,10 +421,7 @@ impl Field for CommittedVectorField {
 impl CommittedVectorField {
     pub fn search(
         &self,
-        target: &[f32],
-        similarity: f32,
-        limit: usize,
-        search_document_context: &SearchDocumentContext<'_, DocumentId>,
+        params: &VectorSearchParams<'_>,
         output: &mut HashMap<DocumentId, f32>,
     ) -> Result<()> {
         update_invocation_counter(&self.invocation_counter);
@@ -428,14 +451,7 @@ impl CommittedVectorField {
             }
         };
 
-        layout.search(
-            target,
-            similarity,
-            limit,
-            search_document_context,
-            self.metadata.model,
-            output,
-        )?;
+        layout.search(params, self.metadata.model, output)?;
 
         Ok(())
     }

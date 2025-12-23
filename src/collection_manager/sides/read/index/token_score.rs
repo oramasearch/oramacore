@@ -1,27 +1,47 @@
-use std::{collections::{HashMap, HashSet}, sync::Arc};
+use std::{
+    collections::{HashMap, HashSet},
+    sync::Arc,
+};
 
 use anyhow::{bail, Context as _, Result};
+use oramacore_lib::filters::FilterResult;
 use tokio::join;
 use tracing::debug;
 
 use crate::{
     ai::llms,
-    collection_manager::bm25::BM25Scorer,
+    collection_manager::{
+        bm25::BM25Scorer,
+        sides::read::index::committed_field::{StringSearchParams, VectorSearchParams},
+    },
     lock::OramaAsyncLockReadGuard,
     python::embeddings::Intent,
     types::{
         DocumentId, FieldId, FulltextMode, HybridMode, Limit, Properties, SearchMode,
-        SearchModeResult, SearchParams, Similarity, Threshold, VectorMode,
+        SearchModeResult, Similarity, Threshold, VectorMode,
     },
 };
 
 use super::{
-    merge::Field,
-    path_to_index_id_map::PathToIndexId,
-    search_context::FullTextSearchContext,
-    CommittedFields, FieldType, ReadSideContext, TextParser, UncommittedFields,
+    merge::Field, path_to_index_id_map::PathToIndexId, CommittedFields, FieldType, ReadSideContext,
+    TextParser, UncommittedFields,
 };
-use crate::collection_manager::sides::read::search::SearchDocumentContext;
+
+/// Parameters required for token score calculation.
+///
+/// This structure extracts only the necessary fields from SearchParams,
+/// using lifetimes to avoid cloning data.
+pub struct TokenScoreParams<'search> {
+    /// The search mode (fulltext, vector, hybrid, or auto)
+    pub mode: &'search SearchMode,
+    /// Field-specific boost values
+    pub boost: &'search HashMap<String, f32>,
+    /// Properties (fields) to search on
+    pub properties: &'search Properties,
+    /// Maximum number of results
+    pub limit_hint: Limit,
+    pub filtered_doc_ids: Option<&'search FilterResult<DocumentId>>,
+}
 
 /// Context for executing token score calculations.
 ///
@@ -158,14 +178,13 @@ impl<'index> TokenScoreContext<'index> {
                 }
                 field_ids
             }
-            Properties::None | Properties::Star => {
-                self.uncommitted_fields
-                    .string_fields
-                    .keys()
-                    .chain(self.committed_fields.string_fields.keys())
-                    .copied()
-                    .collect()
-            }
+            Properties::None | Properties::Star => self
+                .uncommitted_fields
+                .string_fields
+                .keys()
+                .chain(self.committed_fields.string_fields.keys())
+                .copied()
+                .collect(),
         };
 
         Ok(properties.into_iter().collect())
@@ -184,7 +203,7 @@ impl<'index> TokenScoreContext<'index> {
         tolerance: Option<u8>,
         properties: Vec<FieldId>,
         boost: HashMap<FieldId, f32>,
-        search_document_context: &SearchDocumentContext<'_, DocumentId>,
+        filtered_doc_ids: Option<&FilterResult<DocumentId>>,
     ) -> Result<HashMap<DocumentId, f32>> {
         let tokens = self.text_parser.tokenize_and_stem(term);
         let mut tokens: Vec<_> = if exact {
@@ -239,14 +258,14 @@ impl<'index> TokenScoreContext<'index> {
                 // Collect unique document IDs for this term across all fields for corpus DF calculation
                 let mut corpus_scorer = BM25Scorer::plain();
                 let single_token_slice = std::slice::from_ref(token);
-                let mut corpus_context = FullTextSearchContext {
+                let mut corpus_context = StringSearchParams {
                     tokens: single_token_slice,
                     exact_match: exact,
                     boost: 1.0,
                     field_id: *field_id,
                     global_info: field_global_info[field_id].clone(),
-                    total_term_count: 1,
-                    search_document_context,
+                    filtered_doc_ids,
+                    tolerance,
                 };
 
                 field
@@ -254,7 +273,7 @@ impl<'index> TokenScoreContext<'index> {
                     .context("Cannot perform corpus search")?;
                 if let Some(committed_field) = committed {
                     committed_field
-                        .search(&mut corpus_context, &mut corpus_scorer, tolerance)
+                        .search(&mut corpus_context, &mut corpus_scorer)
                         .context("Cannot perform corpus search")?;
                 }
 
@@ -283,24 +302,25 @@ impl<'index> TokenScoreContext<'index> {
 
                 // Reuse the same token slice to avoid allocation
                 let single_token_slice = std::slice::from_ref(token);
-                let mut context = FullTextSearchContext {
+
+                let context = StringSearchParams {
                     tokens: single_token_slice,
                     exact_match: exact,
                     boost,
                     field_id: *field_id,
                     global_info,
-                    total_term_count: term_index as u64 + 1,
-                    search_document_context,
+                    filtered_doc_ids,
+                    tolerance,
                 };
 
                 // Search this field for this specific term (with filters applied)
                 field
-                    .search(&mut context, &mut scorer)
+                    .search(&context, &mut scorer)
                     .context("Cannot perform search")?;
 
                 if let Some(committed_field) = committed {
                     committed_field
-                        .search(&mut context, &mut scorer, tolerance)
+                        .search(&context, &mut scorer)
                         .context("Cannot perform search")?;
                 }
             }
@@ -343,7 +363,7 @@ impl<'index> TokenScoreContext<'index> {
         properties: Vec<FieldId>,
         similarity: Similarity,
         limit: Limit,
-        search_document_context: &SearchDocumentContext<'_, DocumentId>,
+        filtered_doc_ids: Option<&FilterResult<DocumentId>>,
     ) -> Result<HashMap<DocumentId, f32>> {
         let mut output: HashMap<DocumentId, f32> = HashMap::new();
 
@@ -368,15 +388,16 @@ impl<'index> TokenScoreContext<'index> {
                 .context("Cannot calculate embeddings")?;
 
             for target in targets {
-                uncommitted.search(&target, similarity.0, search_document_context, &mut output)?;
+                let params = VectorSearchParams {
+                    target: &target,
+                    limit: limit.0,
+                    similarity: similarity.0,
+                    filtered_doc_ids,
+                };
+
+                uncommitted.search(&params, &mut output)?;
                 if let Some(committed) = committed {
-                    committed.search(
-                        &target,
-                        similarity.0,
-                        limit.0,
-                        search_document_context,
-                        &mut output,
-                    )?;
+                    committed.search(&params, &mut output)?;
                 }
             }
         }
@@ -394,7 +415,7 @@ impl<'index> TokenScoreContext<'index> {
         properties: &Properties,
         boost: &HashMap<String, f32>,
         limit: Limit,
-        search_document_context: &SearchDocumentContext<'_, DocumentId>,
+        filtered_doc_ids: Option<&FilterResult<DocumentId>>,
     ) -> Result<HashMap<DocumentId, f32>> {
         let vector_properties = self.calculate_vector_properties().await?;
         let string_properties = self.calculate_string_properties(properties).await?;
@@ -407,7 +428,7 @@ impl<'index> TokenScoreContext<'index> {
                 vector_properties,
                 mode.similarity,
                 limit,
-                search_document_context,
+                filtered_doc_ids,
             ),
             self.search_full_text(
                 &mode.term,
@@ -416,7 +437,7 @@ impl<'index> TokenScoreContext<'index> {
                 mode.tolerance,
                 string_properties,
                 boost,
-                search_document_context,
+                filtered_doc_ids,
             )
         );
 
@@ -491,7 +512,7 @@ impl<'index> TokenScoreContext<'index> {
     ///
     /// # Arguments
     ///
-    /// * `search_params` - The search parameters including mode, properties, boost, etc.
+    /// * `params` - The token score parameters (mode, properties, boost, limit)
     /// * `search_document_context` - Context containing filtered/deleted document information
     /// * `results` - Mutable map to populate with document IDs and their scores
     ///
@@ -500,22 +521,19 @@ impl<'index> TokenScoreContext<'index> {
     /// Returns `Ok(())` on success, or an error if any search operation fails.
     pub async fn execute(
         self,
-        search_params: &SearchParams,
-        search_document_context: &SearchDocumentContext<'_, DocumentId>,
+        params: &TokenScoreParams<'_>,
         results: &mut HashMap<DocumentId, f32>,
     ) -> Result<()> {
         // Determine the actual search mode (handle auto-mode with LLM)
-        let search_mode = self.determine_search_mode(&search_params.mode).await?;
+        let search_mode = self.determine_search_mode(params.mode).await?;
 
         // Calculate boost values
-        let boost = self.calculate_boost(&search_params.boost);
+        let boost = self.calculate_boost(params.boost);
 
         // Dispatch to appropriate search strategy based on mode
         match search_mode {
             SearchMode::Default(mode) | SearchMode::FullText(mode) => {
-                let properties = self
-                    .calculate_string_properties(&search_params.properties)
-                    .await?;
+                let properties = self.calculate_string_properties(params.properties).await?;
                 results.extend(
                     self.search_full_text(
                         &mode.term,
@@ -524,7 +542,7 @@ impl<'index> TokenScoreContext<'index> {
                         mode.tolerance,
                         properties,
                         boost,
-                        search_document_context,
+                        params.filtered_doc_ids,
                     )
                     .await?,
                 )
@@ -536,8 +554,8 @@ impl<'index> TokenScoreContext<'index> {
                         &mode.term,
                         vector_properties,
                         mode.similarity,
-                        search_params.limit,
-                        search_document_context,
+                        params.limit_hint,
+                        params.filtered_doc_ids,
                     )
                     .await?,
                 )
@@ -546,10 +564,10 @@ impl<'index> TokenScoreContext<'index> {
                 results.extend(
                     self.search_hybrid(
                         &mode,
-                        &search_params.properties,
-                        &search_params.boost,
-                        search_params.limit,
-                        search_document_context,
+                        params.properties,
+                        params.boost,
+                        params.limit_hint,
+                        params.filtered_doc_ids,
                     )
                     .await?,
                 );

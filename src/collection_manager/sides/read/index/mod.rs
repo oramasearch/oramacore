@@ -11,26 +11,23 @@ use tracing::{debug, error, info, trace, warn};
 use uncommitted_field::*;
 
 use crate::{
-    collection_manager::{
-        sides::{
-            read::{
-                context::ReadSideContext,
-                index::{
-                    committed_field::{
-                        CommittedDateField, CommittedGeoPointField, CommittedStringField,
-                        CommittedVectorField, DateFieldInfo, GeoPointFieldInfo, StringFieldInfo,
-                    },
-                    merge::{
-                        merge_field, CommittedField, CommittedFieldMetadata, Field,
-                        UncommittedField,
-                    },
+    collection_manager::sides::{
+        read::{
+            context::ReadSideContext,
+            index::{
+                committed_field::{
+                    CommittedDateField, CommittedGeoPointField, CommittedStringField,
+                    CommittedVectorField, DateFieldInfo, GeoPointFieldInfo, StringFieldInfo,
                 },
-                search::SearchDocumentContext,
-                ReadError,
+                merge::{
+                    merge_field, CommittedField, CommittedFieldMetadata, Field, UncommittedField,
+                },
+                token_score::{TokenScoreContext, TokenScoreParams},
             },
-            write::index::EnumStrategy,
-            Offset,
+            ReadError,
         },
+        write::index::EnumStrategy,
+        Offset,
     },
     lock::{OramaAsyncLock, OramaAsyncLockReadGuard},
     metrics::{
@@ -54,7 +51,6 @@ mod filter;
 mod group;
 mod merge;
 mod path_to_index_id_map;
-mod search_context;
 mod token_score;
 mod uncommitted_field;
 
@@ -336,16 +332,11 @@ impl Index {
     }
 
     pub async fn get_all_document_ids(&self) -> Result<Vec<DocumentId>> {
-        let search_document_context =
-            SearchDocumentContext::new(&self.uncommitted_deleted_documents, None);
-
-        // Acquire field locks
         let (committed_fields, uncommitted_fields) = tokio::join!(
             self.committed_fields.read("get_all_document_ids"),
             self.uncommitted_fields.read("get_all_document_ids"),
         );
 
-        // Create token score context
         let context = token_score::TokenScoreContext::new(
             self.id.to_string(),
             self.document_count,
@@ -356,29 +347,26 @@ impl Index {
             &self.path_to_index_id_map,
         );
 
-        // Use an empty search with default properties to get all documents
-        let search_params = SearchParams {
-            mode: SearchMode::Default(FulltextMode {
-                term: String::new(),
-                threshold: None,
-                exact: false,
-                tolerance: None,
-            }),
-            properties: Properties::default(),
-            boost: Default::default(),
-            where_filter: Default::default(),
-            facets: Default::default(),
-            limit: Limit(usize::MAX),
-            offset: crate::types::SearchOffset(0),
-            sort_by: None,
-            group_by: None,
-            indexes: None,
-            user_id: None,
+        let mode = SearchMode::Default(FulltextMode {
+            term: String::new(),
+            threshold: None,
+            exact: false,
+            tolerance: None,
+        });
+        let properties = Properties::default();
+        let boost = HashMap::new();
+
+        let params = token_score::TokenScoreParams {
+            mode: &mode,
+            properties: &properties,
+            boost: &boost,
+            limit_hint: Limit(usize::MAX),
+            filtered_doc_ids: None,
         };
 
         let mut output = HashMap::new();
         context
-            .execute(&search_params, &search_document_context, &mut output)
+            .execute(&params, &mut output)
             .await
             .expect("Failed to get all documents");
 
@@ -1100,17 +1088,13 @@ impl Index {
             .await
             .with_context(|| format!("Cannot calculate filtered doc in index {:?}", self.id))?;
 
-        let search_document_context =
-            SearchDocumentContext::new(uncommitted_deleted_documents, filtered_doc_ids);
-
         // Acquire field locks
         let (committed_fields, uncommitted_fields) = tokio::join!(
             self.committed_fields.read("token_score"),
             self.uncommitted_fields.read("token_score"),
         );
 
-        // Create token score context with gathered data
-        let context = token_score::TokenScoreContext::new(
+        let context = TokenScoreContext::new(
             self.id.to_string(),
             self.document_count,
             uncommitted_fields,
@@ -1119,10 +1103,14 @@ impl Index {
             &self.context,
             &self.path_to_index_id_map,
         );
-
-        // Delegate to token score logic
         context
-            .execute(search_params, &search_document_context, results)
+            .execute(&TokenScoreParams {
+                mode: &search_params.mode,
+                boost: &search_params.boost,
+                properties: &search_params.properties,
+                limit_hint: search_params.limit,
+                filtered_doc_ids: filtered_doc_ids.as_ref(),
+            }, results)
             .await
     }
 
@@ -1534,7 +1522,8 @@ impl Index {
         where_filter: &WhereFilter,
         uncommitted_deleted_documents: &HashSet<DocumentId>,
     ) -> Result<Option<FilterResult<DocumentId>>> {
-        if where_filter.is_empty() {
+        // Early return only if there's no filter AND no deleted documents
+        if where_filter.is_empty() && uncommitted_deleted_documents.is_empty() {
             return Ok(None);
         }
 
@@ -1558,7 +1547,6 @@ impl Index {
         // Delegate to filter logic
         context.execute_filter(where_filter)
     }
-
 }
 
 #[derive(Serialize, Debug)]
