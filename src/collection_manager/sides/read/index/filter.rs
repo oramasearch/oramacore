@@ -495,8 +495,18 @@ impl<'index> FilterContext<'index> {
         self,
         where_filter: &WhereFilter,
     ) -> Result<Option<FilterResult<DocumentId>>> {
+        // Only return None if there's no filter AND no deleted documents
         if where_filter.is_empty() {
-            return Ok(None);
+            if self.uncommitted_deleted_documents.is_empty() {
+                return Ok(None);
+            }
+            // No filter but we have deleted documents - return NOT(deleted_docs)
+            return Ok(Some(FilterResult::Not(Box::new(FilterResult::Filter(
+                PlainFilterResult::from_iter(
+                    self.document_count,
+                    self.uncommitted_deleted_documents.iter().copied(),
+                ),
+            )))));
         }
 
         let mut output = calculate_filter(

@@ -1,13 +1,12 @@
 use std::collections::HashMap;
 
 use anyhow::{bail, Result};
-use oramacore_lib::data_structures::ShouldInclude;
 use serde::Serialize;
 
 use crate::{
-    collection_manager::sides::read::{
-        index::merge::{Field, UncommittedField},
-        search::SearchDocumentContext,
+    collection_manager::sides::read::index::{
+        committed_field::VectorSearchParams,
+        merge::{Field, UncommittedField},
     },
     python::embeddings::Model,
     types::DocumentId,
@@ -42,34 +41,25 @@ impl UncommittedVectorField {
         self.model
     }
 
-    fn is_e5_model(&self) -> bool {
-        matches!(
-            self.model,
-            Model::MultilingualE5Small | Model::MultilingualE5Base | Model::MultilingualE5Large
-        )
-    }
-
     pub fn search(
         &self,
-        target: &[f32],
-        similarity: f32,
-        search_document_context: &SearchDocumentContext<'_, DocumentId>,
+        params: &VectorSearchParams<'_>,
         output: &mut HashMap<DocumentId, f32>,
     ) -> Result<()> {
         for (id, vectors) in &self.data {
-            if search_document_context.should_exclude(id) {
+            // Skip documents that are NOT in the filter (when filter exists)
+            if params
+                .filtered_doc_ids
+                .is_some_and(|filtered| !filtered.contains(id))
+            {
                 continue;
             }
 
             for (_m, vector) in vectors {
-                let mut score = score_vector(vector, target)?;
+                let score = score_vector(vector, params.target)?;
+                let score = self.model.rescale_score(score);
 
-                // Rescale E5 model scores from [0.7, 1.0] to [0.0, 1.0]
-                if self.is_e5_model() {
-                    score = rescale_e5_similarity_score(score);
-                }
-
-                if score < similarity {
+                if score < params.similarity {
                     continue;
                 }
 
@@ -161,20 +151,6 @@ fn score_vector(vector: &[f32], target: &[f32]) -> Result<f32> {
     Ok(similarity)
 }
 
-/// Rescales E5 embedding model cosine similarity scores from their typical range [0.7, 1.0] to [0.0, 1.0].
-/// E5 models produce similarity scores that rarely go below 0.7, making the effective range much narrower.
-/// This rescaling helps normalize the scores to use the full [0.0, 1.0] range for better search ranking.
-fn rescale_e5_similarity_score(score: f32) -> f32 {
-    const E5_MIN_SCORE: f32 = 0.7;
-    const E5_MAX_SCORE: f32 = 1.0;
-
-    // Clamp the score to the expected E5 range to handle edge cases
-    let clamped_score = score.clamp(E5_MIN_SCORE, E5_MAX_SCORE);
-
-    // Rescale from [0.7, 1.0] to [0.0, 1.0]
-    (clamped_score - E5_MIN_SCORE) / (E5_MAX_SCORE - E5_MIN_SCORE)
-}
-
 #[derive(Serialize, Debug)]
 pub struct UncommittedVectorFieldStats {
     pub document_count: usize,
@@ -206,30 +182,28 @@ mod tests {
         target[0] = 1.0;
 
         // With similarity
+        let params = VectorSearchParams {
+            target: &target,
+            limit: 10,
+            similarity: 0.6,
+            filtered_doc_ids: None,
+        };
         let mut output = HashMap::new();
-        index
-            .search(
-                &target,
-                0.6,
-                &SearchDocumentContext::new(&Default::default(), None),
-                &mut output,
-            )
-            .unwrap();
+        index.search(&params, &mut output).unwrap();
         assert_eq!(
             HashSet::from([DocumentId(0), DocumentId(1)]),
             output.keys().cloned().collect()
         );
 
         // With similarity to 0
+        let params = VectorSearchParams {
+            target: &target,
+            limit: 10,
+            similarity: 0.0,
+            filtered_doc_ids: None,
+        };
         let mut output = HashMap::new();
-        index
-            .search(
-                &target,
-                0.0,
-                &SearchDocumentContext::new(&Default::default(), None),
-                &mut output,
-            )
-            .unwrap();
+        index.search(&params, &mut output).unwrap();
         assert_eq!(
             HashSet::from([DocumentId(0), DocumentId(1), DocumentId(2)]),
             output.keys().cloned().collect()

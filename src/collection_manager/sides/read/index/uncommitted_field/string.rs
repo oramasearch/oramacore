@@ -1,7 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
 use anyhow::Result;
-use oramacore_lib::data_structures::ShouldInclude;
 use serde::Serialize;
 use tracing::{debug, warn};
 use xtri::{RadixTree, SearchMode};
@@ -12,8 +11,8 @@ use crate::{
         global_info::GlobalInfo,
         sides::{
             read::index::{
+                committed_field::StringSearchParams,
                 merge::{Field, UncommittedField},
-                search_context::FullTextSearchContext,
             },
             InsertStringTerms, TermStringField,
         },
@@ -146,7 +145,7 @@ impl UncommittedStringField {
 
     pub fn search(
         &self,
-        context: &mut FullTextSearchContext<'_, '_>,
+        context: &StringSearchParams<'_, '_>,
         scorer: &mut BM25Scorer<DocumentId>,
     ) -> Result<()> {
         let total_field_length = context.global_info.total_document_length as f32;
@@ -155,8 +154,6 @@ impl UncommittedStringField {
 
         let mut total_matches = 0_usize;
         for token in context.tokens {
-            context.increment_term_count();
-
             // We don't "boost" the exact match at all.
             // Should we boost if the match is "perfect"?
             // TODO: think about this
@@ -169,7 +166,10 @@ impl UncommittedStringField {
 
             for (_total_documents_with_term_in_field, position_per_document) in matches {
                 for (doc_id, positions) in position_per_document {
-                    if context.search_document_context.should_exclude(doc_id) {
+                    if context
+                        .filtered_doc_ids
+                        .is_some_and(|filtered| !filtered.contains(doc_id))
+                    {
                         continue;
                     }
 

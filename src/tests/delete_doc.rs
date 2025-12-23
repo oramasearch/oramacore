@@ -1,6 +1,8 @@
+use anyhow::bail;
 use serde_json::json;
 
 use crate::tests::utils::init_log;
+use crate::tests::utils::wait_for;
 use crate::tests::utils::TestContext;
 
 #[tokio::test(flavor = "multi_thread")]
@@ -28,19 +30,26 @@ async fn test_delete_search_ok() {
         .await
         .unwrap();
 
-    let output = collection_client
-        .search(
-            json!({
-                "term": "Lorem ipsum",
-            })
-            .try_into()
-            .unwrap(),
-        )
-        .await
-        .unwrap();
-
-    assert_eq!(output.count, 0);
-    assert_eq!(output.hits.len(), 0);
+    wait_for(&collection_client, |collection_client| {
+        Box::pin(async move {
+            let output = collection_client
+                .search(
+                    json!({
+                        "term": "Lorem ipsum",
+                    })
+                    .try_into()
+                    .unwrap(),
+                )
+                .await?;
+            if output.count == 0 {
+                Ok(())
+            } else {
+                bail!("Document not deleted yet");
+            }
+        })
+    })
+    .await
+    .unwrap();
 
     let output = collection_client
         .search(

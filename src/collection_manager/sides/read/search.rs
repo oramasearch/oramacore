@@ -423,21 +423,7 @@ pub async fn sort_and_truncate(
 
 pub struct SearchDocumentContext<'a, DocumentId> {
     deleted_documents: &'a HashSet<DocumentId>,
-    filtered_doc_ids: Option<FilterResult<DocumentId>>,
-}
-impl SearchDocumentContext<'_, DocumentId> {
-    pub fn new<'a>(
-        deleted_documents: &'a HashSet<DocumentId>,
-        filtered_doc_ids: Option<FilterResult<DocumentId>>,
-    ) -> SearchDocumentContext<'a, DocumentId> {
-        SearchDocumentContext {
-            deleted_documents,
-            filtered_doc_ids,
-        }
-    }
-    pub fn has_filtered(&self) -> bool {
-        !self.deleted_documents.is_empty() || self.filtered_doc_ids.is_some()
-    }
+    pub filtered_doc_ids: Option<FilterResult<DocumentId>>,
 }
 
 impl<DocumentId: Sync + Send + Hash + Eq + DocId> ShouldInclude<DocumentId>

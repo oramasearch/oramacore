@@ -3,50 +3,42 @@ use committed_field::{
     BoolFieldInfo, CommittedBoolField, CommittedNumberField, CommittedStringFilterField,
     NumberFieldInfo, StringFilterFieldInfo, VectorFieldInfo,
 };
-use futures::join;
 use group::Groupable;
 use oramacore_lib::filters::FilterResult;
 use path_to_index_id_map::PathToIndexId;
-use search_context::FullTextSearchContext;
 use serde::{Deserialize, Serialize};
 use tracing::{debug, error, info, trace, warn};
 use uncommitted_field::*;
 
 use crate::{
-    ai::llms,
-    collection_manager::{
-        bm25::BM25Scorer,
-        sides::{
-            read::{
-                context::ReadSideContext,
-                index::{
-                    committed_field::{
-                        CommittedDateField, CommittedGeoPointField, CommittedStringField,
-                        CommittedVectorField, DateFieldInfo, GeoPointFieldInfo, StringFieldInfo,
-                    },
-                    merge::{
-                        merge_field, CommittedField, CommittedFieldMetadata, Field,
-                        UncommittedField,
-                    },
+    collection_manager::sides::{
+        read::{
+            context::ReadSideContext,
+            index::{
+                committed_field::{
+                    CommittedDateField, CommittedGeoPointField, CommittedStringField,
+                    CommittedVectorField, DateFieldInfo, GeoPointFieldInfo, StringFieldInfo,
                 },
-                search::SearchDocumentContext,
-                ReadError,
+                merge::{
+                    merge_field, CommittedField, CommittedFieldMetadata, Field, UncommittedField,
+                },
+                token_score::{TokenScoreContext, TokenScoreParams},
             },
-            write::index::EnumStrategy,
-            Offset,
+            ReadError,
         },
+        write::index::EnumStrategy,
+        Offset,
     },
     lock::{OramaAsyncLock, OramaAsyncLockReadGuard},
     metrics::{
         commit::{FIELD_INDEX_COMMIT_CALCULATION_TIME, INDEX_COMMIT_CALCULATION_TIME},
-        search::{MATCHING_COUNT_CALCULTATION_COUNT, MATCHING_PERC_CALCULATION_COUNT},
-        CollectionLabels, FieldIndexCollectionCommitLabels, IndexCollectionCommitLabels,
+        FieldIndexCollectionCommitLabels, IndexCollectionCommitLabels,
     },
-    python::embeddings::{Intent, Model},
+    python::embeddings::Model,
     types::{
-        CollectionId, DocumentId, FacetDefinition, FacetResult, FulltextMode, HybridMode, IndexId,
-        Limit, Number, NumberFilter, Properties, SearchMode, SearchModeResult, SearchParams,
-        Similarity, SortOrder, Threshold, TypeParsingStrategies, VectorMode, WhereFilter,
+        CollectionId, DocumentId, FacetDefinition, FacetResult, FulltextMode, IndexId, Limit,
+        Number, NumberFilter, Properties, SearchMode, SearchParams, SortOrder,
+        TypeParsingStrategies, WhereFilter,
     },
 };
 use oramacore_lib::fs::{create_if_not_exists, BufferedFile};
@@ -59,7 +51,7 @@ mod filter;
 mod group;
 mod merge;
 mod path_to_index_id_map;
-mod search_context;
+mod token_score;
 mod uncommitted_field;
 
 use crate::{
@@ -340,23 +332,44 @@ impl Index {
     }
 
     pub async fn get_all_document_ids(&self) -> Result<Vec<DocumentId>> {
-        let search_document_context =
-            SearchDocumentContext::new(&self.uncommitted_deleted_documents, None);
+        let (committed_fields, uncommitted_fields) = tokio::join!(
+            self.committed_fields.read("get_all_document_ids"),
+            self.uncommitted_fields.read("get_all_document_ids"),
+        );
 
+        let context = token_score::TokenScoreContext::new(
+            self.id.to_string(),
+            self.document_count,
+            uncommitted_fields,
+            committed_fields,
+            &self.text_parser,
+            &self.context,
+            &self.path_to_index_id_map,
+        );
+
+        let mode = SearchMode::Default(FulltextMode {
+            term: String::new(),
+            threshold: None,
+            exact: false,
+            tolerance: None,
+        });
         let properties = Properties::default();
-        let properties = self.calculate_string_properties(&properties).await?;
-        let output = self
-            .search_full_text(
-                "",
-                None,
-                false,
-                None,
-                properties,
-                Default::default(),
-                &search_document_context,
-            )
+        let boost = HashMap::new();
+
+        let params = token_score::TokenScoreParams {
+            mode: &mode,
+            properties: &properties,
+            boost: &boost,
+            limit_hint: Limit(usize::MAX),
+            filtered_doc_ids: None,
+        };
+
+        let mut output = HashMap::new();
+        context
+            .execute(&params, &mut output)
             .await
             .expect("Failed to get all documents");
+
         let document_ids: Vec<_> = output.keys().copied().collect();
 
         Ok(document_ids)
@@ -1069,158 +1082,39 @@ impl Index {
     ) -> Result<()> {
         let uncommitted_deleted_documents = &self.uncommitted_deleted_documents;
 
+        // Calculate filtered documents (already using FilterContext)
         let filtered_doc_ids = self
             .calculate_filtered_doc_ids(&search_params.where_filter, uncommitted_deleted_documents)
             .await
             .with_context(|| format!("Cannot calculate filtered doc in index {:?}", self.id))?;
 
-        let search_document_context =
-            SearchDocumentContext::new(uncommitted_deleted_documents, filtered_doc_ids);
-
-        // Manage the "auto" search mode. OramaCore will automatically determine
-        // wether to use full text search, vector search or hybrid search.
-        let search_mode: SearchMode = match &search_params.mode {
-            SearchMode::Auto(mode_result) => {
-                let final_mode: String = self
-                    .context
-                    .llm_service
-                    .run_known_prompt(
-                        llms::KnownPrompts::Autoquery,
-                        vec![],
-                        vec![("query".to_string(), mode_result.term.clone())],
-                        None,
-                        // @todo: determine if we want to allow the user to select which LLM to use here.
-                        None,
-                    )
-                    .await?;
-
-                let serilized_final_mode: SearchModeResult = serde_json::from_str(&final_mode)?;
-
-                match serilized_final_mode.mode.as_str() {
-                    "fulltext" => SearchMode::FullText(FulltextMode {
-                        term: mode_result.term.clone(),
-                        threshold: None,
-                        exact: false,
-                        tolerance: None,
-                    }),
-                    "hybrid" => SearchMode::Hybrid(HybridMode {
-                        term: mode_result.term.clone(),
-                        similarity: Similarity::default(),
-                        threshold: None,
-                        exact: false,
-                        tolerance: None,
-                    }),
-                    "vector" => SearchMode::Vector(VectorMode {
-                        term: mode_result.term.clone(),
-                        similarity: Similarity::default(),
-                    }),
-                    _ => anyhow::bail!("Invalid search mode"),
-                }
-            }
-            _ => search_params.mode.clone(),
-        };
-
-        let boost = self.calculate_boost(&search_params.boost);
-
-        match search_mode {
-            SearchMode::Default(search_mode) | SearchMode::FullText(search_mode) => {
-                let properties = self
-                    .calculate_string_properties(&search_params.properties)
-                    .await?;
-                results.extend(
-                    self.search_full_text(
-                        &search_mode.term,
-                        search_mode.threshold,
-                        search_mode.exact,
-                        search_mode.tolerance,
-                        properties,
-                        boost,
-                        &search_document_context,
-                    )
-                    .await?,
-                )
-            }
-            SearchMode::Vector(search_mode) => {
-                let vector_properties = self.calculate_vector_properties().await?;
-                results.extend(
-                    self.search_vector(
-                        &search_mode.term,
-                        vector_properties,
-                        search_mode.similarity,
-                        search_params.limit,
-                        &search_document_context,
-                    )
-                    .await?,
-                )
-            }
-            SearchMode::Hybrid(search_mode) => {
-                let vector_properties = self.calculate_vector_properties().await?;
-                let string_properties = self
-                    .calculate_string_properties(&search_params.properties)
-                    .await?;
-
-                let (vector, fulltext) = join!(
-                    self.search_vector(
-                        &search_mode.term,
-                        vector_properties,
-                        search_mode.similarity,
-                        search_params.limit,
-                        &search_document_context,
-                    ),
-                    self.search_full_text(
-                        &search_mode.term,
-                        search_mode.threshold,
-                        search_mode.exact,
-                        search_mode.tolerance,
-                        string_properties,
-                        boost,
-                        &search_document_context,
-                    )
-                );
-                let vector = vector?;
-                let fulltext = fulltext?;
-
-                // min-max normalization
-                let max = vector.values().copied().fold(0.0, f32::max);
-                let max = max.max(fulltext.values().copied().fold(0.0, f32::max));
-                let min = vector.values().copied().fold(0.0, f32::min);
-                let min = min.min(fulltext.values().copied().fold(0.0, f32::min));
-
-                let vector: HashMap<_, _> = vector
-                    .into_iter()
-                    .map(|(k, v)| (k, (v - min) / (max - min)))
-                    .collect();
-
-                let mut fulltext: HashMap<_, _> = fulltext
-                    .into_iter()
-                    .map(|(k, v)| (k, (v - min) / (max - min)))
-                    .collect();
-
-                for (k, v) in vector {
-                    let e = fulltext.entry(k).or_default();
-                    *e += v;
-                }
-                results.extend(fulltext);
-            }
-            SearchMode::Auto(_) => unreachable!(),
-        };
-
-        MATCHING_COUNT_CALCULTATION_COUNT.track_usize(
-            CollectionLabels {
-                collection: self.id.to_string(),
-            },
-            results.len(),
-        );
-        MATCHING_PERC_CALCULATION_COUNT.track(
-            CollectionLabels {
-                collection: self.id.to_string(),
-            },
-            results.len() as f64 / self.document_count as f64,
+        // Acquire field locks
+        let (committed_fields, uncommitted_fields) = tokio::join!(
+            self.committed_fields.read("token_score"),
+            self.uncommitted_fields.read("token_score"),
         );
 
-        debug!("token_scores: {:?}", results);
-
-        Ok(())
+        let context = TokenScoreContext::new(
+            self.id.to_string(),
+            self.document_count,
+            uncommitted_fields,
+            committed_fields,
+            &self.text_parser,
+            &self.context,
+            &self.path_to_index_id_map,
+        );
+        context
+            .execute(
+                &TokenScoreParams {
+                    mode: &search_params.mode,
+                    boost: &search_params.boost,
+                    properties: &search_params.properties,
+                    limit_hint: search_params.limit,
+                    filtered_doc_ids: filtered_doc_ids.as_ref(),
+                },
+                results,
+            )
+            .await
     }
 
     pub async fn stats(&self, is_temp: bool) -> Result<IndexStats> {
@@ -1631,7 +1525,8 @@ impl Index {
         where_filter: &WhereFilter,
         uncommitted_deleted_documents: &HashSet<DocumentId>,
     ) -> Result<Option<FilterResult<DocumentId>>> {
-        if where_filter.is_empty() {
+        // Early return only if there's no filter AND no deleted documents
+        if where_filter.is_empty() && uncommitted_deleted_documents.is_empty() {
             return Ok(None);
         }
 
@@ -1654,273 +1549,6 @@ impl Index {
 
         // Delegate to filter logic
         context.execute_filter(where_filter)
-    }
-
-    fn calculate_boost(&self, boost: &HashMap<String, f32>) -> HashMap<FieldId, f32> {
-        boost
-            .iter()
-            .filter_map(|(field_name, boost)| {
-                let a = self.path_to_index_id_map.get(field_name);
-                let field_id = a?.0;
-                Some((field_id, *boost))
-            })
-            .collect()
-    }
-
-    async fn calculate_vector_properties(&self) -> Result<Vec<FieldId>> {
-        let uncommitted_fields = self.uncommitted_fields.read("vector_props").await;
-        let committed_fields = self.committed_fields.read("vector_props").await;
-
-        let properties: HashSet<_> = uncommitted_fields
-            .vector_fields
-            .keys()
-            .chain(committed_fields.vector_fields.keys())
-            .copied()
-            .collect();
-
-        Ok(properties.into_iter().collect())
-    }
-
-    async fn calculate_string_properties(&self, properties: &Properties) -> Result<Vec<FieldId>> {
-        let properties: HashSet<_> = match properties {
-            Properties::Specified(properties) => {
-                let mut field_ids = HashSet::new();
-                for field in properties {
-                    let Some((field_id, field_type)) = self.path_to_index_id_map.get(field) else {
-                        continue;
-                        // bail!("Cannot filter by \"{}\": unknown field", &field);
-                    };
-                    if !matches!(field_type, FieldType::String) {
-                        continue;
-                        // bail!("Cannot filter by \"{}\": wrong type", &field);
-                    }
-                    field_ids.insert(field_id);
-                }
-                field_ids
-            }
-            Properties::None | Properties::Star => {
-                let uncommitted_fields = self.uncommitted_fields.read("string_props").await;
-                let committed_fields = self.committed_fields.read("string_props").await;
-
-                uncommitted_fields
-                    .string_fields
-                    .keys()
-                    .chain(committed_fields.string_fields.keys())
-                    .copied()
-                    .collect()
-            }
-        };
-
-        Ok(properties.into_iter().collect())
-    }
-
-    async fn search_full_text(
-        &self,
-        term: &str,
-        threshold: Option<Threshold>,
-        exact: bool,
-        tolerance: Option<u8>,
-        properties: Vec<FieldId>,
-        boost: HashMap<FieldId, f32>,
-        search_document_context: &SearchDocumentContext<'_, DocumentId>,
-    ) -> Result<HashMap<DocumentId, f32>> {
-        let uncommitted_fields = self.uncommitted_fields.read("search_fulltext").await;
-        let committed_fields = self.committed_fields.read("search_fulltext").await;
-
-        let tokens = self.text_parser.tokenize_and_stem(term);
-        let mut tokens: Vec<_> = if exact {
-            tokens.into_iter().map(|e| e.0).collect()
-        } else {
-            tokens
-                .into_iter()
-                .flat_map(|e| std::iter::once(e.0).chain(e.1.into_iter()))
-                .collect()
-        };
-
-        if tokens.is_empty() {
-            // Ensure we have at least one token otherwise the result will be empty.
-            tokens.push(String::from(""));
-        }
-
-        let mut scorer: BM25Scorer<DocumentId> = match threshold {
-            Some(Threshold(threshold)) => {
-                let perc = tokens.len() as f32 * threshold;
-                let threshold = perc.floor() as u32;
-                BM25Scorer::with_threshold(threshold)
-            }
-            None => BM25Scorer::plain(),
-        };
-
-        // Use the collection's total document count for canonical BM25F
-        let total_documents = self.document_count as f32;
-
-        let mut field_global_info: HashMap<FieldId, _> = HashMap::new();
-        let mut corpus_dfs: HashMap<String, usize> = HashMap::new();
-
-        // Single pass to compute both global info and corpus document frequencies
-        for token in &tokens {
-            let mut total_corpus_docs = HashSet::new();
-
-            for field_id in &properties {
-                let Some(field) = uncommitted_fields.string_fields.get(field_id) else {
-                    continue;
-                };
-                let committed = committed_fields.string_fields.get(field_id);
-
-                // Compute global info only once per field
-                if !field_global_info.contains_key(field_id) {
-                    let global_info = if let Some(committed) = committed {
-                        committed.stats().global_info.clone() + field.global_info()
-                    } else {
-                        field.global_info()
-                    };
-                    field_global_info.insert(*field_id, global_info);
-                }
-
-                // Collect unique document IDs for this term across all fields for corpus DF calculation
-                let mut corpus_scorer = BM25Scorer::plain();
-                let single_token_slice = std::slice::from_ref(token);
-                let mut corpus_context = FullTextSearchContext {
-                    tokens: single_token_slice,
-                    exact_match: exact,
-                    boost: 1.0,
-                    field_id: *field_id,
-                    global_info: field_global_info[field_id].clone(),
-                    total_term_count: 1,
-                    search_document_context,
-                };
-
-                field
-                    .search(&mut corpus_context, &mut corpus_scorer)
-                    .context("Cannot perform corpus search")?;
-                if let Some(committed_field) = committed {
-                    committed_field
-                        .search(&mut corpus_context, &mut corpus_scorer, tolerance)
-                        .context("Cannot perform corpus search")?;
-                }
-
-                // Add documents found in this field to the corpus count
-                total_corpus_docs.extend(corpus_scorer.get_scores().keys().cloned());
-            }
-
-            corpus_dfs.insert(token.clone(), total_corpus_docs.len().max(1));
-        }
-
-        // Now perform the actual scoring with pre-computed corpus frequencies
-        for (term_index, token) in tokens.iter().enumerate() {
-            scorer.reset_term();
-            let corpus_df = corpus_dfs[token];
-
-            // Then, add field contributions for this term with filtering applied
-            for field_id in &properties {
-                let Some(field) = uncommitted_fields.string_fields.get(field_id) else {
-                    continue;
-                };
-                let committed = committed_fields.string_fields.get(field_id);
-
-                let global_info = field_global_info[field_id].clone();
-
-                let boost = boost.get(field_id).copied().unwrap_or(1.0);
-
-                // Reuse the same token slice to avoid allocation
-                let single_token_slice = std::slice::from_ref(token);
-                let mut context = FullTextSearchContext {
-                    tokens: single_token_slice,
-                    exact_match: exact,
-                    boost,
-                    field_id: *field_id,
-                    global_info,
-                    total_term_count: term_index as u64 + 1,
-                    search_document_context,
-                };
-
-                // Search this field for this specific term (with filters applied)
-                field
-                    .search(&mut context, &mut scorer)
-                    .context("Cannot perform search")?;
-
-                if let Some(committed_field) = committed {
-                    committed_field
-                        .search(&mut context, &mut scorer, tolerance)
-                        .context("Cannot perform search")?;
-                }
-            }
-
-            match &scorer {
-                BM25Scorer::Plain(_) => {
-                    scorer.finalize_term_plain(
-                        corpus_df,
-                        total_documents,
-                        1.2, // k parameter
-                        1.0, // phrase boost
-                    );
-                }
-                BM25Scorer::WithThreshold(_) => {
-                    scorer.finalize_term(
-                        corpus_df,
-                        total_documents,
-                        1.2,             // k parameter
-                        1.0,             // phrase boost
-                        1 << term_index, // token_indexes: bit mask indicating which token this is
-                    );
-                }
-            }
-
-            // Move to next term
-            scorer.next_term();
-        }
-
-        Ok(scorer.get_scores())
-    }
-
-    async fn search_vector(
-        &self,
-        term: &str,
-        properties: Vec<FieldId>,
-        similarity: Similarity,
-        limit: Limit,
-        search_document_context: &SearchDocumentContext<'_, DocumentId>,
-    ) -> Result<HashMap<DocumentId, f32>> {
-        let mut output: HashMap<DocumentId, f32> = HashMap::new();
-
-        let uncommitted_fields = self.uncommitted_fields.read("vector_search").await;
-        let committed_fields = self.committed_fields.read("vector_search").await;
-
-        for field_id in properties {
-            let Some(uncommitted) = uncommitted_fields.vector_fields.get(&field_id) else {
-                bail!("Cannot search on field {field_id:?}: unknown field");
-            };
-            let committed = committed_fields.vector_fields.get(&field_id);
-
-            let model = uncommitted.get_model();
-
-            // We don't cache the embedding.
-            // We can do that because, for now, an index and an collection has only one embedding field.
-            // Anyway, if the user seach in different index, we are re-calculating the embedding.
-            // We should put a sort of cache here.
-            // TODO: think about this.
-            let targets = self
-                .context
-                .python_service
-                .embeddings_service
-                .calculate_embeddings(vec![term.to_string()], Intent::Query, model)
-                .context("Cannot calculate embeddings")?;
-
-            for target in targets {
-                uncommitted.search(&target, similarity.0, search_document_context, &mut output)?;
-                if let Some(committed) = committed {
-                    committed.search(
-                        &target,
-                        similarity.0,
-                        limit.0,
-                        search_document_context,
-                        &mut output,
-                    )?;
-                }
-            }
-        }
-
-        Ok(output)
     }
 }
 
