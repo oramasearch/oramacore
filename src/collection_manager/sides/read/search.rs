@@ -155,6 +155,7 @@ impl<'collection, 'analytics_storage> Search<'collection, 'analytics_storage> {
         let pin_rules = extract_pin_rules(
             &*collection.get_pin_rules_reader("search").await,
             &search_params,
+            &indexes,
         )
         .await;
 
@@ -312,12 +313,30 @@ pub fn extract_term_from_search_mode(search_mode: &SearchMode) -> &str {
     }
 }
 
-async fn extract_pin_rules(
+async fn extract_pin_rules<'collection>(
     rules: &PinRulesReader<DocumentId>,
     search_params: &SearchParams,
+    indexes: &ReadIndexesLockGuard<'collection, '_>,
 ) -> Vec<Consequence<DocumentId>> {
     let term = extract_term_from_search_mode(&search_params.mode);
-    rules.apply(term)
+    let mut consequences: Vec<_> = indexes
+        .iter()
+        .flat_map(|index| {
+            let text_parser = index.get_text_parser();
+            rules.apply(term, text_parser)
+        })
+        .collect();
+
+    consequences.sort_by(|a, b| {
+        a.promote
+            .iter()
+            .map(|item| (item.position, item.doc_id))
+            .cmp(b.promote.iter().map(|item| (item.position, item.doc_id)))
+    });
+
+    consequences.dedup();
+
+    consequences
 }
 
 async fn calculate_token_score_for_indexes(
