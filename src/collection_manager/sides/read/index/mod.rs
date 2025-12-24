@@ -3,7 +3,7 @@ use committed_field::{
     BoolFieldInfo, CommittedBoolField, CommittedNumberField, CommittedStringFilterField,
     NumberFieldInfo, StringFilterFieldInfo, VectorFieldInfo,
 };
-use group::Groupable;
+use group::{GroupContext, GroupParams};
 use oramacore_lib::filters::FilterResult;
 use path_to_index_id_map::PathToIndexId;
 use serde::{Deserialize, Serialize};
@@ -60,13 +60,12 @@ use crate::{
     },
     types::FieldId,
 };
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{bail, Context, Result};
 pub use committed_field::{
     CommittedBoolFieldStats, CommittedDateFieldStats, CommittedGeoPointFieldStats,
     CommittedNumberFieldStats, CommittedStringFieldStats, CommittedStringFilterFieldStats,
     CommittedVectorFieldStats,
 };
-use debug_panic::debug_panic;
 pub use group::GroupValue;
 use std::iter::Peekable;
 use std::{
@@ -1350,174 +1349,34 @@ impl Index {
         Ok(())
     }
 
-    fn generate_group_combinations(
-        field_ids: &[FieldId],
-        all_variants: &HashMap<FieldId, HashMap<GroupValue, HashSet<DocumentId>>>,
-        current_combination: &mut Vec<(FieldId, GroupValue)>,
-        result: &mut Vec<Vec<(FieldId, GroupValue)>>,
-    ) {
-        if current_combination.len() == field_ids.len() {
-            result.push(current_combination.clone());
-            return;
-        }
-
-        let field_id = field_ids[current_combination.len()];
-        if let Some(variants) = all_variants.get(&field_id) {
-            for group_value in variants.keys() {
-                current_combination.push((field_id, group_value.clone()));
-                Self::generate_group_combinations(
-                    field_ids,
-                    all_variants,
-                    current_combination,
-                    result,
-                );
-                current_combination.pop();
-            }
-        }
-    }
-
+    /// Calculates document groups based on field values.
+    ///
+    /// This method delegates to `GroupContext` for the actual grouping logic,
+    /// following the same pattern as `calculate_filtered_doc_ids` and `calculate_token_score`.
+    ///
+    /// # Arguments
+    /// * `properties_on_group` - Field names to group by
+    /// * `results` - Mutable map to populate with group combinations and their document IDs
     pub async fn calculate_groups(
         &self,
         properties_on_group: &[String],
         results: &mut HashMap<Vec<GroupValue>, HashSet<DocumentId>>,
     ) -> Result<()> {
-        let Some(properties) = properties_on_group
-            .iter()
-            .map(|field_name| self.path_to_index_id_map.get_filter_field(field_name))
-            .collect::<Option<Vec<_>>>()
-        else {
-            // Index has to contain all the property.
-            // Otherwise, its document cannot be inside the buckets
-            return Ok(());
-        };
+        // Acquire field locks concurrently
+        let (committed, uncommitted) = tokio::join!(
+            self.committed_fields.read("groups"),
+            self.uncommitted_fields.read("groups"),
+        );
 
-        let committed = self.committed_fields.read("groups").await;
-        let uncommitted = self.uncommitted_fields.read("groups").await;
+        // Create context and delegate to group logic
+        let context = GroupContext::new(&self.path_to_index_id_map, uncommitted, committed);
 
-        let mut all_variants = HashMap::<FieldId, HashMap<GroupValue, HashSet<DocumentId>>>::new();
-        for (field_id, field_type) in &properties {
-            let uncommitted_groupable: Box<&dyn Groupable> = match field_type {
-                FieldType::Bool => {
-                    let f = uncommitted
-                        .bool_fields
-                        .get(field_id)
-                        .ok_or(anyhow!("Cannot find bool field {field_id:?}"))?;
-                    Box::new(f)
-                }
-                FieldType::Number => {
-                    let f = uncommitted
-                        .number_fields
-                        .get(field_id)
-                        .ok_or(anyhow!("Cannot find number field {field_id:?}"))?;
-                    Box::new(f)
-                }
-                FieldType::StringFilter => {
-                    let f = uncommitted
-                        .string_filter_fields
-                        .get(field_id)
-                        .ok_or(anyhow!("Cannot find string filter field {field_id:?}"))?;
-                    Box::new(f)
-                }
-                FieldType::GeoPoint => {
-                    bail!("Cannot calculate group on a GeoPoint field");
-                }
-                _ => {
-                    debug_panic!("Invalid field type {:?} for group", field_type);
-                    bail!("Cannot calculate group on {field_type:?} field");
-                }
-            };
-
-            let variants: Vec<_> = uncommitted_groupable.get_values().collect();
-            if variants.len() > 500 {
-                // Should we group by a field with more than 500 variant???
-                // TODO: think about it. For now, no.
-                bail!("Cannot calculate groups on a field with more than 500 variant");
-            }
-
-            for variant in &variants {
-                let docs: HashSet<_> = uncommitted_groupable.get_doc_ids(variant)?.collect();
-                let doc_ids_per_variant = all_variants.entry(*field_id).or_default();
-                let g = doc_ids_per_variant.entry(variant.clone()).or_default();
-                g.extend(docs);
-            }
-
-            let committed_groupable: Option<Box<&dyn Groupable>> = match field_type {
-                FieldType::Bool => committed
-                    .bool_fields
-                    .get(field_id)
-                    .map(|f| Box::<&dyn Groupable>::new(f)),
-                FieldType::Number => committed
-                    .number_fields
-                    .get(field_id)
-                    .map(|f| Box::<&dyn Groupable>::new(f)),
-                FieldType::StringFilter => committed
-                    .string_filter_fields
-                    .get(field_id)
-                    .map(|f| Box::<&dyn Groupable>::new(f)),
-                FieldType::GeoPoint => {
-                    bail!("Cannot calculate group on a GeoPoint field");
-                }
-                _ => {
-                    debug_panic!("Invalid field type {:?} for group", field_type);
-                    bail!("Cannot calculate group on {field_type:?} field");
-                }
-            };
-
-            if let Some(committed_groupable) = committed_groupable {
-                let variants: Vec<_> = committed_groupable.get_values().collect();
-                if variants.len() > 500 {
-                    // Should we group by a field with more than 500 variant???
-                    // TODO: think about it. For now, no.
-                    bail!("Cannot calculate groups on a field with more than 500 variant");
-                }
-
-                for variant in &variants {
-                    let docs: HashSet<_> = committed_groupable.get_doc_ids(variant)?.collect();
-                    let doc_ids_per_variant = all_variants.entry(*field_id).or_default();
-                    let g = doc_ids_per_variant.entry(variant.clone()).or_default();
-                    g.extend(docs);
-                }
-            }
-        }
-
-        drop(committed);
-        drop(uncommitted);
-
-        let field_ids: Vec<_> = properties.iter().map(|(field_id, _)| *field_id).collect();
-        let mut groups = Vec::new();
-        Self::generate_group_combinations(&field_ids, &all_variants, &mut Vec::new(), &mut groups);
-
-        // Filter groups by documents that are in token_scores and create final result
-        for group_combination in groups {
-            // Find intersection of all document sets for this combination
-            let mut intersection: Option<HashSet<DocumentId>> = None;
-            let mut group_values = Vec::new();
-
-            for (field_id, group_value) in group_combination {
-                let Some(docs) = all_variants
-                    .get(&field_id)
-                    .and_then(|map| map.get(&group_value))
-                else {
-                    debug_panic!("Cannot calculate group values on field {:?}", field_id);
-                    continue;
-                };
-
-                intersection = if let Some(intersection) = intersection {
-                    Some(intersection.intersection(docs).cloned().collect())
-                } else {
-                    Some(docs.clone())
-                };
-
-                group_values.push(group_value);
-            }
-
-            let doc_ids_for_key = results.entry(group_values).or_default();
-            if let Some(intersection) = intersection {
-                doc_ids_for_key.extend(intersection);
-            }
-        }
-
-        Ok(())
+        context.execute(
+            &GroupParams {
+                properties: properties_on_group,
+            },
+            results,
+        )
     }
 
     async fn calculate_filtered_doc_ids(
