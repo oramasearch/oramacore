@@ -5,7 +5,7 @@ use oramacore_lib::data_structures::capped_heap::CappedHeap;
 use ordered_float::NotNan;
 use tracing::{info, warn};
 
-use super::{GroupValue, SortedField};
+use super::{GroupValue, IndexSortContext};
 use crate::collection_manager::sides::read::collection::ReadIndexesLockGuard;
 use crate::collection_manager::sides::read::sort::sort_iter::MergeSortedIterator;
 use crate::collection_manager::sides::read::ReadError;
@@ -135,11 +135,11 @@ async fn sort_and_truncate_documents_by_field(
         let sorted_field = index
             .get_sort_iterator(&sort_by.property, sort_by.order)
             .await?;
-        let output = process_sort_iterator(sorted_field.iter(), top_count);
+        let output = process_sort_iterator(sorted_field.execute(), top_count);
 
         truncate(token_scores, output.into_iter(), top_count)
     } else {
-        let mut v: Vec<SortedField<'_>> = Vec::with_capacity(indexes.len());
+        let mut v: Vec<IndexSortContext<'_>> = Vec::with_capacity(indexes.len());
         for index in indexes.iter() {
             let index_results = index
                 .get_sort_iterator(&sort_by.property, sort_by.order)
@@ -149,7 +149,7 @@ async fn sort_and_truncate_documents_by_field(
 
         let mut merge_sorted_iterator = MergeSortedIterator::new(sort_by.order);
         for i in &v {
-            merge_sorted_iterator.add(i.iter());
+            merge_sorted_iterator.add(i.execute());
         }
 
         let data = truncate(token_scores, merge_sorted_iterator, top_count);
@@ -409,13 +409,13 @@ where
             .await?;
 
         output
-            .iter()
+            .execute()
             .flat_map(|(_, h)| h.into_iter())
             .filter(|doc_id| docs.contains(doc_id) && token_scores.contains_key(doc_id))
             .take(expanded_limit)
             .collect()
     } else {
-        let mut v: Vec<SortedField<'_>> = Vec::with_capacity(indexes.len());
+        let mut v: Vec<IndexSortContext<'_>> = Vec::with_capacity(indexes.len());
         for index in indexes.iter() {
             let index_results = index
                 .get_sort_iterator(&sort_by.property, sort_by.order)
@@ -425,7 +425,7 @@ where
 
         let mut merge_sorted_iterator = MergeSortedIterator::new(sort_by.order);
         for i in &v {
-            merge_sorted_iterator.add(i.iter());
+            merge_sorted_iterator.add(i.execute());
         }
 
         let data: Vec<DocumentId> = merge_sorted_iterator
