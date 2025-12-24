@@ -373,7 +373,9 @@ where
     if let Some(committed_field) = committed_field {
         let variants: Vec<_> = committed_field.get_values().collect();
         if variants.len() > MAX_GROUP_VARIANTS {
-            bail!("Cannot calculate groups on a field with more than {MAX_GROUP_VARIANTS} variants");
+            bail!(
+                "Cannot calculate groups on a field with more than {MAX_GROUP_VARIANTS} variants"
+            );
         }
 
         for variant in variants {
