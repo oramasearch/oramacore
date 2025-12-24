@@ -406,9 +406,7 @@ fn calculate_facet_for_field(
             token_scores,
         ),
         _ => {
-            bail!(
-                "Cannot calculate facet on field type {field_type:?}: unsupported for faceting"
-            );
+            bail!("Cannot calculate facet on field type {field_type:?}: unsupported for faceting");
         }
     }
 }
