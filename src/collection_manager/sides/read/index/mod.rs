@@ -24,7 +24,6 @@ use crate::{
                 },
                 token_score::{TokenScoreContext, TokenScoreParams},
             },
-            ReadError,
         },
         write::index::EnumStrategy,
         Offset,
@@ -997,71 +996,21 @@ impl Index {
             .is_some()
     }
 
-    pub async fn get_sort_iterator<'index>(
+    pub async fn get_sort_context<'index>(
         &'index self,
         field_name: &str,
         order: SortOrder,
-    ) -> Result<IndexSortContext<'index>, ReadError> {
-        let Some((field_id, field_type)) = self.path_to_index_id_map.get_filter_field(field_name)
-        else {
-            return Err(ReadError::SortFieldNotFound(field_name.to_string()));
-        };
+    ) -> IndexSortContext<'index> {
+        let uncommitted_fields = self.uncommitted_fields.read("get_sort_context").await;
+        let committed_fields = self.committed_fields.read("get_sort_context").await;
 
-        let uncommitted_fields = self.uncommitted_fields.read("get_sort_iterator").await;
-        let committed_fields = self.committed_fields.read("get_sort_iterator").await;
-
-        match &field_type {
-            FieldType::Number => {
-                if !uncommitted_fields.number_fields.contains_key(&field_id) {
-                    return Err(ReadError::Generic(anyhow::anyhow!(
-                        "Field {field_name} is not a number field"
-                    )));
-                };
-
-                Ok(IndexSortContext::new(
-                    uncommitted_fields,
-                    committed_fields,
-                    field_id,
-                    field_type,
-                    order,
-                ))
-            }
-            FieldType::Bool => {
-                if !uncommitted_fields.bool_fields.contains_key(&field_id) {
-                    return Err(ReadError::Generic(anyhow::anyhow!(
-                        "Field {field_name} is not a bool field"
-                    )));
-                };
-
-                Ok(IndexSortContext::new(
-                    uncommitted_fields,
-                    committed_fields,
-                    field_id,
-                    field_type,
-                    order,
-                ))
-            }
-
-            FieldType::Date => {
-                if !uncommitted_fields.date_fields.contains_key(&field_id) {
-                    return Err(ReadError::Generic(anyhow::anyhow!(
-                        "Field {field_name} is not a date field"
-                    )));
-                };
-
-                Ok(IndexSortContext::new(
-                    uncommitted_fields,
-                    committed_fields,
-                    field_id,
-                    field_type,
-                    order,
-                ))
-            }
-            _ => Err(ReadError::InvalidSortField(
-                field_name.to_string(),
-                format!("{field_type:?}"),
-            )),
-        }
+        IndexSortContext::new(
+            &self.path_to_index_id_map,
+            uncommitted_fields,
+            committed_fields,
+            field_name,
+            order,
+        )
     }
 
     // Since we only have one embedding model for all indexes in a collection,

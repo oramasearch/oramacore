@@ -133,23 +133,23 @@ async fn sort_and_truncate_documents_by_field(
         // If there's only one index, use the existing optimized path
         let index = indexes.iter().next().expect("Index must exist");
         let sorted_field = index
-            .get_sort_iterator(&sort_by.property, sort_by.order)
-            .await?;
-        let output = process_sort_iterator(sorted_field.execute(), top_count);
+            .get_sort_context(&sort_by.property, sort_by.order)
+            .await;
+        let output = process_sort_iterator(sorted_field.execute()?, top_count);
 
         truncate(token_scores, output.into_iter(), top_count)
     } else {
         let mut v: Vec<IndexSortContext<'_>> = Vec::with_capacity(indexes.len());
         for index in indexes.iter() {
             let index_results = index
-                .get_sort_iterator(&sort_by.property, sort_by.order)
-                .await?;
+                .get_sort_context(&sort_by.property, sort_by.order)
+                .await;
             v.push(index_results);
         }
 
         let mut merge_sorted_iterator = MergeSortedIterator::new(sort_by.order);
         for i in &v {
-            merge_sorted_iterator.add(i.execute());
+            merge_sorted_iterator.add(i.execute()?);
         }
 
         let data = truncate(token_scores, merge_sorted_iterator, top_count);
@@ -404,12 +404,12 @@ where
 
     let v: Vec<_> = if indexes.len() == 1 {
         let index = indexes.iter().next().expect("Index must exist");
-        let output = index
-            .get_sort_iterator(&sort_by.property, sort_by.order)
-            .await?;
+        let sort_context = index
+            .get_sort_context(&sort_by.property, sort_by.order)
+            .await;
+        let sorted_iter = sort_context.execute()?;
 
-        output
-            .execute()
+        sorted_iter
             .flat_map(|(_, h)| h.into_iter())
             .filter(|doc_id| docs.contains(doc_id) && token_scores.contains_key(doc_id))
             .take(expanded_limit)
@@ -418,14 +418,14 @@ where
         let mut v: Vec<IndexSortContext<'_>> = Vec::with_capacity(indexes.len());
         for index in indexes.iter() {
             let index_results = index
-                .get_sort_iterator(&sort_by.property, sort_by.order)
-                .await?;
+                .get_sort_context(&sort_by.property, sort_by.order)
+                .await;
             v.push(index_results);
         }
 
         let mut merge_sorted_iterator = MergeSortedIterator::new(sort_by.order);
         for i in &v {
-            merge_sorted_iterator.add(i.execute());
+            merge_sorted_iterator.add(i.execute()?);
         }
 
         let data: Vec<DocumentId> = merge_sorted_iterator

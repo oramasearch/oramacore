@@ -2,12 +2,14 @@ use std::collections::HashSet;
 use std::iter::Peekable;
 
 use crate::{
+    collection_manager::sides::read::ReadError,
     lock::OramaAsyncLockReadGuard,
-    types::{DocumentId, FieldId, Number, SortOrder},
+    types::{DocumentId, Number, SortOrder},
 };
 
 use super::{
     committed_field::{CommittedBoolField, CommittedDateField, CommittedNumberField},
+    path_to_index_id_map::PathToIndexId,
     uncommitted_field::{UncommittedBoolField, UncommittedDateFilterField, UncommittedNumberField},
     CommittedFields, FieldType, UncommittedFields,
 };
@@ -133,40 +135,42 @@ impl Sortable for CommittedBoolField {
 /// allowing sort logic to be executed without direct Index coupling.
 /// Index is responsible for gathering the data and passing it to the
 /// IndexSortContext constructor, maintaining proper encapsulation.
+///
+/// Validation of field existence and type is deferred to the `execute` method,
+/// allowing construction to be infallible.
 pub struct IndexSortContext<'index> {
+    path_to_index_id_map: &'index PathToIndexId,
     uncommitted_fields: OramaAsyncLockReadGuard<'index, UncommittedFields>,
     committed_fields: OramaAsyncLockReadGuard<'index, CommittedFields>,
-    field_id: FieldId,
-    field_type: FieldType,
+    field_name: String,
     order: SortOrder,
 }
 
 impl<'index> IndexSortContext<'index> {
     /// Creates a new IndexSortContext with the provided sort dependencies.
     ///
-    /// This constructor accepts all necessary data as parameters, ensuring
-    /// that Index internals are not directly accessed. The caller (Index)
-    /// is responsible for gathering the data and passing it in.
+    /// This constructor stores the parameters without validation. Validation
+    /// of field existence and type is deferred to the `execute` method.
     ///
     /// # Arguments
     ///
+    /// * `path_to_index_id_map` - Map from field paths to (FieldId, FieldType)
     /// * `uncommitted_fields` - Read guard for in-memory uncommitted fields
     /// * `committed_fields` - Read guard for persisted committed fields
-    /// * `field_id` - The ID of the field to sort by
-    /// * `field_type` - The type of the field (Bool, Number, or Date)
+    /// * `field_name` - The name of the field to sort by
     /// * `order` - The sort order (ascending or descending)
     pub(crate) fn new(
+        path_to_index_id_map: &'index PathToIndexId,
         uncommitted_fields: OramaAsyncLockReadGuard<'index, UncommittedFields>,
         committed_fields: OramaAsyncLockReadGuard<'index, CommittedFields>,
-        field_id: FieldId,
-        field_type: FieldType,
+        field_name: &str,
         order: SortOrder,
     ) -> Self {
         Self {
+            path_to_index_id_map,
             uncommitted_fields,
             committed_fields,
-            field_id,
-            field_type,
+            field_name: field_name.to_string(),
             order,
         }
     }
@@ -174,25 +178,83 @@ impl<'index> IndexSortContext<'index> {
     /// Executes the sort operation and returns the sorted iterator.
     ///
     /// This is the main entry point for sorting within an IndexSortContext.
-    /// It dispatches to the appropriate field type and returns a merged,
-    /// sorted iterator combining uncommitted and committed data.
+    /// It validates the field exists and is sortable, then dispatches to the
+    /// appropriate field type and returns a merged, sorted iterator combining
+    /// uncommitted and committed data.
     ///
     /// Note: Returns a borrowing iterator, so context cannot be consumed.
     ///
     /// # Returns
     ///
     /// A boxed iterator yielding (Number, HashSet<DocumentId>) tuples in sorted order.
-    pub fn execute<'s>(&'s self) -> Box<dyn Iterator<Item = (Number, HashSet<DocumentId>)> + 's>
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - The field is not found in the index
+    /// - The field type is not sortable (only Bool, Number, Date are supported)
+    /// - The field exists in the map but not in the uncommitted fields
+    pub fn execute<'s>(
+        &'s self,
+    ) -> Result<Box<dyn Iterator<Item = (Number, HashSet<DocumentId>)> + 's>, ReadError>
     where
         'index: 's,
     {
-        calculate_sort_for_field(
-            self.field_id,
-            self.field_type,
-            &self.uncommitted_fields,
-            &self.committed_fields,
-            self.order,
-        )
+        // Look up the field in the index
+        let (field_id, field_type) = self
+            .path_to_index_id_map
+            .get_filter_field(&self.field_name)
+            .ok_or_else(|| ReadError::SortFieldNotFound(self.field_name.clone()))?;
+
+        // Validate field type, get fields, and dispatch to appropriate sort implementation
+        match field_type {
+            FieldType::Number => {
+                let uncommitted = self
+                    .uncommitted_fields
+                    .number_fields
+                    .get(&field_id)
+                    .ok_or_else(|| {
+                        ReadError::Generic(anyhow::anyhow!(
+                            "Field {} is not a number field",
+                            self.field_name
+                        ))
+                    })?;
+                let committed = self.committed_fields.number_fields.get(&field_id);
+                Ok(calculate_sort_on_field(uncommitted, committed, self.order))
+            }
+            FieldType::Bool => {
+                let uncommitted = self
+                    .uncommitted_fields
+                    .bool_fields
+                    .get(&field_id)
+                    .ok_or_else(|| {
+                        ReadError::Generic(anyhow::anyhow!(
+                            "Field {} is not a bool field",
+                            self.field_name
+                        ))
+                    })?;
+                let committed = self.committed_fields.bool_fields.get(&field_id);
+                Ok(calculate_sort_on_field(uncommitted, committed, self.order))
+            }
+            FieldType::Date => {
+                let uncommitted = self
+                    .uncommitted_fields
+                    .date_fields
+                    .get(&field_id)
+                    .ok_or_else(|| {
+                        ReadError::Generic(anyhow::anyhow!(
+                            "Field {} is not a date field",
+                            self.field_name
+                        ))
+                    })?;
+                let committed = self.committed_fields.date_fields.get(&field_id);
+                Ok(calculate_sort_on_field(uncommitted, committed, self.order))
+            }
+            _ => Err(ReadError::InvalidSortField(
+                self.field_name.clone(),
+                format!("{field_type:?}"),
+            )),
+        }
     }
 }
 
@@ -273,61 +335,6 @@ where
         Box::new(SortIterator::new(uncommitted_iter, committed_iter, order))
     } else {
         uncommitted_iter
-    }
-}
-
-/// Dispatches sort operations to the appropriate field type.
-///
-/// This function acts as a dispatcher, matching the field type (Bool, Number, Date)
-/// and calling `calculate_sort_on_field` with the concrete field types.
-/// This approach provides full type safety since each branch works with concrete
-/// types rather than trait objects.
-///
-/// # Arguments
-/// * `field_id` - The ID of the field to sort by
-/// * `field_type` - The type of the field
-/// * `uncommitted_fields` - The in-memory uncommitted field collection
-/// * `committed_fields` - The persisted committed field collection
-/// * `order` - The sort order (ascending or descending)
-///
-/// # Returns
-/// A boxed iterator yielding (Number, HashSet<DocumentId>) tuples in sorted order.
-fn calculate_sort_for_field<'a>(
-    field_id: FieldId,
-    field_type: FieldType,
-    uncommitted_fields: &'a UncommittedFields,
-    committed_fields: &'a CommittedFields,
-    order: SortOrder,
-) -> Box<dyn Iterator<Item = (Number, HashSet<DocumentId>)> + 'a> {
-    match field_type {
-        FieldType::Bool => {
-            let uncommitted = uncommitted_fields
-                .bool_fields
-                .get(&field_id)
-                .expect("Bool field should exist");
-            let committed = committed_fields.bool_fields.get(&field_id);
-            calculate_sort_on_field(uncommitted, committed, order)
-        }
-        FieldType::Number => {
-            let uncommitted = uncommitted_fields
-                .number_fields
-                .get(&field_id)
-                .expect("Number field should exist");
-            let committed = committed_fields.number_fields.get(&field_id);
-            calculate_sort_on_field(uncommitted, committed, order)
-        }
-        FieldType::Date => {
-            let uncommitted = uncommitted_fields
-                .date_fields
-                .get(&field_id)
-                .expect("Date field should exist");
-            let committed = committed_fields.date_fields.get(&field_id);
-            calculate_sort_on_field(uncommitted, committed, order)
-        }
-        _ => {
-            // This should not happen as we validate field types before creating IndexSortContext
-            unreachable!("Unsupported field type for sorting: {field_type:?}")
-        }
     }
 }
 
