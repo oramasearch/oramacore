@@ -781,7 +781,7 @@ impl StringScoreField {
                 }
             };
 
-            for stemmed in stemmeds {
+            if let Some(stemmed) = stemmeds {
                 let stemmed = Term(stemmed);
                 match terms.entry(stemmed) {
                     Entry::Occupied(mut entry) => {
