@@ -1145,7 +1145,13 @@ impl Index {
         // Create context and delegate to facet logic
         let context = FacetContext::new(&self.path_to_index_id_map, uncommitted, committed);
 
-        context.execute(&FacetParams { facets, token_scores }, res_facets)
+        context.execute(
+            &FacetParams {
+                facets,
+                token_scores,
+            },
+            res_facets,
+        )
     }
 
     /// Calculates document groups based on field values.

@@ -336,9 +336,8 @@ where
     CF: Facetable<FacetParam = FP>,
     FP: TryFromFacetDefinition,
 {
-    let facet_param: &FP = FP::try_from_facet_definition(facet_param).map_err(|_| {
-        anyhow::anyhow!("Failed to convert facet definition to expected type")
-    })?;
+    let facet_param: &FP = FP::try_from_facet_definition(facet_param)
+        .map_err(|_| anyhow::anyhow!("Failed to convert facet definition to expected type"))?;
 
     let mut result = HashMap::new();
 
@@ -408,8 +407,7 @@ fn calculate_facet_for_field(
         ),
         _ => {
             bail!(
-                "Cannot calculate facet on field type {:?}: unsupported for faceting",
-                field_type
+                "Cannot calculate facet on field type {field_type:?}: unsupported for faceting"
             );
         }
     }
@@ -504,8 +502,7 @@ impl<'index> FacetContext<'index> {
 
             if !is_valid_combination {
                 bail!(
-                    "Cannot calculate facet on field {field_name:?}: wrong type. Expected {:?} facet",
-                    field_type
+                    "Cannot calculate facet on field {field_name:?}: wrong type. Expected {field_type:?} facet"
                 );
             }
 
