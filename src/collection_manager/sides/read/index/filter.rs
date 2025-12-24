@@ -75,7 +75,7 @@ pub trait Filterable {
 ///
 /// This trait enables type-safe conversion from the Filter enum variants to the
 /// specific types expected by field implementations of Filterable trait.
-pub(super) trait TryFromFilter {
+trait TryFromFilter {
     type Error;
 
     fn try_from_filter(filter: &Filter) -> Result<&Self, Self::Error>
