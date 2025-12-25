@@ -18,7 +18,11 @@ pub struct PythonService {
 
 impl PythonService {
     pub fn new(orama_config: AIServiceConfig) -> PyResult<Self> {
-        Python::initialize();
+        // This initialization could not be required because it is already called in main function
+        // `initialize` has to be called in the main thread.
+        // Don't call it here to avoid issues.
+        // Don't uncomment the next line even if you know what you're doing.
+        // Python::initialize();
 
         let python_scripts_dir = Self::extract_python_scripts().map_err(|e| {
             PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!(
@@ -44,7 +48,7 @@ impl PythonService {
         })
     }
 
-    pub fn initialize_python_env(py: Python<'_>, python_scripts_dir: &PathBuf) -> PyResult<()> {
+    fn initialize_python_env(py: Python<'_>, python_scripts_dir: &PathBuf) -> PyResult<()> {
         let sys = py.import("sys")?;
         let path = sys.getattr("path")?;
 
