@@ -25,6 +25,7 @@ mod list_documents;
 mod mcp_server;
 mod multi_index;
 mod offload_field;
+mod openai_chat;
 mod pin_rules;
 mod quick_fulltext_benchmark;
 mod replace_doc_on_insert;
