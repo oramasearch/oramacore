@@ -1,6 +1,5 @@
 use std::{
     collections::{HashMap, HashSet},
-    sync::Arc,
 };
 
 use anyhow::{bail, Context as _, Result};
@@ -14,11 +13,9 @@ use crate::{
         bm25::BM25Scorer,
         sides::read::index::committed_field::{StringSearchParams, VectorSearchParams},
     },
-    lock::OramaAsyncLockReadGuard,
     python::embeddings::Intent,
     types::{
-        DocumentId, FieldId, FulltextMode, HybridMode, Limit, Properties, SearchMode,
-        SearchModeResult, Similarity, Threshold, VectorMode,
+        DocumentId, FieldId, FulltextMode, HybridMode, IndexId, Limit, Properties, SearchMode, SearchModeResult, Similarity, Threshold, VectorMode
     },
 };
 
@@ -50,13 +47,13 @@ pub struct TokenScoreParams<'search> {
 /// Index is responsible for gathering the data and passing it to the
 /// TokenScoreContext constructor, maintaining proper encapsulation.
 pub struct TokenScoreContext<'index> {
-    index_id: String,
+    index_id: IndexId,
     document_count: u64,
-    uncommitted_fields: OramaAsyncLockReadGuard<'index, UncommittedFields>,
-    committed_fields: OramaAsyncLockReadGuard<'index, CommittedFields>,
-    text_parser: &'index Arc<TextParser>,
+    uncommitted_fields: &'index UncommittedFields,
+    committed_fields: &'index CommittedFields,
+    text_parser: &'index TextParser,
     context: &'index ReadSideContext,
-    path_to_index_id_map: &'index PathToIndexId,
+    path_to_field_id_map: &'index PathToIndexId,
 }
 
 impl<'index> TokenScoreContext<'index> {
@@ -67,13 +64,13 @@ impl<'index> TokenScoreContext<'index> {
     /// that Index internals are not directly accessed. The caller (Index)
     /// is responsible for gathering the data and passing it in.
     pub fn new(
-        index_id: String,
+        index_id: IndexId,
         document_count: u64,
-        uncommitted_fields: OramaAsyncLockReadGuard<'index, UncommittedFields>,
-        committed_fields: OramaAsyncLockReadGuard<'index, CommittedFields>,
-        text_parser: &'index Arc<TextParser>,
+        uncommitted_fields: &'index UncommittedFields,
+        committed_fields: &'index CommittedFields,
+        text_parser: &'index TextParser,
         context: &'index ReadSideContext,
-        path_to_index_id_map: &'index PathToIndexId,
+        path_to_field_id_map: &'index PathToIndexId,
     ) -> Self {
         Self {
             index_id,
@@ -82,7 +79,7 @@ impl<'index> TokenScoreContext<'index> {
             committed_fields,
             text_parser,
             context,
-            path_to_index_id_map,
+            path_to_field_id_map,
         }
     }
 
@@ -137,7 +134,7 @@ impl<'index> TokenScoreContext<'index> {
         boost
             .iter()
             .filter_map(|(field_name, boost)| {
-                let a = self.path_to_index_id_map.get(field_name);
+                let a = self.path_to_field_id_map.get(field_name);
                 let field_id = a?.0;
                 Some((field_id, *boost))
             })
@@ -168,7 +165,7 @@ impl<'index> TokenScoreContext<'index> {
             Properties::Specified(properties) => {
                 let mut field_ids = HashSet::new();
                 for field in properties {
-                    let Some((field_id, field_type)) = self.path_to_index_id_map.get(field) else {
+                    let Some((field_id, field_type)) = self.path_to_field_id_map.get(field) else {
                         continue;
                     };
                     if !matches!(field_type, FieldType::String) {
@@ -491,15 +488,16 @@ impl<'index> TokenScoreContext<'index> {
             CollectionLabels,
         };
 
+        let index_id = self.index_id.to_string();
         MATCHING_COUNT_CALCULTATION_COUNT.track_usize(
             CollectionLabels {
-                collection: self.index_id.clone(),
+                collection: index_id.clone(),
             },
             result_count,
         );
         MATCHING_PERC_CALCULATION_COUNT.track(
             CollectionLabels {
-                collection: self.index_id.clone(),
+                collection: index_id,
             },
             result_count as f64 / self.document_count as f64,
         );

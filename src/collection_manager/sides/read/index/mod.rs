@@ -3,9 +3,6 @@ use committed_field::{
     BoolFieldInfo, CommittedBoolField, CommittedNumberField, CommittedStringFilterField,
     NumberFieldInfo, StringFilterFieldInfo, VectorFieldInfo,
 };
-use facet::{FacetContext, FacetParams};
-use group::{GroupContext, GroupParams};
-use oramacore_lib::filters::FilterResult;
 use path_to_index_id_map::PathToIndexId;
 use serde::{Deserialize, Serialize};
 use tracing::{debug, error, info, trace, warn};
@@ -13,7 +10,7 @@ use uncommitted_field::*;
 
 use crate::{
     collection_manager::sides::{
-        read::{
+        Offset, read::{
             context::ReadSideContext,
             index::{
                 committed_field::{
@@ -21,23 +18,19 @@ use crate::{
                     CommittedVectorField, DateFieldInfo, GeoPointFieldInfo, StringFieldInfo,
                 },
                 merge::{
-                    merge_field, CommittedField, CommittedFieldMetadata, Field, UncommittedField,
+                    CommittedField, CommittedFieldMetadata, Field, UncommittedField, merge_field
                 },
-                token_score::{TokenScoreContext, TokenScoreParams},
             },
-        },
-        write::index::EnumStrategy,
-        Offset,
+        }, write::index::EnumStrategy
     },
-    lock::OramaAsyncLock,
+    lock::{OramaAsyncLock, OramaAsyncLockReadGuard},
     metrics::{
-        commit::{FIELD_INDEX_COMMIT_CALCULATION_TIME, INDEX_COMMIT_CALCULATION_TIME},
-        FieldIndexCollectionCommitLabels, IndexCollectionCommitLabels,
+        FieldIndexCollectionCommitLabels, IndexCollectionCommitLabels, commit::{FIELD_INDEX_COMMIT_CALCULATION_TIME, INDEX_COMMIT_CALCULATION_TIME}
     },
     python::embeddings::Model,
     types::{
-        CollectionId, DocumentId, FacetDefinition, FacetResult, FulltextMode, IndexId, Limit,
-        Properties, SearchMode, SearchParams, SortOrder, TypeParsingStrategies, WhereFilter,
+        CollectionId, DocumentId, FulltextMode, IndexId, Limit,
+        Properties, SearchMode, SortOrder, TypeParsingStrategies,
     },
 };
 use oramacore_lib::fs::{create_if_not_exists, BufferedFile};
@@ -46,13 +39,13 @@ use oramacore_lib::nlp::{locales::Locale, TextParser};
 use super::collection::{IndexFieldStats, IndexFieldStatsType};
 use super::OffloadFieldConfig;
 mod committed_field;
-mod facet;
-mod filter;
-mod group;
+pub mod facet;
+pub mod filter;
+pub mod group;
 mod merge;
 mod path_to_index_id_map;
 mod sort;
-mod token_score;
+pub mod token_score;
 mod uncommitted_field;
 
 use crate::{
@@ -111,6 +104,18 @@ pub struct CommittedFields {
     pub geopoint_fields: HashMap<FieldId, CommittedGeoPointField>,
     pub string_fields: HashMap<FieldId, CommittedStringField>,
     pub vector_fields: HashMap<FieldId, CommittedVectorField>,
+}
+
+pub struct IndexSearchStore<'index> {
+    pub document_count: u64,
+    pub committed_fields: OramaAsyncLockReadGuard<'index, CommittedFields>,
+    pub uncommitted_fields: OramaAsyncLockReadGuard<'index, UncommittedFields>,
+    pub path_to_field_id_map: &'index PathToIndexId,
+    pub uncommitted_deleted_documents: &'index HashSet<DocumentId>,
+    pub text_parser: &'index TextParser,
+
+    // I don't like this, but for now it's the easiest way
+    pub read_side_context: &'index ReadSideContext,
 }
 
 pub struct Index {
@@ -331,6 +336,23 @@ impl Index {
         })
     }
 
+    pub async fn get_search_store<'index>(&'index self) -> IndexSearchStore<'index> {
+        let (committed_fields, uncommitted_fields) = tokio::join!(
+            self.committed_fields.read("get_all_document_ids"),
+            self.uncommitted_fields.read("get_all_document_ids"),
+        );
+
+        IndexSearchStore {
+            document_count: self.document_count,
+            committed_fields,
+            uncommitted_fields,
+            path_to_field_id_map: &self.path_to_index_id_map,
+            uncommitted_deleted_documents: &self.uncommitted_deleted_documents,
+            text_parser: &self.text_parser,
+            read_side_context: &self.context,
+        }
+    }
+
     pub async fn get_all_document_ids(&self) -> Result<Vec<DocumentId>> {
         let (committed_fields, uncommitted_fields) = tokio::join!(
             self.committed_fields.read("get_all_document_ids"),
@@ -338,10 +360,10 @@ impl Index {
         );
 
         let context = token_score::TokenScoreContext::new(
-            self.id.to_string(),
+            self.id,
             self.document_count,
-            uncommitted_fields,
-            committed_fields,
+            &**uncommitted_fields,
+            &**committed_fields,
             &self.text_parser,
             &self.context,
             &self.path_to_index_id_map,
@@ -1025,48 +1047,6 @@ impl Index {
             .map(|f| f.get_model())
     }
 
-    pub async fn calculate_token_score(
-        &self,
-        search_params: &SearchParams,
-        results: &mut HashMap<DocumentId, f32>,
-    ) -> Result<()> {
-        let uncommitted_deleted_documents = &self.uncommitted_deleted_documents;
-
-        // Calculate filtered documents (already using FilterContext)
-        let filtered_doc_ids = self
-            .calculate_filtered_doc_ids(&search_params.where_filter, uncommitted_deleted_documents)
-            .await
-            .with_context(|| format!("Cannot calculate filtered doc in index {:?}", self.id))?;
-
-        // Acquire field locks
-        let (committed_fields, uncommitted_fields) = tokio::join!(
-            self.committed_fields.read("token_score"),
-            self.uncommitted_fields.read("token_score"),
-        );
-
-        let context = TokenScoreContext::new(
-            self.id.to_string(),
-            self.document_count,
-            uncommitted_fields,
-            committed_fields,
-            &self.text_parser,
-            &self.context,
-            &self.path_to_index_id_map,
-        );
-        context
-            .execute(
-                &TokenScoreParams {
-                    mode: &search_params.mode,
-                    boost: &search_params.boost,
-                    properties: &search_params.properties,
-                    limit_hint: search_params.limit,
-                    filtered_doc_ids: filtered_doc_ids.as_ref(),
-                },
-                results,
-            )
-            .await
-    }
-
     pub async fn stats(&self, is_temp: bool) -> Result<IndexStats> {
         let mut fields_stats: Vec<IndexFieldStats> = Vec::new();
 
@@ -1115,104 +1095,6 @@ impl Index {
 
     pub fn document_count(&self) -> u64 {
         self.document_count
-    }
-
-    /// Calculates facet counts based on field values and search results.
-    ///
-    /// This method delegates to `FacetContext` for the actual faceting logic,
-    /// following the same pattern as `calculate_filtered_doc_ids` and `calculate_groups`.
-    ///
-    /// # Arguments
-    /// * `token_scores` - Map of matching document IDs to their scores; only these docs are counted
-    /// * `facets` - Map of field names to their facet definitions
-    /// * `res_facets` - Mutable map to populate with facet results
-    pub async fn calculate_facets(
-        &self,
-        token_scores: &HashMap<DocumentId, f32>,
-        facets: &HashMap<String, FacetDefinition>,
-        res_facets: &mut HashMap<String, FacetResult>,
-    ) -> Result<()> {
-        if facets.is_empty() {
-            return Ok(());
-        }
-
-        // Acquire field locks concurrently
-        let (committed, uncommitted) = tokio::join!(
-            self.committed_fields.read("facets"),
-            self.uncommitted_fields.read("facets"),
-        );
-
-        // Create context and delegate to facet logic
-        let context = FacetContext::new(&self.path_to_index_id_map, uncommitted, committed);
-
-        context.execute(
-            &FacetParams {
-                facets,
-                token_scores,
-            },
-            res_facets,
-        )
-    }
-
-    /// Calculates document groups based on field values.
-    ///
-    /// This method delegates to `GroupContext` for the actual grouping logic,
-    /// following the same pattern as `calculate_filtered_doc_ids` and `calculate_token_score`.
-    ///
-    /// # Arguments
-    /// * `properties_on_group` - Field names to group by
-    /// * `results` - Mutable map to populate with group combinations and their document IDs
-    pub async fn calculate_groups(
-        &self,
-        properties_on_group: &[String],
-        results: &mut HashMap<Vec<GroupValue>, HashSet<DocumentId>>,
-    ) -> Result<()> {
-        // Acquire field locks concurrently
-        let (committed, uncommitted) = tokio::join!(
-            self.committed_fields.read("groups"),
-            self.uncommitted_fields.read("groups"),
-        );
-
-        // Create context and delegate to group logic
-        let context = GroupContext::new(&self.path_to_index_id_map, uncommitted, committed);
-
-        context.execute(
-            &GroupParams {
-                properties: properties_on_group,
-            },
-            results,
-        )
-    }
-
-    async fn calculate_filtered_doc_ids(
-        &self,
-        where_filter: &WhereFilter,
-        uncommitted_deleted_documents: &HashSet<DocumentId>,
-    ) -> Result<Option<FilterResult<DocumentId>>> {
-        // Early return only if there's no filter AND no deleted documents
-        if where_filter.is_empty() && uncommitted_deleted_documents.is_empty() {
-            return Ok(None);
-        }
-
-        trace!("Calculating filtered doc ids");
-
-        // Acquire field locks
-        let (committed_fields, uncommitted_fields) = tokio::join!(
-            self.committed_fields.read("filters"),
-            self.uncommitted_fields.read("filters"),
-        );
-
-        // Create filter context with gathered data
-        let context = filter::FilterContext::new(
-            self.document_count,
-            &self.path_to_index_id_map,
-            uncommitted_fields,
-            committed_fields,
-            uncommitted_deleted_documents,
-        );
-
-        // Delegate to filter logic
-        context.execute_filter(where_filter)
     }
 }
 

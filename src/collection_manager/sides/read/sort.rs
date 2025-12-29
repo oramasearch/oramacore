@@ -15,7 +15,7 @@ use oramacore_lib::pin_rules::Consequence;
 
 /// Context structure that encapsulates all parameters needed for sorting operations
 pub struct SortContext<'collection, 'search> {
-    indexes: &'search ReadIndexesLockGuard<'collection, 'search>,
+    indexes: &'search ReadIndexesLockGuard<'collection>,
     token_scores: &'search HashMap<DocumentId, f32>,
     search_params: &'search SearchParams,
     pin_rules: &'collection [Consequence<DocumentId>],
@@ -23,7 +23,7 @@ pub struct SortContext<'collection, 'search> {
 
 impl<'collection, 'search> SortContext<'collection, 'search> {
     pub fn new(
-        indexes: &'search ReadIndexesLockGuard<'collection, 'search>,
+        indexes: &'search ReadIndexesLockGuard<'collection>,
         token_scores: &'search HashMap<DocumentId, f32>,
         search_params: &'search SearchParams,
         pin_rules: &'collection [Consequence<DocumentId>],
@@ -100,7 +100,7 @@ fn top_n<'s, I: Iterator<Item = (&'s DocumentId, &'s f32)>>(map: I, n: usize) ->
 }
 
 async fn sort_and_truncate_documents_by_field(
-    indexes: &ReadIndexesLockGuard<'_, '_>,
+    indexes: &ReadIndexesLockGuard<'_>,
     sort_by: &SortBy,
     token_scores: &HashMap<DocumentId, f32>,
     top_count: usize,
@@ -310,7 +310,7 @@ fn apply_pin_rules_to_group(
 }
 
 pub async fn sort_documents_in_groups(
-    indexes: &ReadIndexesLockGuard<'_, '_>,
+    indexes: &ReadIndexesLockGuard<'_>,
     groups: HashMap<Vec<GroupValue>, HashSet<DocumentId>>,
     token_scores: &HashMap<DocumentId, f32>,
     sort_by: Option<&SortBy>,
@@ -385,7 +385,7 @@ fn top_n_documents_in_group_by_score(
 }
 
 async fn top_n_documents_in_group_by_field<'collection, 'search>(
-    indexes: &ReadIndexesLockGuard<'collection, 'search>,
+    indexes: &ReadIndexesLockGuard<'collection>,
     docs: HashSet<DocumentId>,
     sort_by: &SortBy,
     token_scores: &'search HashMap<DocumentId, f32>,

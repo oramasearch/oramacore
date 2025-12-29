@@ -716,62 +716,49 @@ impl CollectionReader {
             .await)
     }
 
-    pub async fn get_all_index_ids(&self) -> Result<Vec<IndexId>> {
-        let lock = self.indexes.read("get_all_index_ids").await;
-        let all_indexes = lock
-            .iter()
-            .filter(|index| !index.is_deleted())
-            .map(|i| i.id())
-            .collect::<Vec<_>>();
-        Ok(all_indexes)
-    }
-
-    pub async fn get_indexes_lock<'collection, 'search>(
+    pub async fn get_index_read_locks<'collection>(
         &'collection self,
-        index_ids: &'search [IndexId],
-    ) -> Result<ReadIndexesLockGuard<'collection, 'search>> {
-        let lock = self.indexes.read("get_indexes_lock").await;
+        indexes_from_user: Option<&Vec<IndexId>>,
+    ) -> Result<ReadIndexesLockGuard<'collection>, ReadError> {
+        let lock = self.indexes.read("get_all_index_ids").await;
 
-        let unknown_index = index_ids.iter().find(|id| {
-            !lock
+        let index_ids: Vec<IndexId> = {
+            let all_indexes = lock
                 .iter()
-                .any(|index| !index.is_deleted() && index.id() == **id)
-        });
-        if let Some(unknown_index) = unknown_index {
-            bail!("Unknown index: {unknown_index:?}");
-        }
+                .filter(|index| !index.is_deleted())
+                .map(|i| i.id())
+                .collect::<Vec<_>>();
+
+            match indexes_from_user {
+                // No indexes from user -> search on all indexes
+                None => all_indexes,
+                // Empty indexes from user -> search on all indexes
+                // It doens't make sense to search on empty indexes list
+                Some(indexes_from_user) if indexes_from_user.is_empty() => all_indexes,
+                Some(indexes_from_user) => {
+                    let unknown_indexes = indexes_from_user
+                        .iter()
+                        .filter(|index| !all_indexes.contains(index))
+                        .collect::<Vec<_>>();
+                    if !unknown_indexes.is_empty() {
+                        let unknown_indexes = unknown_indexes
+                            .iter()
+                            .copied()
+                            .copied()
+                            .collect();
+                        return Err(ReadError::UnknownIndex(unknown_indexes, all_indexes));
+                    }
+
+                    let index_ids  = all_indexes
+                        .into_iter()
+                        .filter(|index| indexes_from_user.contains(index))
+                        .collect();
+                    index_ids
+                }
+            }
+        };
 
         Ok(ReadIndexesLockGuard::new(lock, index_ids))
-    }
-
-    pub async fn get_index_ids(
-        &self,
-        indexes_from_user: Option<&Vec<IndexId>>,
-    ) -> Result<Vec<IndexId>> {
-        let all_indexes = self.get_all_index_ids().await?;
-        // No indexes from user -> search on all indexes
-        let Some(indexes_from_user) = indexes_from_user else {
-            return Ok(all_indexes);
-        };
-        // Empty indexes from user -> search on all indexes
-        // It doens't make sense to search on empty indexes list
-        if indexes_from_user.is_empty() {
-            return Ok(all_indexes);
-        }
-
-        let unknown_indexes = indexes_from_user
-            .iter()
-            .filter(|index| !all_indexes.contains(index))
-            .collect::<Vec<_>>();
-        if !unknown_indexes.is_empty() {
-            bail!("Unknown indexes: {unknown_indexes:?}. Available indexes: {all_indexes:?}")
-        }
-
-        let res = all_indexes
-            .into_iter()
-            .filter(|index| indexes_from_user.contains(index))
-            .collect();
-        Ok(res)
     }
 
     pub async fn get_index(&self, index_id: IndexId) -> Option<IndexReadLock<'_>> {
@@ -1589,14 +1576,16 @@ enum Dump {
     V2(DumpV2),
 }
 
-pub struct ReadIndexesLockGuard<'collection, 'search> {
+const MAX_INDEXES_PER_SEARCH: usize = 16;
+
+pub struct ReadIndexesLockGuard<'collection> {
     lock: OramaAsyncLockReadGuard<'collection, Vec<Index>>,
-    index_ids: &'search [IndexId],
+    index_ids: Vec<IndexId>,
 }
-impl<'collection, 'search> ReadIndexesLockGuard<'collection, 'search> {
+impl<'collection> ReadIndexesLockGuard<'collection> {
     pub fn new(
         lock: OramaAsyncLockReadGuard<'collection, Vec<Index>>,
-        index_ids: &'search [IndexId],
+        index_ids: Vec<IndexId>,
     ) -> Self {
         Self { lock, index_ids }
     }

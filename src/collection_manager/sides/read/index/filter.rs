@@ -4,7 +4,6 @@ use anyhow::{bail, Context, Result};
 use oramacore_lib::filters::{FilterResult, PlainFilterResult};
 
 use crate::{
-    lock::OramaAsyncLockReadGuard,
     types::{DateFilter, DocumentId, Filter, GeoSearchFilter, NumberFilter, WhereFilter},
 };
 
@@ -455,8 +454,8 @@ fn calculate_filter(
 pub struct FilterContext<'index> {
     document_count: u64,
     path_to_index_id_map: &'index PathToIndexId,
-    uncommitted_fields: OramaAsyncLockReadGuard<'index, UncommittedFields>,
-    committed_fields: OramaAsyncLockReadGuard<'index, CommittedFields>,
+    uncommitted_fields: &'index UncommittedFields,
+    committed_fields: &'index CommittedFields,
     uncommitted_deleted_documents: &'index HashSet<DocumentId>,
 }
 
@@ -469,8 +468,8 @@ impl<'index> FilterContext<'index> {
     pub fn new(
         document_count: u64,
         path_to_index_id_map: &'index PathToIndexId,
-        uncommitted_fields: OramaAsyncLockReadGuard<'index, UncommittedFields>,
-        committed_fields: OramaAsyncLockReadGuard<'index, CommittedFields>,
+        uncommitted_fields: &'index UncommittedFields,
+        committed_fields: &'index CommittedFields,
         uncommitted_deleted_documents: &'index HashSet<DocumentId>,
     ) -> Self {
         Self {

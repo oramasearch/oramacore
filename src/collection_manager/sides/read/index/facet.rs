@@ -10,7 +10,6 @@ use crate::{
     collection_manager::sides::read::index::uncommitted_field::{
         UncommittedBoolField, UncommittedNumberField, UncommittedStringFilterField,
     },
-    lock::OramaAsyncLockReadGuard,
     types::{
         BoolFacetDefinition, DocumentId, FacetDefinition, FacetResult, FieldId,
         NumberFacetDefinition, NumberFilter, StringFacetDefinition,
@@ -434,8 +433,8 @@ pub struct FacetParams<'search> {
 /// FacetContext constructor, maintaining proper encapsulation.
 pub struct FacetContext<'index> {
     path_to_index_id_map: &'index PathToIndexId,
-    uncommitted_fields: OramaAsyncLockReadGuard<'index, UncommittedFields>,
-    committed_fields: OramaAsyncLockReadGuard<'index, CommittedFields>,
+    uncommitted_fields: &'index UncommittedFields,
+    committed_fields: &'index CommittedFields,
 }
 
 impl<'index> FacetContext<'index> {
@@ -446,8 +445,8 @@ impl<'index> FacetContext<'index> {
     /// is responsible for gathering the data and passing it in.
     pub fn new(
         path_to_index_id_map: &'index PathToIndexId,
-        uncommitted_fields: OramaAsyncLockReadGuard<'index, UncommittedFields>,
-        committed_fields: OramaAsyncLockReadGuard<'index, CommittedFields>,
+        uncommitted_fields: &'index UncommittedFields,
+        committed_fields: &'index CommittedFields,
     ) -> Self {
         Self {
             path_to_index_id_map,
