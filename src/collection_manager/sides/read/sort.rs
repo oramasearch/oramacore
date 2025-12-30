@@ -386,9 +386,15 @@ mod sort_iter {
     pub trait OrderedKey: Ord + Eq + Clone + Debug {}
     impl OrderedKey for Number {}
 
+    /// A boxed iterator yielding (sort_key, document_ids) pairs.
+    type SortedIter<'s, T> = Box<dyn Iterator<Item = (T, &'s HashSet<DocumentId>)> + 's>;
+
+    /// A peekable boxed iterator for merge operations.
+    type PeekableSortedIter<'s, T> = Peekable<SortedIter<'s, T>>;
+
     /// Iterator that merges multiple sorted iterators into a single sorted stream.
     pub struct MergeSortedIterator<'iter, T: OrderedKey> {
-        iters: Vec<Peekable<Box<dyn Iterator<Item = (T, &'iter HashSet<DocumentId>)> + 'iter>>>,
+        iters: Vec<PeekableSortedIter<'iter, T>>,
         order: SortOrder,
     }
 
@@ -400,10 +406,7 @@ mod sort_iter {
             }
         }
 
-        pub fn add(
-            &mut self,
-            iter: Box<dyn Iterator<Item = (T, &'iter HashSet<DocumentId>)> + 'iter>,
-        ) {
+        pub fn add(&mut self, iter: SortedIter<'iter, T>) {
             self.iters.push(iter.peekable());
         }
     }

@@ -29,6 +29,10 @@ type SortedDocIdsBidirectionalIter<'s> =
 /// Result type for sort execution, returning either a sorted iterator or a read error.
 type SortExecuteResult<'s> = Result<SortedDocIdsIter<'s>, ReadError>;
 
+/// A peekable boxed iterator for merge operations.
+/// Used internally by SortIterator to peek at the next element without consuming it.
+type PeekableSortIter<'s, T> = Peekable<Box<dyn Iterator<Item = (T, &'s HashSet<DocumentId>)> + 's>>;
+
 // =============================================================================
 // Sortable trait
 // =============================================================================
@@ -289,8 +293,8 @@ where
 /// output that maintains the sort order. It uses a peek-compare-advance
 /// strategy to efficiently merge without buffering all data.
 struct SortIterator<'s1, 's2, T: Ord> {
-    iter1: Peekable<Box<dyn Iterator<Item = (T, &'s1 HashSet<DocumentId>)> + 's1>>,
-    iter2: Peekable<Box<dyn Iterator<Item = (T, &'s2 HashSet<DocumentId>)> + 's2>>,
+    iter1: PeekableSortIter<'s1, T>,
+    iter2: PeekableSortIter<'s2, T>,
     order: SortOrder,
 }
 
