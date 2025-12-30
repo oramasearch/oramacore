@@ -67,7 +67,7 @@ pub use group::GroupValue;
 pub use sort::IndexSortContext;
 use std::{
     collections::{HashMap, HashSet},
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc,
@@ -1165,7 +1165,7 @@ fn merge_type<
     CFM: CommittedFieldMetadata,
     CF: CommittedField<Uncommitted = UF, FieldMetadata = CFM>,
 >(
-    data_dir_with_offset: &PathBuf,
+    data_dir_with_offset: &Path,
     uncommitted_fields: &HashMap<FieldId, UF>,
     committed_fields: &HashMap<FieldId, CF>,
     uncommitted_deleted_documents: &HashSet<DocumentId>,

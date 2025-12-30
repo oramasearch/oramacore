@@ -254,7 +254,7 @@ impl<'index> TokenScoreContext<'index> {
                 // Collect unique document IDs for this term across all fields for corpus DF calculation
                 let mut corpus_scorer = BM25Scorer::plain();
                 let single_token_slice = std::slice::from_ref(token);
-                let mut corpus_context = StringSearchParams {
+                let corpus_context = StringSearchParams {
                     tokens: single_token_slice,
                     exact_match: exact,
                     boost: 1.0,
@@ -265,11 +265,11 @@ impl<'index> TokenScoreContext<'index> {
                 };
 
                 field
-                    .search(&mut corpus_context, &mut corpus_scorer)
+                    .search(&corpus_context, &mut corpus_scorer)
                     .context("Cannot perform corpus search")?;
                 if let Some(committed_field) = committed {
                     committed_field
-                        .search(&mut corpus_context, &mut corpus_scorer)
+                        .search(&corpus_context, &mut corpus_scorer)
                         .context("Cannot perform corpus search")?;
                 }
 

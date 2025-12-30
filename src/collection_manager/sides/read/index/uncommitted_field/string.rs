@@ -252,8 +252,8 @@ impl UncommittedField for UncommittedStringField {
 impl Field for UncommittedStringField {
     type FieldStats = UncommittedStringFieldStats;
 
-    fn field_path(&self) -> &Box<[String]> {
-        &self.field_path
+    fn field_path(&self) -> &[String] {
+        self.field_path.as_ref()
     }
 
     fn stats(&self) -> UncommittedStringFieldStats {

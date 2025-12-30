@@ -456,8 +456,8 @@ mod sort_iter {
         }
 
         /// Helper to compare Cow<HashSet> with HashSet
-        fn cow_eq(cow: &Cow<'_, HashSet<DocumentId>>, expected: HashSet<DocumentId>) -> bool {
-            cow.as_ref() == &expected
+        fn cow_eq(cow: &HashSet<DocumentId>, expected: HashSet<DocumentId>) -> bool {
+            cow == &expected
         }
 
         #[test]

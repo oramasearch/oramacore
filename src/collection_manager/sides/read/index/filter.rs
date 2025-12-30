@@ -165,7 +165,7 @@ impl TryFromFilter for GeoSearchFilter {
 ///
 /// # Returns
 /// A FilterResult containing the union of matching document IDs from both fields
-fn calculate_filter_on_field<'a, UF, CF, FP>(
+fn calculate_filter_on_field<UF, CF, FP>(
     document_count_estimate: u64,
     uncommitted_field: &UF,
     committed_field: Option<&CF>,

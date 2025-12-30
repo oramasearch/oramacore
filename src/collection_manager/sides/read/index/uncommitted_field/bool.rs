@@ -78,8 +78,8 @@ impl UncommittedField for UncommittedBoolField {
 impl Field for UncommittedBoolField {
     type FieldStats = UncommittedBoolFieldStats;
 
-    fn field_path(&self) -> &Box<[String]> {
-        &self.field_path
+    fn field_path(&self) -> &[String] {
+        self.field_path.as_ref()
     }
 
     fn stats(&self) -> Self::FieldStats {

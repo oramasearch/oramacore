@@ -409,8 +409,8 @@ impl CommittedField for CommittedVectorField {
 impl Field for CommittedVectorField {
     type FieldStats = CommittedVectorFieldStats;
 
-    fn field_path(&self) -> &Box<[String]> {
-        &self.metadata.field_path
+    fn field_path(&self) -> &[String] {
+        self.metadata.field_path.as_ref()
     }
 
     fn stats(&self) -> CommittedVectorFieldStats {
@@ -517,7 +517,7 @@ impl CommittedFieldMetadata for VectorFieldInfo {
     fn set_data_dir(&mut self, data_dir: PathBuf) {
         self.data_dir = data_dir;
     }
-    fn field_path(&self) -> &Box<[String]> {
-        &self.field_path
+    fn field_path(&self) -> &[String] {
+        self.field_path.as_ref()
     }
 }

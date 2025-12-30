@@ -128,10 +128,7 @@ impl<'collection, 'analytics_storage> Search<'collection, 'analytics_storage> {
                 ) as Box<dyn Iterator<Item = DocumentId>>
             })
             .unwrap_or_else(|| Box::new(std::iter::empty()));
-        let all_docs_ids = top_results
-            .iter()
-            .map(|ts| ts.document_id)
-            .chain(group);
+        let all_docs_ids = top_results.iter().map(|ts| ts.document_id).chain(group);
         let docs = collection_document_storage
             .get_documents_by_ids(all_docs_ids.collect())
             .await?;

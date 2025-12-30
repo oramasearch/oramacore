@@ -207,8 +207,8 @@ impl CommittedField for CommittedBoolField {
 impl Field for CommittedBoolField {
     type FieldStats = CommittedBoolFieldStats;
 
-    fn field_path(&self) -> &Box<[String]> {
-        &self.field_path
+    fn field_path(&self) -> &[String] {
+        self.field_path.as_ref()
     }
 
     fn stats(&self) -> Self::FieldStats {
@@ -336,7 +336,7 @@ impl CommittedFieldMetadata for BoolFieldInfo {
         self.data_dir = data_dir;
     }
 
-    fn field_path(&self) -> &Box<[String]> {
-        &self.field_path
+    fn field_path(&self) -> &[String] {
+        self.field_path.as_ref()
     }
 }

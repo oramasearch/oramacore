@@ -110,8 +110,8 @@ impl UncommittedField for UncommittedVectorField {
 impl Field for UncommittedVectorField {
     type FieldStats = UncommittedVectorFieldStats;
 
-    fn field_path(&self) -> &Box<[String]> {
-        &self.field_path
+    fn field_path(&self) -> &[String] {
+        self.field_path.as_ref()
     }
 
     fn stats(&self) -> UncommittedVectorFieldStats {
