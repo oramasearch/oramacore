@@ -12,58 +12,6 @@ use crate::types::{DocumentId, Number, SortBy, TokenScore};
 use crate::types::{Limit, SearchOffset};
 use oramacore_lib::pin_rules::Consequence;
 
-/// Truncate results based on top_count, applying token scores
-fn truncate<I: Iterator<Item = (Number, HashSet<DocumentId>)>>(
-    token_scores: &HashMap<DocumentId, f32>,
-    output: I,
-    top_count: usize,
-) -> Vec<TokenScore> {
-    let mut res = Vec::with_capacity(top_count);
-    let mut k = 0_usize;
-    for (_, docs) in output {
-        for doc in docs {
-            let score = token_scores.get(&doc);
-            if let Some(score) = score {
-                if k < top_count {
-                    res.push(TokenScore {
-                        document_id: doc,
-                        score: *score,
-                    });
-                }
-
-                k += 1;
-
-                if k > top_count {
-                    break;
-                }
-            }
-        }
-    }
-    res
-}
-
-/// Get top N results based on token scores when no sorting is requested
-fn top_n<'s, I: Iterator<Item = (&'s DocumentId, &'s f32)>>(map: I, n: usize) -> Vec<TokenScore> {
-    let mut capped_heap = CappedHeap::new(n);
-
-    for (key, value) in map {
-        let k = match NotNan::new(*value) {
-            Ok(k) => k,
-            Err(_) => continue,
-        };
-        let v = key;
-        capped_heap.insert(k, v);
-    }
-
-    capped_heap
-        .into_top()
-        .map(|(value, key)| TokenScore {
-            document_id: *key,
-            score: value.into_inner(),
-        })
-        .collect()
-}
-
 pub fn sort_token_scores<'index>(
     stores: &[IndexSearchStore<'index>],
     token_scores: &HashMap<DocumentId, f32>,
@@ -269,6 +217,59 @@ pub fn sort_groups<'index>(
     }
 
     Ok(sorted_groups)
+}
+
+
+/// Truncate results based on top_count, applying token scores
+fn truncate<I: Iterator<Item = (Number, HashSet<DocumentId>)>>(
+    token_scores: &HashMap<DocumentId, f32>,
+    output: I,
+    top_count: usize,
+) -> Vec<TokenScore> {
+    let mut res = Vec::with_capacity(top_count);
+    let mut k = 0_usize;
+    for (_, docs) in output {
+        for doc in docs {
+            let score = token_scores.get(&doc);
+            if let Some(score) = score {
+                if k < top_count {
+                    res.push(TokenScore {
+                        document_id: doc,
+                        score: *score,
+                    });
+                }
+
+                k += 1;
+
+                if k > top_count {
+                    break;
+                }
+            }
+        }
+    }
+    res
+}
+
+/// Get top N results based on token scores when no sorting is requested
+fn top_n<'s, I: Iterator<Item = (&'s DocumentId, &'s f32)>>(map: I, n: usize) -> Vec<TokenScore> {
+    let mut capped_heap = CappedHeap::new(n);
+
+    for (key, value) in map {
+        let k = match NotNan::new(*value) {
+            Ok(k) => k,
+            Err(_) => continue,
+        };
+        let v = key;
+        capped_heap.insert(k, v);
+    }
+
+    capped_heap
+        .into_top()
+        .map(|(value, key)| TokenScore {
+            document_id: *key,
+            score: value.into_inner(),
+        })
+        .collect()
 }
 
 // Maximum number of promoted items to prevent excessive memory usage

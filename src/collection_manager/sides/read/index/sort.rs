@@ -28,9 +28,6 @@ use super::{
 /// The trait returns a boxed `DoubleEndedIterator` to support both ascending
 /// and descending sort orders. The iterator yields tuples of (Number, HashSet<DocumentId>)
 /// where Number is the sort key and HashSet contains all documents with that value.
-///
-/// Unlike `Filterable` or `Groupable`, this trait doesn't use an associated type
-/// for the key since all implementations convert to `Number` for unified sorting.
 trait Sortable {
     /// Returns a sorted iterator over (sort_key, document_ids) pairs.
     ///
@@ -129,14 +126,6 @@ impl Sortable for CommittedBoolField {
 // =============================================================================
 
 /// Context required for executing sort operations on an index.
-///
-/// This struct encapsulates all the data needed to sort documents,
-/// allowing sort logic to be executed without direct Index coupling.
-/// Index is responsible for gathering the data and passing it to the
-/// IndexSortContext constructor, maintaining proper encapsulation.
-///
-/// Validation of field existence and type is deferred to the `execute` method,
-/// allowing construction to be infallible.
 pub struct IndexSortContext<'index> {
     path_to_index_id_map: &'index PathToIndexId,
     uncommitted_fields: &'index UncommittedFields,
@@ -147,17 +136,6 @@ pub struct IndexSortContext<'index> {
 
 impl<'index> IndexSortContext<'index> {
     /// Creates a new IndexSortContext with the provided sort dependencies.
-    ///
-    /// This constructor stores the parameters without validation. Validation
-    /// of field existence and type is deferred to the `execute` method.
-    ///
-    /// # Arguments
-    ///
-    /// * `path_to_index_id_map` - Map from field paths to (FieldId, FieldType)
-    /// * `uncommitted_fields` - Read guard for in-memory uncommitted fields
-    /// * `committed_fields` - Read guard for persisted committed fields
-    /// * `field_name` - The name of the field to sort by
-    /// * `order` - The sort order (ascending or descending)
     pub(crate) fn new(
         path_to_index_id_map: &'index PathToIndexId,
         uncommitted_fields: &'index UncommittedFields,
@@ -177,35 +155,17 @@ impl<'index> IndexSortContext<'index> {
     /// Executes the sort operation and returns the sorted iterator.
     ///
     /// This is the main entry point for sorting within an IndexSortContext.
-    /// It validates the field exists and is sortable, then dispatches to the
-    /// appropriate field type and returns a merged, sorted iterator combining
-    /// uncommitted and committed data.
-    ///
-    /// Note: Returns a borrowing iterator, so context cannot be consumed.
-    ///
-    /// # Returns
-    ///
-    /// A boxed iterator yielding (Number, HashSet<DocumentId>) tuples in sorted order.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if:
-    /// - The field is not found in the index
-    /// - The field type is not sortable (only Bool, Number, Date are supported)
-    /// - The field exists in the map but not in the uncommitted fields
     pub fn execute<'s>(
         &'s self,
     ) -> Result<Box<dyn Iterator<Item = (Number, HashSet<DocumentId>)> + 's>, ReadError>
     where
         'index: 's,
     {
-        // Look up the field in the index
         let (field_id, field_type) = self
             .path_to_index_id_map
             .get_filter_field(&self.field_name)
             .ok_or_else(|| ReadError::SortFieldNotFound(self.field_name.clone()))?;
 
-        // Validate field type, get fields, and dispatch to appropriate sort implementation
         match field_type {
             FieldType::Number => {
                 let uncommitted = self
@@ -289,20 +249,7 @@ fn i64_to_number(value: i64) -> Number {
 /// Merges sorted iterators from uncommitted and committed fields.
 ///
 /// This generic function handles the combination of uncommitted (in-memory) and
-/// committed (persisted) field data. It uses the `Sortable` trait for compile-time
-/// type safety.
-///
-/// # Type Parameters
-/// * `UF` - Uncommitted field type implementing Sortable
-/// * `CF` - Committed field type implementing Sortable
-///
-/// # Arguments
-/// * `uncommitted_field` - The in-memory uncommitted field
-/// * `committed_field` - Optional persisted committed field
-/// * `order` - The sort order (ascending or descending)
-///
-/// # Returns
-/// A boxed iterator yielding (Number, HashSet<DocumentId>) tuples in sorted order.
+/// committed (persisted) field data.
 fn calculate_sort_on_field<'a, UF, CF>(
     uncommitted_field: &'a UF,
     committed_field: Option<&'a CF>,
@@ -314,14 +261,12 @@ where
 {
     let uncommitted_iter = uncommitted_field.iter_sorted();
 
-    // Apply sort order to uncommitted iterator
     let uncommitted_iter: Box<dyn Iterator<Item = (Number, HashSet<DocumentId>)> + 'a> = match order
     {
         SortOrder::Ascending => Box::new(uncommitted_iter),
         SortOrder::Descending => Box::new(uncommitted_iter.rev()),
     };
 
-    // If there's a committed field, merge the two iterators
     if let Some(committed_field) = committed_field {
         let committed_iter = committed_field.iter_sorted();
 
@@ -331,6 +276,7 @@ where
                 SortOrder::Descending => Box::new(committed_iter.rev()),
             };
 
+        // If there's a committed field, merge the two iterators
         Box::new(SortIterator::new(uncommitted_iter, committed_iter, order))
     } else {
         uncommitted_iter
@@ -346,9 +292,6 @@ where
 /// This iterator takes two already-sorted iterators and produces a merged
 /// output that maintains the sort order. It uses a peek-compare-advance
 /// strategy to efficiently merge without buffering all data.
-///
-/// # Type Parameters
-/// * `T` - The key type, must implement `Ord + Clone`
 struct SortIterator<'s1, 's2, T: Ord + Clone> {
     iter1: Peekable<Box<dyn Iterator<Item = (T, HashSet<DocumentId>)> + 's1>>,
     iter2: Peekable<Box<dyn Iterator<Item = (T, HashSet<DocumentId>)> + 's2>>,
@@ -357,8 +300,6 @@ struct SortIterator<'s1, 's2, T: Ord + Clone> {
 
 impl<'s1, 's2, T: Ord + Clone> SortIterator<'s1, 's2, T> {
     /// Creates a new SortIterator from two iterators.
-    ///
-    /// Both input iterators must already be sorted according to the specified order.
     fn new(
         iter1: Box<dyn Iterator<Item = (T, HashSet<DocumentId>)> + 's1>,
         iter2: Box<dyn Iterator<Item = (T, HashSet<DocumentId>)> + 's2>,
@@ -402,10 +343,6 @@ impl<T: Ord + Clone> Iterator for SortIterator<'_, '_, T> {
         }
     }
 }
-
-// =============================================================================
-// Tests
-// =============================================================================
 
 #[cfg(test)]
 mod tests {
