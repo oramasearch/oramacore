@@ -31,7 +31,8 @@ type SortExecuteResult<'s> = Result<SortedDocIdsIter<'s>, ReadError>;
 
 /// A peekable boxed iterator for merge operations.
 /// Used internally by SortIterator to peek at the next element without consuming it.
-type PeekableSortIter<'s, T> = Peekable<Box<dyn Iterator<Item = (T, &'s HashSet<DocumentId>)> + 's>>;
+type PeekableSortIter<'s, T> =
+    Peekable<Box<dyn Iterator<Item = (T, &'s HashSet<DocumentId>)> + 's>>;
 
 // =============================================================================
 // Sortable trait
