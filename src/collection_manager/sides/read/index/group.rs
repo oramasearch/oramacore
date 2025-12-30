@@ -275,8 +275,8 @@ impl<'index> GroupContext<'index> {
             let field_variants = calculate_group_for_field(
                 *field_id,
                 *field_type,
-                &self.uncommitted_fields,
-                &self.committed_fields,
+                self.uncommitted_fields,
+                self.committed_fields,
             )?;
             all_variants.insert(*field_id, field_variants);
         }

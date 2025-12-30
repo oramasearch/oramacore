@@ -506,8 +506,8 @@ impl<'index> FacetContext<'index> {
             let facet_values = calculate_facet_for_field(
                 field_id,
                 field_type,
-                &self.uncommitted_fields,
-                &self.committed_fields,
+                self.uncommitted_fields,
+                self.committed_fields,
                 facet_definition,
                 params.token_scores,
             )?;

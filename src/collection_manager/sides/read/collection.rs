@@ -745,11 +745,11 @@ impl CollectionReader {
                         return Err(ReadError::UnknownIndex(unknown_indexes, all_indexes));
                     }
 
-                    let index_ids = all_indexes
+                    
+                    all_indexes
                         .into_iter()
                         .filter(|index| indexes_from_user.contains(index))
-                        .collect();
-                    index_ids
+                        .collect()
                 }
             }
         };

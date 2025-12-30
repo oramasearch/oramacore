@@ -90,8 +90,9 @@ impl Sortable for CommittedNumberField {
         &'s self,
     ) -> Box<dyn DoubleEndedIterator<Item = (Number, Cow<'s, HashSet<DocumentId>>)> + 's> {
         Box::new(
-            self.iter_ref()
-                .map(|(serializable_number, doc_ids)| (serializable_number.0, Cow::Borrowed(doc_ids))),
+            self.iter_ref().map(|(serializable_number, doc_ids)| {
+                (serializable_number.0, Cow::Borrowed(doc_ids))
+            }),
         )
     }
 }

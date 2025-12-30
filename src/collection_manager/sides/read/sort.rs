@@ -55,9 +55,9 @@ fn sort_token_scores_by_field<'index>(
         let store = &stores[0];
 
         let index_sort_context = IndexSortContext::new(
-            &store.path_to_field_id_map,
-            &**store.uncommitted_fields,
-            &**store.committed_fields,
+            store.path_to_field_id_map,
+            &store.uncommitted_fields,
+            &store.committed_fields,
             &sort_by.property,
             sort_by.order,
         );
@@ -69,9 +69,9 @@ fn sort_token_scores_by_field<'index>(
         let mut v: Vec<IndexSortContext<'_>> = Vec::with_capacity(stores.len());
         for store in stores.iter() {
             let index_sort_context = IndexSortContext::new(
-                &store.path_to_field_id_map,
-                &**store.uncommitted_fields,
-                &**store.committed_fields,
+                store.path_to_field_id_map,
+                &store.uncommitted_fields,
+                &store.committed_fields,
                 &sort_by.property,
                 sort_by.order,
             );
@@ -146,9 +146,9 @@ pub fn sort_groups<'index>(
                 let store = &stores[0];
 
                 let index_sort_context = IndexSortContext::new(
-                    &store.path_to_field_id_map,
-                    &**store.uncommitted_fields,
-                    &**store.committed_fields,
+                    store.path_to_field_id_map,
+                    &store.uncommitted_fields,
+                    &store.committed_fields,
                     &sort_by.property,
                     sort_by.order,
                 );
@@ -164,9 +164,9 @@ pub fn sort_groups<'index>(
                 let mut v: Vec<IndexSortContext<'_>> = Vec::with_capacity(stores.len());
                 for store in stores.iter() {
                     let index_sort_context = IndexSortContext::new(
-                        &store.path_to_field_id_map,
-                        &**store.uncommitted_fields,
-                        &**store.committed_fields,
+                        store.path_to_field_id_map,
+                        &store.uncommitted_fields,
+                        &store.committed_fields,
                         &sort_by.property,
                         sort_by.order,
                     );
@@ -220,7 +220,6 @@ pub fn sort_groups<'index>(
 
     Ok(sorted_groups)
 }
-
 
 /// Truncate results based on top_count, applying token scores.
 /// Works with Cow<HashSet> to avoid unnecessary cloning.
@@ -394,7 +393,8 @@ mod sort_iter {
     /// Iterator that merges multiple sorted iterators into a single sorted stream.
     /// Uses Cow to avoid cloning HashSets when possible.
     pub struct MergeSortedIterator<'iter, T: OrderedKey> {
-        iters: Vec<Peekable<Box<dyn Iterator<Item = (T, Cow<'iter, HashSet<DocumentId>>)> + 'iter>>>,
+        iters:
+            Vec<Peekable<Box<dyn Iterator<Item = (T, Cow<'iter, HashSet<DocumentId>>)> + 'iter>>>,
         order: SortOrder,
     }
 

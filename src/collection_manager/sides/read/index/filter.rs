@@ -513,8 +513,8 @@ impl<'index> FilterContext<'index> {
             self.document_count,
             self.path_to_index_id_map,
             where_filter,
-            &self.uncommitted_fields,
-            &self.committed_fields,
+            self.uncommitted_fields,
+            self.committed_fields,
         )?;
 
         // Integrate deleted documents using AND + NOT logic

@@ -365,8 +365,8 @@ impl Index {
         let context = token_score::TokenScoreContext::new(
             self.id,
             self.document_count,
-            &**uncommitted_fields,
-            &**committed_fields,
+            &uncommitted_fields,
+            &committed_fields,
             &self.text_parser,
             &self.context,
             &self.path_to_index_id_map,
