@@ -37,6 +37,11 @@ impl CommittedDateField {
     pub fn iter(&self) -> impl DoubleEndedIterator<Item = (i64, HashSet<DocumentId>)> + '_ {
         self.vec.iter().cloned()
     }
+
+    /// Returns an iterator over (i64, &HashSet<DocumentId>) pairs without cloning.
+    pub fn iter_ref(&self) -> impl DoubleEndedIterator<Item = (i64, &HashSet<DocumentId>)> + '_ {
+        self.vec.iter().map(|(n, h)| (*n, h))
+    }
 }
 
 impl CommittedField for CommittedDateField {

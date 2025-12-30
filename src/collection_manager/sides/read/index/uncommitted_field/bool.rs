@@ -52,6 +52,12 @@ impl UncommittedBoolField {
     pub fn clone_inner(&self) -> (HashSet<DocumentId>, HashSet<DocumentId>) {
         self.inner.clone()
     }
+
+    /// Returns references to the inner HashSets without cloning.
+    /// Returns (true_docs, false_docs).
+    pub fn inner_ref(&self) -> (&HashSet<DocumentId>, &HashSet<DocumentId>) {
+        (&self.inner.0, &self.inner.1)
+    }
 }
 
 fn f(d: &DocumentId) -> DocumentId {

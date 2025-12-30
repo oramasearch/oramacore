@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::collections::HashSet;
 use std::iter::Peekable;
 
@@ -26,8 +27,11 @@ use super::{
 /// # Design
 ///
 /// The trait returns a boxed `DoubleEndedIterator` to support both ascending
-/// and descending sort orders. The iterator yields tuples of (Number, HashSet<DocumentId>)
-/// where Number is the sort key and HashSet contains all documents with that value.
+/// and descending sort orders. The iterator yields tuples of (Number, Cow<HashSet<DocumentId>>)
+/// where Number is the sort key and Cow allows either borrowed or owned HashSets.
+///
+/// Using Cow allows fields to return references to their stored HashSets
+/// (avoiding expensive clones).
 trait Sortable {
     /// Returns a sorted iterator over (sort_key, document_ids) pairs.
     ///
@@ -35,7 +39,7 @@ trait Sortable {
     /// Use `.rev()` on the returned iterator for descending order.
     fn iter_sorted<'s>(
         &'s self,
-    ) -> Box<dyn DoubleEndedIterator<Item = (Number, HashSet<DocumentId>)> + 's>;
+    ) -> Box<dyn DoubleEndedIterator<Item = (Number, Cow<'s, HashSet<DocumentId>>)> + 's>;
 }
 
 // =============================================================================
@@ -45,18 +49,18 @@ trait Sortable {
 impl Sortable for UncommittedNumberField {
     fn iter_sorted<'s>(
         &'s self,
-    ) -> Box<dyn DoubleEndedIterator<Item = (Number, HashSet<DocumentId>)> + 's> {
-        Box::new(self.iter())
+    ) -> Box<dyn DoubleEndedIterator<Item = (Number, Cow<'s, HashSet<DocumentId>>)> + 's> {
+        Box::new(self.iter_ref().map(|(n, h)| (n, Cow::Borrowed(h))))
     }
 }
 
 impl Sortable for UncommittedDateFilterField {
     fn iter_sorted<'s>(
         &'s self,
-    ) -> Box<dyn DoubleEndedIterator<Item = (Number, HashSet<DocumentId>)> + 's> {
+    ) -> Box<dyn DoubleEndedIterator<Item = (Number, Cow<'s, HashSet<DocumentId>>)> + 's> {
         Box::new(
-            self.iter()
-                .map(|(timestamp, doc_ids)| (i64_to_number(timestamp), doc_ids)),
+            self.iter_ref()
+                .map(|(timestamp, doc_ids)| (i64_to_number(timestamp), Cow::Borrowed(doc_ids))),
         )
     }
 }
@@ -64,13 +68,13 @@ impl Sortable for UncommittedDateFilterField {
 impl Sortable for UncommittedBoolField {
     fn iter_sorted<'s>(
         &'s self,
-    ) -> Box<dyn DoubleEndedIterator<Item = (Number, HashSet<DocumentId>)> + 's> {
-        let (true_docs, false_docs) = self.clone_inner();
+    ) -> Box<dyn DoubleEndedIterator<Item = (Number, Cow<'s, HashSet<DocumentId>>)> + 's> {
+        let (true_docs, false_docs) = self.inner_ref();
         // Ascending order: false (0) first, then true (1)
         Box::new(
             vec![
-                (bool_to_number(false), false_docs),
-                (bool_to_number(true), true_docs),
+                (bool_to_number(false), Cow::Borrowed(false_docs)),
+                (bool_to_number(true), Cow::Borrowed(true_docs)),
             ]
             .into_iter(),
         )
@@ -84,10 +88,10 @@ impl Sortable for UncommittedBoolField {
 impl Sortable for CommittedNumberField {
     fn iter_sorted<'s>(
         &'s self,
-    ) -> Box<dyn DoubleEndedIterator<Item = (Number, HashSet<DocumentId>)> + 's> {
+    ) -> Box<dyn DoubleEndedIterator<Item = (Number, Cow<'s, HashSet<DocumentId>>)> + 's> {
         Box::new(
-            self.iter()
-                .map(|(serializable_number, doc_ids)| (serializable_number.0, doc_ids)),
+            self.iter_ref()
+                .map(|(serializable_number, doc_ids)| (serializable_number.0, Cow::Borrowed(doc_ids))),
         )
     }
 }
@@ -95,10 +99,10 @@ impl Sortable for CommittedNumberField {
 impl Sortable for CommittedDateField {
     fn iter_sorted<'s>(
         &'s self,
-    ) -> Box<dyn DoubleEndedIterator<Item = (Number, HashSet<DocumentId>)> + 's> {
+    ) -> Box<dyn DoubleEndedIterator<Item = (Number, Cow<'s, HashSet<DocumentId>>)> + 's> {
         Box::new(
-            self.iter()
-                .map(|(timestamp, doc_ids)| (i64_to_number(timestamp), doc_ids)),
+            self.iter_ref()
+                .map(|(timestamp, doc_ids)| (i64_to_number(timestamp), Cow::Borrowed(doc_ids))),
         )
     }
 }
@@ -106,15 +110,13 @@ impl Sortable for CommittedDateField {
 impl Sortable for CommittedBoolField {
     fn iter_sorted<'s>(
         &'s self,
-    ) -> Box<dyn DoubleEndedIterator<Item = (Number, HashSet<DocumentId>)> + 's> {
-        // clone_inner returns Result, but we can safely unwrap here
-        // since the bool field is always properly initialized
-        let (true_docs, false_docs) = self.clone_inner().expect("BoolField should be valid");
+    ) -> Box<dyn DoubleEndedIterator<Item = (Number, Cow<'s, HashSet<DocumentId>>)> + 's> {
+        let (true_docs, false_docs) = self.inner_ref();
         // Ascending order: false (0) first, then true (1)
         Box::new(
             vec![
-                (bool_to_number(false), false_docs),
-                (bool_to_number(true), true_docs),
+                (bool_to_number(false), Cow::Borrowed(false_docs)),
+                (bool_to_number(true), Cow::Borrowed(true_docs)),
             ]
             .into_iter(),
         )
@@ -157,7 +159,7 @@ impl<'index> IndexSortContext<'index> {
     /// This is the main entry point for sorting within an IndexSortContext.
     pub fn execute<'s>(
         &'s self,
-    ) -> Result<Box<dyn Iterator<Item = (Number, HashSet<DocumentId>)> + 's>, ReadError>
+    ) -> Result<Box<dyn Iterator<Item = (Number, Cow<'s, HashSet<DocumentId>>)> + 's>, ReadError>
     where
         'index: 's,
     {
@@ -254,23 +256,23 @@ fn calculate_sort_on_field<'a, UF, CF>(
     uncommitted_field: &'a UF,
     committed_field: Option<&'a CF>,
     order: SortOrder,
-) -> Box<dyn Iterator<Item = (Number, HashSet<DocumentId>)> + 'a>
+) -> Box<dyn Iterator<Item = (Number, Cow<'a, HashSet<DocumentId>>)> + 'a>
 where
     UF: Sortable,
     CF: Sortable,
 {
     let uncommitted_iter = uncommitted_field.iter_sorted();
 
-    let uncommitted_iter: Box<dyn Iterator<Item = (Number, HashSet<DocumentId>)> + 'a> = match order
-    {
-        SortOrder::Ascending => Box::new(uncommitted_iter),
-        SortOrder::Descending => Box::new(uncommitted_iter.rev()),
-    };
+    let uncommitted_iter: Box<dyn Iterator<Item = (Number, Cow<'a, HashSet<DocumentId>>)> + 'a> =
+        match order {
+            SortOrder::Ascending => Box::new(uncommitted_iter),
+            SortOrder::Descending => Box::new(uncommitted_iter.rev()),
+        };
 
     if let Some(committed_field) = committed_field {
         let committed_iter = committed_field.iter_sorted();
 
-        let committed_iter: Box<dyn Iterator<Item = (Number, HashSet<DocumentId>)> + 'a> =
+        let committed_iter: Box<dyn Iterator<Item = (Number, Cow<'a, HashSet<DocumentId>>)> + 'a> =
             match order {
                 SortOrder::Ascending => Box::new(committed_iter),
                 SortOrder::Descending => Box::new(committed_iter.rev()),
@@ -292,17 +294,17 @@ where
 /// This iterator takes two already-sorted iterators and produces a merged
 /// output that maintains the sort order. It uses a peek-compare-advance
 /// strategy to efficiently merge without buffering all data.
-struct SortIterator<'s1, 's2, T: Ord + Clone> {
-    iter1: Peekable<Box<dyn Iterator<Item = (T, HashSet<DocumentId>)> + 's1>>,
-    iter2: Peekable<Box<dyn Iterator<Item = (T, HashSet<DocumentId>)> + 's2>>,
+struct SortIterator<'s1, 's2, T: Ord> {
+    iter1: Peekable<Box<dyn Iterator<Item = (T, Cow<'s1, HashSet<DocumentId>>)> + 's1>>,
+    iter2: Peekable<Box<dyn Iterator<Item = (T, Cow<'s2, HashSet<DocumentId>>)> + 's2>>,
     order: SortOrder,
 }
 
-impl<'s1, 's2, T: Ord + Clone> SortIterator<'s1, 's2, T> {
+impl<'s1, 's2, T: Ord> SortIterator<'s1, 's2, T> {
     /// Creates a new SortIterator from two iterators.
     fn new(
-        iter1: Box<dyn Iterator<Item = (T, HashSet<DocumentId>)> + 's1>,
-        iter2: Box<dyn Iterator<Item = (T, HashSet<DocumentId>)> + 's2>,
+        iter1: Box<dyn Iterator<Item = (T, Cow<'s1, HashSet<DocumentId>>)> + 's1>,
+        iter2: Box<dyn Iterator<Item = (T, Cow<'s2, HashSet<DocumentId>>)> + 's2>,
         order: SortOrder,
     ) -> Self {
         Self {
@@ -313,8 +315,8 @@ impl<'s1, 's2, T: Ord + Clone> SortIterator<'s1, 's2, T> {
     }
 }
 
-impl<T: Ord + Clone> Iterator for SortIterator<'_, '_, T> {
-    type Item = (T, HashSet<DocumentId>);
+impl<'s, T: Ord> Iterator for SortIterator<'s, 's, T> {
+    type Item = (T, Cow<'s, HashSet<DocumentId>>);
 
     fn next(&mut self) -> Option<Self::Item> {
         let el1 = self.iter1.peek();
@@ -368,9 +370,9 @@ mod tests {
 
     #[test]
     fn test_sort_iterator_ascending_empty() {
-        let iter1: Box<dyn Iterator<Item = (Number, HashSet<DocumentId>)>> =
+        let iter1: Box<dyn Iterator<Item = (Number, Cow<'_, HashSet<DocumentId>>)>> =
             Box::new(std::iter::empty());
-        let iter2: Box<dyn Iterator<Item = (Number, HashSet<DocumentId>)>> =
+        let iter2: Box<dyn Iterator<Item = (Number, Cow<'_, HashSet<DocumentId>>)>> =
             Box::new(std::iter::empty());
 
         let mut merged = SortIterator::new(iter1, iter2, SortOrder::Ascending);
@@ -380,12 +382,12 @@ mod tests {
     #[test]
     fn test_sort_iterator_ascending_one_empty() {
         let data = vec![
-            (Number::I32(1), HashSet::from([DocumentId(10)])),
-            (Number::I32(3), HashSet::from([DocumentId(30)])),
+            (Number::I32(1), Cow::Owned(HashSet::from([DocumentId(10)]))),
+            (Number::I32(3), Cow::Owned(HashSet::from([DocumentId(30)]))),
         ];
-        let iter1: Box<dyn Iterator<Item = (Number, HashSet<DocumentId>)>> =
+        let iter1: Box<dyn Iterator<Item = (Number, Cow<'_, HashSet<DocumentId>>)>> =
             Box::new(data.into_iter());
-        let iter2: Box<dyn Iterator<Item = (Number, HashSet<DocumentId>)>> =
+        let iter2: Box<dyn Iterator<Item = (Number, Cow<'_, HashSet<DocumentId>>)>> =
             Box::new(std::iter::empty());
 
         let merged = SortIterator::new(iter1, iter2, SortOrder::Ascending);
@@ -398,18 +400,18 @@ mod tests {
     #[test]
     fn test_sort_iterator_ascending() {
         let data1 = vec![
-            (Number::I32(1), HashSet::from([DocumentId(10)])),
-            (Number::I32(3), HashSet::from([DocumentId(30)])),
-            (Number::I32(5), HashSet::from([DocumentId(50)])),
+            (Number::I32(1), Cow::Owned(HashSet::from([DocumentId(10)]))),
+            (Number::I32(3), Cow::Owned(HashSet::from([DocumentId(30)]))),
+            (Number::I32(5), Cow::Owned(HashSet::from([DocumentId(50)]))),
         ];
         let data2 = vec![
-            (Number::I32(2), HashSet::from([DocumentId(20)])),
-            (Number::I32(4), HashSet::from([DocumentId(40)])),
+            (Number::I32(2), Cow::Owned(HashSet::from([DocumentId(20)]))),
+            (Number::I32(4), Cow::Owned(HashSet::from([DocumentId(40)]))),
         ];
 
-        let iter1: Box<dyn Iterator<Item = (Number, HashSet<DocumentId>)>> =
+        let iter1: Box<dyn Iterator<Item = (Number, Cow<'_, HashSet<DocumentId>>)>> =
             Box::new(data1.into_iter());
-        let iter2: Box<dyn Iterator<Item = (Number, HashSet<DocumentId>)>> =
+        let iter2: Box<dyn Iterator<Item = (Number, Cow<'_, HashSet<DocumentId>>)>> =
             Box::new(data2.into_iter());
 
         let merged = SortIterator::new(iter1, iter2, SortOrder::Ascending);
@@ -431,18 +433,18 @@ mod tests {
     #[test]
     fn test_sort_iterator_descending() {
         let data1 = vec![
-            (Number::I32(5), HashSet::from([DocumentId(50)])),
-            (Number::I32(3), HashSet::from([DocumentId(30)])),
-            (Number::I32(1), HashSet::from([DocumentId(10)])),
+            (Number::I32(5), Cow::Owned(HashSet::from([DocumentId(50)]))),
+            (Number::I32(3), Cow::Owned(HashSet::from([DocumentId(30)]))),
+            (Number::I32(1), Cow::Owned(HashSet::from([DocumentId(10)]))),
         ];
         let data2 = vec![
-            (Number::I32(4), HashSet::from([DocumentId(40)])),
-            (Number::I32(2), HashSet::from([DocumentId(20)])),
+            (Number::I32(4), Cow::Owned(HashSet::from([DocumentId(40)]))),
+            (Number::I32(2), Cow::Owned(HashSet::from([DocumentId(20)]))),
         ];
 
-        let iter1: Box<dyn Iterator<Item = (Number, HashSet<DocumentId>)>> =
+        let iter1: Box<dyn Iterator<Item = (Number, Cow<'_, HashSet<DocumentId>>)>> =
             Box::new(data1.into_iter());
-        let iter2: Box<dyn Iterator<Item = (Number, HashSet<DocumentId>)>> =
+        let iter2: Box<dyn Iterator<Item = (Number, Cow<'_, HashSet<DocumentId>>)>> =
             Box::new(data2.into_iter());
 
         let merged = SortIterator::new(iter1, iter2, SortOrder::Descending);
@@ -464,17 +466,17 @@ mod tests {
     #[test]
     fn test_sort_iterator_with_duplicates() {
         let data1 = vec![
-            (Number::I32(1), HashSet::from([DocumentId(10)])),
-            (Number::I32(3), HashSet::from([DocumentId(30)])),
+            (Number::I32(1), Cow::Owned(HashSet::from([DocumentId(10)]))),
+            (Number::I32(3), Cow::Owned(HashSet::from([DocumentId(30)]))),
         ];
         let data2 = vec![
-            (Number::I32(1), HashSet::from([DocumentId(11)])),
-            (Number::I32(3), HashSet::from([DocumentId(31)])),
+            (Number::I32(1), Cow::Owned(HashSet::from([DocumentId(11)]))),
+            (Number::I32(3), Cow::Owned(HashSet::from([DocumentId(31)]))),
         ];
 
-        let iter1: Box<dyn Iterator<Item = (Number, HashSet<DocumentId>)>> =
+        let iter1: Box<dyn Iterator<Item = (Number, Cow<'_, HashSet<DocumentId>>)>> =
             Box::new(data1.into_iter());
-        let iter2: Box<dyn Iterator<Item = (Number, HashSet<DocumentId>)>> =
+        let iter2: Box<dyn Iterator<Item = (Number, Cow<'_, HashSet<DocumentId>>)>> =
             Box::new(data2.into_iter());
 
         let merged = SortIterator::new(iter1, iter2, SortOrder::Ascending);

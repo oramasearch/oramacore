@@ -46,6 +46,11 @@ impl UncommittedDateFilterField {
             .iter()
             .map(|(number, doc_ids)| (*number, doc_ids.clone()))
     }
+
+    /// Returns an iterator over (i64, &HashSet<DocumentId>) pairs.
+    pub fn iter_ref(&self) -> impl DoubleEndedIterator<Item = (i64, &HashSet<DocumentId>)> + '_ {
+        self.inner.iter().map(|(number, doc_ids)| (*number, doc_ids))
+    }
 }
 
 impl UncommittedField for UncommittedDateFilterField {

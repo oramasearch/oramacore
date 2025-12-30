@@ -56,6 +56,15 @@ impl CommittedBoolField {
 
         Ok((true_docs, false_docs))
     }
+
+    /// Returns references to the inner HashSets without cloning.
+    /// Returns (true_docs, false_docs).
+    pub fn inner_ref(&self) -> (&HashSet<DocumentId>, &HashSet<DocumentId>) {
+        (
+            self.map.get(&true).expect("true entry must exist"),
+            self.map.get(&false).expect("false entry must exist"),
+        )
+    }
 }
 
 impl CommittedField for CommittedBoolField {

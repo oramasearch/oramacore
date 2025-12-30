@@ -79,6 +79,13 @@ impl CommittedNumberField {
     ) -> impl DoubleEndedIterator<Item = (SerializableNumber, HashSet<DocumentId>)> + '_ {
         self.vec.iter().cloned()
     }
+
+    /// Returns an iterator over (SerializableNumber, &HashSet<DocumentId>) pairs without cloning the HashSet.
+    pub fn iter_ref(
+        &self,
+    ) -> impl DoubleEndedIterator<Item = (SerializableNumber, &HashSet<DocumentId>)> + '_ {
+        self.vec.iter().map(|(n, h)| (n.clone(), h))
+    }
 }
 
 impl CommittedField for CommittedNumberField {
