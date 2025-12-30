@@ -1,6 +1,4 @@
-use std::{
-    collections::{HashMap, HashSet},
-};
+use std::collections::{HashMap, HashSet};
 
 use anyhow::{bail, Context as _, Result};
 use oramacore_lib::filters::FilterResult;
@@ -15,7 +13,8 @@ use crate::{
     },
     python::embeddings::Intent,
     types::{
-        DocumentId, FieldId, FulltextMode, HybridMode, IndexId, Limit, Properties, SearchMode, SearchModeResult, Similarity, Threshold, VectorMode
+        DocumentId, FieldId, FulltextMode, HybridMode, IndexId, Limit, Properties, SearchMode,
+        SearchModeResult, Similarity, Threshold, VectorMode,
     },
 };
 

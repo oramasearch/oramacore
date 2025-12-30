@@ -3,7 +3,6 @@ use std::iter::Peekable;
 
 use crate::{
     collection_manager::sides::read::ReadError,
-    lock::OramaAsyncLockReadGuard,
     types::{DocumentId, Number, SortOrder},
 };
 
@@ -140,8 +139,8 @@ impl Sortable for CommittedBoolField {
 /// allowing construction to be infallible.
 pub struct IndexSortContext<'index> {
     path_to_index_id_map: &'index PathToIndexId,
-    uncommitted_fields: OramaAsyncLockReadGuard<'index, UncommittedFields>,
-    committed_fields: OramaAsyncLockReadGuard<'index, CommittedFields>,
+    uncommitted_fields: &'index UncommittedFields,
+    committed_fields: &'index CommittedFields,
     field_name: String,
     order: SortOrder,
 }
@@ -161,8 +160,8 @@ impl<'index> IndexSortContext<'index> {
     /// * `order` - The sort order (ascending or descending)
     pub(crate) fn new(
         path_to_index_id_map: &'index PathToIndexId,
-        uncommitted_fields: OramaAsyncLockReadGuard<'index, UncommittedFields>,
-        committed_fields: OramaAsyncLockReadGuard<'index, CommittedFields>,
+        uncommitted_fields: &'index UncommittedFields,
+        committed_fields: &'index CommittedFields,
         field_name: &str,
         order: SortOrder,
     ) -> Self {

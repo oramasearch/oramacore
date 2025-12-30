@@ -3,49 +3,14 @@ use std::collections::{HashMap, HashSet};
 use anyhow::Result;
 use oramacore_lib::data_structures::capped_heap::CappedHeap;
 use ordered_float::NotNan;
-use tracing::{info, warn};
+use tracing::warn;
 
 use super::{GroupValue, IndexSortContext};
-use crate::collection_manager::sides::read::collection::ReadIndexesLockGuard;
 use crate::collection_manager::sides::read::sort::sort_iter::MergeSortedIterator;
-use crate::collection_manager::sides::read::ReadError;
-use crate::types::SearchParams;
+use crate::collection_manager::sides::read::{IndexSearchStore, ReadError};
 use crate::types::{DocumentId, Number, SortBy, TokenScore};
+use crate::types::{Limit, SearchOffset};
 use oramacore_lib::pin_rules::Consequence;
-
-/// Context structure that encapsulates all parameters needed for sorting operations
-pub struct SortContext<'collection, 'search> {
-    indexes: &'search ReadIndexesLockGuard<'collection>,
-    token_scores: &'search HashMap<DocumentId, f32>,
-    search_params: &'search SearchParams,
-    pin_rules: &'collection [Consequence<DocumentId>],
-}
-
-impl<'collection, 'search> SortContext<'collection, 'search> {
-    pub fn new(
-        indexes: &'search ReadIndexesLockGuard<'collection>,
-        token_scores: &'search HashMap<DocumentId, f32>,
-        search_params: &'search SearchParams,
-        pin_rules: &'collection [Consequence<DocumentId>],
-    ) -> Self {
-        Self {
-            indexes,
-            token_scores,
-            search_params,
-            pin_rules,
-        }
-    }
-
-    pub async fn execute(self) -> Result<Vec<TokenScore>, ReadError> {
-        let sort_by = self.search_params.sort_by.as_ref();
-        info!(
-            "Sorting and truncating results: limit = {:?}, offset = {:?}, sort_by = {:?}",
-            self.search_params.limit, self.search_params.offset, sort_by
-        );
-
-        sort_and_truncate_documents(self).await
-    }
-}
 
 /// Truncate results based on top_count, applying token scores
 fn truncate<I: Iterator<Item = (Number, HashSet<DocumentId>)>>(
@@ -99,52 +64,69 @@ fn top_n<'s, I: Iterator<Item = (&'s DocumentId, &'s f32)>>(map: I, n: usize) ->
         .collect()
 }
 
-async fn sort_and_truncate_documents_by_field(
-    indexes: &ReadIndexesLockGuard<'_>,
-    sort_by: &SortBy,
+pub fn sort_token_scores<'index>(
+    stores: &[IndexSearchStore<'index>],
+    token_scores: &HashMap<DocumentId, f32>,
+    limit: Limit,
+    offset: SearchOffset,
+    sort_by: Option<&SortBy>,
+    pin_rule_consequences: &[Consequence<DocumentId>],
+) -> Result<Vec<TokenScore>, ReadError> {
+    let top_count = if pin_rule_consequences.is_empty() {
+        limit.0 + offset.0
+    } else {
+        // The user could ask 0 to N documents,
+        // but a pin rules can move it after N.
+        // In this case, we have to remove it and get the next item.
+        // Anyway, it would fall on the next page, and we don't have it.
+        // This is why we double the limit, so we have the next page ready.
+        (limit.0 + offset.0) * 2
+    };
+
+    let top = if let Some(sort_by) = sort_by {
+        sort_token_scores_by_field(stores, token_scores, top_count, sort_by)?
+    } else {
+        // No sorting requested - fall back to simple top-N selection based on token scores
+        top_n(token_scores.iter(), top_count)
+    };
+
+    let top = apply_pin_rules(pin_rule_consequences, token_scores, top);
+
+    Ok(top)
+}
+
+fn sort_token_scores_by_field<'index>(
+    stores: &[IndexSearchStore<'index>],
     token_scores: &HashMap<DocumentId, f32>,
     top_count: usize,
+    sort_by: &SortBy,
 ) -> Result<Vec<TokenScore>, ReadError> {
-    fn process_sort_iterator(
-        iter: Box<dyn Iterator<Item = (Number, HashSet<DocumentId>)> + '_>,
-        desiderata: usize,
-    ) -> Vec<(Number, HashSet<DocumentId>)> {
-        // The worst scenario is that documents doesn't share the "number" value, so the hashset contains
-        // only one document.
-        // For a good scenario, the documents share the "number" value, so the hashset contains
-        // multiple documents.
-        // We use `desiderata / 2` to avoid excessive memory usage
-        let mut index_results = Vec::with_capacity((desiderata / 2).min(1000));
-
-        let mut total_item = 0_usize;
-        for (n, h) in iter {
-            let c = h.len();
-            index_results.push((n, h));
-            total_item += c;
-            if total_item >= desiderata {
-                break;
-            }
-        }
-
-        index_results
-    }
-
-    let v = if indexes.len() == 1 {
+    let result = if stores.len() == 1 {
         // If there's only one index, use the existing optimized path
-        let index = indexes.iter().next().expect("Index must exist");
-        let sorted_field = index
-            .get_sort_context(&sort_by.property, sort_by.order)
-            .await;
-        let output = process_sort_iterator(sorted_field.execute()?, top_count);
+        let store = &stores[0];
+
+        let index_sort_context = IndexSortContext::new(
+            &store.path_to_field_id_map,
+            &**store.uncommitted_fields,
+            &**store.committed_fields,
+            &sort_by.property,
+            sort_by.order,
+        );
+
+        let output = process_sort_iterator(index_sort_context.execute()?, top_count);
 
         truncate(token_scores, output.into_iter(), top_count)
     } else {
-        let mut v: Vec<IndexSortContext<'_>> = Vec::with_capacity(indexes.len());
-        for index in indexes.iter() {
-            let index_results = index
-                .get_sort_context(&sort_by.property, sort_by.order)
-                .await;
-            v.push(index_results);
+        let mut v: Vec<IndexSortContext<'_>> = Vec::with_capacity(stores.len());
+        for store in stores.iter() {
+            let index_sort_context = IndexSortContext::new(
+                &store.path_to_field_id_map,
+                &**store.uncommitted_fields,
+                &**store.committed_fields,
+                &sort_by.property,
+                sort_by.order,
+            );
+            v.push(index_sort_context);
         }
 
         let mut merge_sorted_iterator = MergeSortedIterator::new(sort_by.order);
@@ -158,43 +140,135 @@ async fn sort_and_truncate_documents_by_field(
 
         data
     };
-    Ok(v)
+
+    Ok(result)
 }
 
-async fn sort_and_truncate_documents(
-    context: SortContext<'_, '_>,
-) -> Result<Vec<TokenScore>, ReadError> {
-    let top_count = if context.pin_rules.is_empty() {
-        context.search_params.limit.0 + context.search_params.offset.0
+/// Process sort iterator to collect results up to the desired count
+///
+/// Returns a vector of (Number, HashSet<DocumentId>) tuples where
+/// the sum of the sizes of the HashSets is at least `desiderata`
+fn process_sort_iterator(
+    iter: Box<dyn Iterator<Item = (Number, HashSet<DocumentId>)> + '_>,
+    desiderata: usize,
+) -> Vec<(Number, HashSet<DocumentId>)> {
+    // The worst scenario is that documents doesn't share the "number" value,
+    // so each iterator item contains only one document.
+    // For a good scenario, the documents share the "number" value,
+    // so the hashset contains multiple documents.
+    // We use `desiderata / 2` to avoid excessive memory usage
+    let mut index_results = Vec::with_capacity((desiderata / 2).min(1000));
+
+    let mut total_item = 0_usize;
+    for (n, h) in iter {
+        let c = h.len();
+        index_results.push((n, h));
+        total_item += c;
+        if total_item >= desiderata {
+            break;
+        }
+    }
+
+    index_results
+}
+
+/// Sort groups of documents based on token scores and optional field sorting
+pub fn sort_groups<'index>(
+    stores: &[IndexSearchStore<'index>],
+    token_scores: &HashMap<DocumentId, f32>,
+    groups: HashMap<Vec<GroupValue>, HashSet<DocumentId>>,
+    group_limit: usize,
+    sort_by: Option<&SortBy>,
+    pin_rule_consequences: &[Consequence<DocumentId>],
+) -> Result<HashMap<Vec<GroupValue>, Vec<TokenScore>>, ReadError> {
+    // Same reason as `sort_token_scores`. See there for more details.
+    let top_count = if pin_rule_consequences.is_empty() {
+        group_limit
     } else {
-        // The user could ask 0 to N documents,
-        // but a pin rules can move it after N.
-        // In this case, we have to remove it and get the next item.
-        // Anyway, it would fall on the next page, and we don't have it.
-        // This is why we double the limit, so we have the next page ready.
-        (context.search_params.limit.0 + context.search_params.offset.0) * 2
+        group_limit * 2
     };
 
-    let top = if let Some(sort_by) = &context.search_params.sort_by {
-        sort_and_truncate_documents_by_field(
-            context.indexes,
-            sort_by,
-            context.token_scores,
-            top_count,
-        )
-        .await?
-    } else {
-        // No sorting requested - fall back to simple top-N selection based on token scores
-        top_n(context.token_scores.iter(), top_count)
-    };
+    let mut sorted_groups = HashMap::with_capacity(groups.len());
 
-    let top = if !context.pin_rules.is_empty() {
-        apply_pin_rules(context.pin_rules, context.token_scores, top)
-    } else {
-        top
-    };
+    for (group_key, docs) in groups {
+        let result: Vec<DocumentId> = if let Some(sort_by) = sort_by {
+            if stores.len() == 1 {
+                let store = &stores[0];
 
-    Ok(top)
+                let index_sort_context = IndexSortContext::new(
+                    &store.path_to_field_id_map,
+                    &**store.uncommitted_fields,
+                    &**store.committed_fields,
+                    &sort_by.property,
+                    sort_by.order,
+                );
+
+                let sorted_iter = index_sort_context.execute()?;
+
+                sorted_iter
+                    .flat_map(|(_, h)| h.into_iter())
+                    .filter(|doc_id| docs.contains(doc_id) && token_scores.contains_key(doc_id))
+                    .take(top_count)
+                    .collect()
+            } else {
+                let mut v: Vec<IndexSortContext<'_>> = Vec::with_capacity(stores.len());
+                for store in stores.iter() {
+                    let index_sort_context = IndexSortContext::new(
+                        &store.path_to_field_id_map,
+                        &**store.uncommitted_fields,
+                        &**store.committed_fields,
+                        &sort_by.property,
+                        sort_by.order,
+                    );
+                    v.push(index_sort_context);
+                }
+
+                let mut merge_sorted_iterator = MergeSortedIterator::new(sort_by.order);
+                for i in &v {
+                    merge_sorted_iterator.add(i.execute()?);
+                }
+
+                let data: Vec<DocumentId> = merge_sorted_iterator
+                    .flat_map(|(_, h)| h.into_iter())
+                    .filter(|doc_id| docs.contains(doc_id) && token_scores.contains_key(doc_id))
+                    .take(top_count)
+                    .collect();
+
+                drop(v);
+
+                data
+            }
+        } else {
+            let mut capped_heap = CappedHeap::new(top_count);
+
+            for doc_id in &docs {
+                if let Some(score) = token_scores.get(doc_id) {
+                    if let Ok(k) = NotNan::new(*score) {
+                        capped_heap.insert(k, doc_id);
+                    }
+                }
+            }
+
+            capped_heap.into_top().map(|(_, doc_id)| *doc_id).collect()
+        };
+
+        let docs = apply_pin_rules_to_group(
+            docs,
+            pin_rule_consequences,
+            token_scores,
+            result
+                .into_iter()
+                .map(|doc_id| TokenScore {
+                    document_id: doc_id,
+                    score: *token_scores.get(&doc_id).unwrap_or(&0.0),
+                })
+                .collect(),
+        );
+
+        sorted_groups.insert(group_key, docs);
+    }
+
+    Ok(sorted_groups)
 }
 
 // Maximum number of promoted items to prevent excessive memory usage
@@ -307,164 +381,6 @@ fn apply_pin_rules_to_group(
         top,
         Some(|doc_id: &DocumentId| all_document_ids.contains(doc_id)),
     )
-}
-
-pub async fn sort_documents_in_groups(
-    indexes: &ReadIndexesLockGuard<'_>,
-    groups: HashMap<Vec<GroupValue>, HashSet<DocumentId>>,
-    token_scores: &HashMap<DocumentId, f32>,
-    sort_by: Option<&SortBy>,
-    max_results: usize,
-    pin_rules: &[Consequence<DocumentId>],
-) -> Result<HashMap<Vec<GroupValue>, Vec<DocumentId>>> {
-    let mut sorted_groups = HashMap::with_capacity(groups.len());
-
-    for (group_key, docs) in groups {
-        let docs = if let Some(sort_by) = sort_by {
-            top_n_documents_in_group_by_field(
-                indexes,
-                docs,
-                sort_by,
-                token_scores,
-                max_results,
-                pin_rules,
-            )
-            .await?
-        } else {
-            top_n_documents_in_group_by_score(docs, token_scores, max_results, pin_rules)
-        };
-
-        sorted_groups.insert(group_key, docs);
-    }
-
-    Ok(sorted_groups)
-}
-
-fn top_n_documents_in_group_by_score(
-    docs: HashSet<DocumentId>,
-    token_scores: &HashMap<DocumentId, f32>,
-    max_results: usize,
-    pin_rules: &[Consequence<DocumentId>],
-) -> Vec<DocumentId> {
-    // Increase limit to account for potential pin rule insertions
-    let expanded_limit = if pin_rules.is_empty() {
-        max_results
-    } else {
-        max_results * 2 // Double the limit like we do in the main sort function
-    };
-
-    let mut capped_heap = CappedHeap::new(expanded_limit);
-
-    for doc_id in &docs {
-        if let Some(score) = token_scores.get(doc_id) {
-            if let Ok(k) = NotNan::new(*score) {
-                capped_heap.insert(k, doc_id);
-            }
-        }
-    }
-
-    println!("Top N documents in group by score, found {} candidates.", max_results);
-
-    let mut result: Vec<TokenScore> = capped_heap
-        .into_top()
-        .map(|(score, doc_id)| TokenScore {
-            document_id: *doc_id,
-            score: score.into_inner(),
-        })
-        .collect();
-
-    // Apply pin rules to this group's documents
-    if !pin_rules.is_empty() {
-        result = apply_pin_rules_to_group(docs, pin_rules, token_scores, result);
-    }
-
-    // Truncate to max_results and extract document IDs
-    result
-        .into_iter()
-        .take(max_results)
-        .map(|ts| ts.document_id)
-        .collect()
-}
-
-async fn top_n_documents_in_group_by_field<'collection, 'search>(
-    indexes: &ReadIndexesLockGuard<'collection>,
-    docs: HashSet<DocumentId>,
-    sort_by: &SortBy,
-    token_scores: &'search HashMap<DocumentId, f32>,
-    max_results: usize,
-    pin_rules: &[Consequence<DocumentId>],
-) -> Result<Vec<DocumentId>>
-where
-    'collection: 'search,
-{
-    // Increase limit to account for potential pin rule insertions
-    let expanded_limit = if pin_rules.is_empty() {
-        max_results
-    } else {
-        max_results * 2 // Double the limit like we do in the main sort function
-    };
-
-    let v: Vec<_> = if indexes.len() == 1 {
-        let index = indexes.iter().next().expect("Index must exist");
-        let sort_context = index
-            .get_sort_context(&sort_by.property, sort_by.order)
-            .await;
-        let sorted_iter = sort_context.execute()?;
-
-        sorted_iter
-            .flat_map(|(_, h)| h.into_iter())
-            .filter(|doc_id| docs.contains(doc_id) && token_scores.contains_key(doc_id))
-            .take(expanded_limit)
-            .collect()
-    } else {
-        let mut v: Vec<IndexSortContext<'_>> = Vec::with_capacity(indexes.len());
-        for index in indexes.iter() {
-            let index_results = index
-                .get_sort_context(&sort_by.property, sort_by.order)
-                .await;
-            v.push(index_results);
-        }
-
-        let mut merge_sorted_iterator = MergeSortedIterator::new(sort_by.order);
-        for i in &v {
-            merge_sorted_iterator.add(i.execute()?);
-        }
-
-        let data: Vec<DocumentId> = merge_sorted_iterator
-            .flat_map(|(_, h)| h.into_iter())
-            .filter(|doc_id| docs.contains(doc_id) && token_scores.contains_key(doc_id))
-            .take(expanded_limit)
-            .collect();
-
-        drop(v);
-
-        data
-    };
-
-    // Apply pin rules if any exist
-    if !pin_rules.is_empty() {
-        // Convert document IDs to TokenScore for pin rule application
-        let mut token_scores_vec: Vec<TokenScore> = v
-            .into_iter()
-            .map(|doc_id| TokenScore {
-                document_id: doc_id,
-                score: *token_scores.get(&doc_id).unwrap_or(&0.0),
-            })
-            .collect();
-
-        // Apply pin rules
-        token_scores_vec =
-            apply_pin_rules_to_group(docs, pin_rules, token_scores, token_scores_vec);
-
-        // Extract document IDs and truncate to max_results
-        Ok(token_scores_vec
-            .into_iter()
-            .take(max_results)
-            .map(|ts| ts.document_id)
-            .collect())
-    } else {
-        Ok(v.into_iter().take(max_results).collect())
-    }
 }
 
 mod sort_iter {

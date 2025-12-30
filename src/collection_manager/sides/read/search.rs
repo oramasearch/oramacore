@@ -1,26 +1,33 @@
+use oramacore_lib::{
+    data_structures::ShouldInclude,
+    filters::{DocId, FilterResult, PlainFilterResult},
+    pin_rules::{Consequence, PinRulesReader},
+};
 use std::{
     borrow::Cow,
     collections::{HashMap, HashSet},
     hash::Hash,
     time::Instant,
 };
-use oramacore_lib::{
-    data_structures::ShouldInclude,
-    filters::{DocId, FilterResult, PlainFilterResult},
-    pin_rules::{Consequence, PinRulesReader},
-};
 
 use crate::{
     collection_manager::sides::read::{
-        GroupValue, ReadError, SortContext, analytics::{
+        analytics::{
             AnalyticsMetadataFromRequest, OramaCoreAnalytics, SearchAnalyticEventOrigin,
             SearchAnalyticEventV1,
-        }, collection::ReadIndexesLockGuard, facet::{FacetContext, FacetParams}, filter::FilterContext, group::{GroupContext, GroupParams}, sort::sort_documents_in_groups, token_score::{TokenScoreContext, TokenScoreParams}
+        },
+        collection::ReadIndexesLockGuard,
+        facet::{FacetContext, FacetParams},
+        filter::FilterContext,
+        group::{GroupContext, GroupParams},
+        sort::{sort_groups, sort_token_scores},
+        token_score::{TokenScoreContext, TokenScoreParams},
+        GroupValue, ReadError,
     },
-    metrics::{SearchCollectionLabels, search::SEARCH_CALCULATION_TIME},
+    metrics::{search::SEARCH_CALCULATION_TIME, SearchCollectionLabels},
     types::{
-        DocumentId, FacetResult, GroupedResult, SearchMode, SearchParams,
-        SearchResult, SearchResultHit, TokenScore,
+        DocumentId, FacetResult, GroupedResult, SearchMode, SearchParams, SearchResult,
+        SearchResultHit, TokenScore,
     },
 };
 
@@ -91,7 +98,9 @@ impl<'collection, 'analytics_storage> Search<'collection, 'analytics_storage> {
         // TODO: we can use an Area allocator to reuse the memory between searches
         let matching_document_count_estimation = collection.get_document_count_estimation() / 3;
 
-        let indexes = collection.get_index_read_locks(search_params.indexes.as_ref()).await?;
+        let indexes = collection
+            .get_index_read_locks(search_params.indexes.as_ref())
+            .await?;
 
         let pin_rule_consequences = extract_pin_rules(
             &*collection.get_pin_rules_reader("search").await,
@@ -101,20 +110,31 @@ impl<'collection, 'analytics_storage> Search<'collection, 'analytics_storage> {
 
         let has_pin_rules = !pin_rule_consequences.is_empty();
 
-        let (
-            top_results,
-            count,
-            facets,
-            groups,
-        ) = search_on_indexes(&indexes, &search_params, matching_document_count_estimation, pin_rule_consequences).await?;
+        let (top_results, count, facets, groups) = search_on_indexes(
+            &indexes,
+            &search_params,
+            matching_document_count_estimation,
+            pin_rule_consequences,
+        )
+        .await?;
 
         let collection_document_storage = collection.get_document_storage();
-        let group = groups.as_ref().map(|g| {
-            Box::new(g.values().flat_map(|g| g.iter().cloned())) as Box<dyn Iterator<Item = DocumentId>>
-        }).unwrap_or_else(|| Box::new(std::iter::empty()));
-        let all_docs_ids = top_results.iter().map(|ts| ts.document_id.clone())
+        let group = groups
+            .as_ref()
+            .map(|g| {
+                Box::new(
+                    g.values()
+                        .flat_map(|token_scores| token_scores.iter().map(|ts| ts.document_id)),
+                ) as Box<dyn Iterator<Item = DocumentId>>
+            })
+            .unwrap_or_else(|| Box::new(std::iter::empty()));
+        let all_docs_ids = top_results
+            .iter()
+            .map(|ts| ts.document_id.clone())
             .chain(group);
-        let docs = collection_document_storage.get_documents_by_ids(all_docs_ids.collect()).await?;
+        let docs = collection_document_storage
+            .get_documents_by_ids(all_docs_ids.collect())
+            .await?;
 
         let hits = top_results
             .into_iter()
@@ -144,14 +164,17 @@ impl<'collection, 'analytics_storage> Search<'collection, 'analytics_storage> {
 
         let groups = if let Some(grouped_results) = groups {
             let mut final_groups = Vec::new();
-            for (group_value, doc_ids) in grouped_results {
+            for (group_value, token_scores) in grouped_results {
                 let mut hits = Vec::new();
-                for doc_id in doc_ids {
-                    if let Some((_, doc)) = docs.iter().find(|(d_id, _)| d_id == &doc_id) {
+                for token_score in token_scores {
+                    if let Some((_, doc)) = docs
+                        .iter()
+                        .find(|(d_id, _)| d_id == &token_score.document_id)
+                    {
                         let doc_id = doc.id.clone().unwrap_or_default();
                         hits.push(SearchResultHit {
                             id: doc_id,
-                            score: 0.0, // Score is not relevant in grouped results
+                            score: token_score.score,
                             document: Some(doc.clone()),
                         });
                     }
@@ -159,9 +182,7 @@ impl<'collection, 'analytics_storage> Search<'collection, 'analytics_storage> {
 
                 let group = GroupedResult {
                     result: hits,
-                    values: group_value.into_iter()
-                        .map(|v| v.into())
-                        .collect(),
+                    values: group_value.into_iter().map(|v| v.into()).collect(),
                 };
 
                 final_groups.push(group);
@@ -234,19 +255,23 @@ async fn search_on_indexes(
     search_params: &SearchParams,
     matching_document_count_estimation: u64,
     pin_rule_consequences: Vec<Consequence<DocumentId>>,
-) -> Result<(
-    Vec<TokenScore>,
-    usize,
-    HashMap<String, FacetResult>,
-    Option<HashMap<Vec<GroupValue>, Vec<DocumentId>>>,
-), ReadError> {
+) -> Result<
+    (
+        Vec<TokenScore>,
+        usize,
+        HashMap<String, FacetResult>,
+        Option<HashMap<Vec<GroupValue>, Vec<TokenScore>>>,
+    ),
+    ReadError,
+> {
     let mut token_score_results: HashMap<DocumentId, f32> =
         HashMap::with_capacity((matching_document_count_estimation) as usize);
     let mut facets_results = HashMap::new();
     let mut group_results = HashMap::new();
 
-    for index in indexes.iter() {
+    let mut stores = Vec::with_capacity(indexes.len());
 
+    for index in indexes.iter() {
         let search_store = index.get_search_store().await;
 
         let filter_context = FilterContext::new(
@@ -268,15 +293,18 @@ async fn search_on_indexes(
             &search_store.read_side_context,
             &search_store.path_to_field_id_map,
         );
-        token_score_context.execute(&TokenScoreParams {
-            mode: &search_params.mode,
-            boost: &search_params.boost,
-            properties: &search_params.properties,
-            limit_hint: search_params.limit,
-            filtered_doc_ids: filtered_document_ids.as_ref(),
-        },
-        &mut token_score_results,
-        ).await?;
+        token_score_context
+            .execute(
+                &TokenScoreParams {
+                    mode: &search_params.mode,
+                    boost: &search_params.boost,
+                    properties: &search_params.properties,
+                    limit_hint: search_params.limit,
+                    filtered_doc_ids: filtered_document_ids.as_ref(),
+                },
+                &mut token_score_results,
+            )
+            .await?;
 
         if !search_params.facets.is_empty() {
             // Orama provides a UI component that shows the search results
@@ -298,22 +326,15 @@ async fn search_on_indexes(
                 if search_params.where_filter.is_empty() {
                     Cow::Borrowed(&token_score_results)
                 } else {
-                    let filtered_doc_ids = Some(
-                        FilterResult::Not(
-                            Box::new(
-                                FilterResult::Filter(
-                                    PlainFilterResult::from_iter(
-                                        search_store.document_count,
-                                        search_store.uncommitted_deleted_documents
-                                            .iter()
-                                            .cloned(),
-                                    )
-                                )
-                            )
-                        )
-                    );
+                    let filtered_doc_ids = Some(FilterResult::Not(Box::new(FilterResult::Filter(
+                        PlainFilterResult::from_iter(
+                            search_store.document_count,
+                            search_store.uncommitted_deleted_documents.iter().cloned(),
+                        ),
+                    ))));
 
-                    let mut token_score_results_for_facets = HashMap::with_capacity((matching_document_count_estimation) as usize);
+                    let mut token_score_results_for_facets =
+                        HashMap::with_capacity((matching_document_count_estimation) as usize);
 
                     let token_score_context = TokenScoreContext::new(
                         index.id(),
@@ -324,19 +345,21 @@ async fn search_on_indexes(
                         &search_store.read_side_context,
                         &search_store.path_to_field_id_map,
                     );
-                    token_score_context.execute(&TokenScoreParams {
-                        mode: &search_params.mode,
-                        boost: &search_params.boost,
-                        properties: &search_params.properties,
-                        limit_hint: search_params.limit,
-                        filtered_doc_ids: filtered_doc_ids.as_ref(),
-                    },
-                    &mut token_score_results_for_facets,
-                    ).await?;
+                    token_score_context
+                        .execute(
+                            &TokenScoreParams {
+                                mode: &search_params.mode,
+                                boost: &search_params.boost,
+                                properties: &search_params.properties,
+                                limit_hint: search_params.limit,
+                                filtered_doc_ids: filtered_doc_ids.as_ref(),
+                            },
+                            &mut token_score_results_for_facets,
+                        )
+                        .await?;
 
                     Cow::Owned(token_score_results_for_facets)
                 };
-
 
             trace!("Calculating facets for index {}", index.id());
             let facet_context = FacetContext::new(
@@ -361,11 +384,15 @@ async fn search_on_indexes(
                 &**search_store.committed_fields,
             );
 
-            group_context.execute(&GroupParams {
-                properties: &group_by.properties,
-            }, &mut group_results)?;
+            group_context.execute(
+                &GroupParams {
+                    properties: &group_by.properties,
+                },
+                &mut group_results,
+            )?;
         }
 
+        stores.push(search_store);
     }
 
     if token_score_results.is_empty() {
@@ -401,17 +428,16 @@ async fn search_on_indexes(
     }
 
     let group_by_results = if let Some(group_by_config) = &search_params.group_by {
-        let sorted_results = sort_documents_in_groups(
-            indexes,
-            group_results,
+        let sorted_group_results = sort_groups(
+            &stores,
             &token_score_results,
-            search_params.sort_by.as_ref(),
+            group_results,
             group_by_config.max_results,
+            search_params.sort_by.as_ref(),
             &pin_rule_consequences,
-        )
-        .await?;
+        )?;
 
-        Some(sorted_results)
+        Some(sorted_group_results)
     } else {
         None
     };
@@ -419,8 +445,14 @@ async fn search_on_indexes(
     // This is all matching documents across all indexes
     let count = token_score_results.len();
 
-    let top_results: Vec<TokenScore> =
-        sort_and_truncate(&indexes, &token_score_results, &search_params, &pin_rule_consequences).await?;
+    let top_results = sort_token_scores(
+        &stores,
+        &token_score_results,
+        search_params.limit,
+        search_params.offset,
+        search_params.sort_by.as_ref(),
+        &pin_rule_consequences,
+    )?;
     trace!("Top results: {:?} (of {})", top_results, count);
 
     let search_top_results = top_results
@@ -429,22 +461,7 @@ async fn search_on_indexes(
         .take(search_params.limit.0)
         .collect::<Vec<_>>();
 
-    Ok((
-        search_top_results,
-        count,
-        facets_results,
-        group_by_results,
-    ))
-}
-
-pub async fn sort_and_truncate(
-    indexes: &ReadIndexesLockGuard<'_>,
-    token_scores: &HashMap<DocumentId, f32>,
-    search_params: &SearchParams,
-    pin_rules: &[Consequence<DocumentId>],
-) -> Result<Vec<TokenScore>, ReadError> {
-    let context = SortContext::new(indexes, token_scores, search_params, pin_rules);
-    context.execute().await
+    Ok((search_top_results, count, facets_results, group_by_results))
 }
 
 pub struct SearchDocumentContext<'a, DocumentId> {

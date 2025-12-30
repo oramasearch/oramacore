@@ -242,10 +242,7 @@ async fn test_facets_unknown_field() {
 
     let err = output.expect_err("Should return an error");
 
-    assert!(matches!(
-        err,
-        ReadError::FacetFieldNotFound(_)
-    ));
+    assert!(matches!(err, ReadError::FacetFieldNotFound(_)));
 
     assert!(format!("{err:?}").contains("unknown"));
 

@@ -1,12 +1,10 @@
 use std::collections::HashSet;
 
-use tracing::trace;
 use anyhow::{bail, Context, Result};
 use oramacore_lib::filters::{FilterResult, PlainFilterResult};
+use tracing::trace;
 
-use crate::{
-    types::{DateFilter, DocumentId, Filter, GeoSearchFilter, NumberFilter, WhereFilter},
-};
+use crate::types::{DateFilter, DocumentId, Filter, GeoSearchFilter, NumberFilter, WhereFilter};
 
 use super::{path_to_index_id_map::PathToIndexId, CommittedFields, FieldType, UncommittedFields};
 
@@ -510,7 +508,6 @@ impl<'index> FilterContext<'index> {
         }
 
         trace!("Calculating filtered doc ids");
-
 
         let mut output = calculate_filter(
             self.document_count,

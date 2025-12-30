@@ -741,15 +741,11 @@ impl CollectionReader {
                         .filter(|index| !all_indexes.contains(index))
                         .collect::<Vec<_>>();
                     if !unknown_indexes.is_empty() {
-                        let unknown_indexes = unknown_indexes
-                            .iter()
-                            .copied()
-                            .copied()
-                            .collect();
+                        let unknown_indexes = unknown_indexes.iter().copied().copied().collect();
                         return Err(ReadError::UnknownIndex(unknown_indexes, all_indexes));
                     }
 
-                    let index_ids  = all_indexes
+                    let index_ids = all_indexes
                         .into_iter()
                         .filter(|index| indexes_from_user.contains(index))
                         .collect();

@@ -10,7 +10,7 @@ use uncommitted_field::*;
 
 use crate::{
     collection_manager::sides::{
-        Offset, read::{
+        read::{
             context::ReadSideContext,
             index::{
                 committed_field::{
@@ -18,19 +18,22 @@ use crate::{
                     CommittedVectorField, DateFieldInfo, GeoPointFieldInfo, StringFieldInfo,
                 },
                 merge::{
-                    CommittedField, CommittedFieldMetadata, Field, UncommittedField, merge_field
+                    merge_field, CommittedField, CommittedFieldMetadata, Field, UncommittedField,
                 },
             },
-        }, write::index::EnumStrategy
+        },
+        write::index::EnumStrategy,
+        Offset,
     },
     lock::{OramaAsyncLock, OramaAsyncLockReadGuard},
     metrics::{
-        FieldIndexCollectionCommitLabels, IndexCollectionCommitLabels, commit::{FIELD_INDEX_COMMIT_CALCULATION_TIME, INDEX_COMMIT_CALCULATION_TIME}
+        commit::{FIELD_INDEX_COMMIT_CALCULATION_TIME, INDEX_COMMIT_CALCULATION_TIME},
+        FieldIndexCollectionCommitLabels, IndexCollectionCommitLabels,
     },
     python::embeddings::Model,
     types::{
-        CollectionId, DocumentId, FulltextMode, IndexId, Limit,
-        Properties, SearchMode, SortOrder, TypeParsingStrategies,
+        CollectionId, DocumentId, FulltextMode, IndexId, Limit, Properties, SearchMode,
+        TypeParsingStrategies,
     },
 };
 use oramacore_lib::fs::{create_if_not_exists, BufferedFile};
@@ -1019,23 +1022,6 @@ impl Index {
             .is_some()
     }
 
-    pub async fn get_sort_context<'index>(
-        &'index self,
-        field_name: &str,
-        order: SortOrder,
-    ) -> IndexSortContext<'index> {
-        let uncommitted_fields = self.uncommitted_fields.read("get_sort_context").await;
-        let committed_fields = self.committed_fields.read("get_sort_context").await;
-
-        IndexSortContext::new(
-            &self.path_to_index_id_map,
-            uncommitted_fields,
-            committed_fields,
-            field_name,
-            order,
-        )
-    }
-
     // Since we only have one embedding model for all indexes in a collection,
     // we can get the first index model and return it early.
     pub async fn get_model(&self) -> Option<Model> {
@@ -1111,7 +1097,7 @@ pub struct IndexStats {
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
-pub(crate) enum FieldType {
+pub enum FieldType {
     Bool,
     Number,
     StringFilter,
