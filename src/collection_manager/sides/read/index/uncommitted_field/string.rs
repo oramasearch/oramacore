@@ -170,6 +170,7 @@ impl UncommittedStringField {
                         .filtered_doc_ids
                         .is_some_and(|filtered| !filtered.contains(doc_id))
                     {
+                        println!("Skipping doc_id {:?} as it's filtered out", doc_id);
                         continue;
                     }
 

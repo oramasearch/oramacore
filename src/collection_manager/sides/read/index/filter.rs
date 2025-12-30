@@ -1,5 +1,6 @@
 use std::collections::HashSet;
 
+use tracing::trace;
 use anyhow::{bail, Context, Result};
 use oramacore_lib::filters::{FilterResult, PlainFilterResult};
 
@@ -507,6 +508,9 @@ impl<'index> FilterContext<'index> {
                 ),
             )))));
         }
+
+        trace!("Calculating filtered doc ids");
+
 
         let mut output = calculate_filter(
             self.document_count,

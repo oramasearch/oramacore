@@ -363,6 +363,8 @@ fn top_n_documents_in_group_by_score(
         }
     }
 
+    println!("Top N documents in group by score, found {} candidates.", max_results);
+
     let mut result: Vec<TokenScore> = capped_heap
         .into_top()
         .map(|(score, doc_id)| TokenScore {

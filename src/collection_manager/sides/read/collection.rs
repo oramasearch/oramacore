@@ -1576,8 +1576,6 @@ enum Dump {
     V2(DumpV2),
 }
 
-const MAX_INDEXES_PER_SEARCH: usize = 16;
-
 pub struct ReadIndexesLockGuard<'collection> {
     lock: OramaAsyncLockReadGuard<'collection, Vec<Index>>,
     index_ids: Vec<IndexId>,

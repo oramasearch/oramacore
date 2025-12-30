@@ -6,7 +6,7 @@ use std::{
 };
 use oramacore_lib::{
     data_structures::ShouldInclude,
-    filters::{DocId, FilterResult},
+    filters::{DocId, FilterResult, PlainFilterResult},
     pin_rules::{Consequence, PinRulesReader},
 };
 
@@ -20,7 +20,7 @@ use crate::{
     metrics::{SearchCollectionLabels, search::SEARCH_CALCULATION_TIME},
     types::{
         DocumentId, FacetResult, GroupedResult, SearchMode, SearchParams,
-        SearchResult, SearchResultHit, TokenScore, WhereFilter,
+        SearchResult, SearchResultHit, TokenScore,
     },
 };
 
@@ -249,20 +249,14 @@ async fn search_on_indexes(
 
         let search_store = index.get_search_store().await;
 
-        // Filtering
-        let filtered_document_ids = if !search_params.where_filter.is_empty() {
-            trace!("Calculating filtered doc ids");
-            let filter_context = FilterContext::new(
-                search_store.document_count,
-                search_store.path_to_field_id_map,
-                &**search_store.uncommitted_fields,
-                &**search_store.committed_fields,
-                search_store.uncommitted_deleted_documents,
-            );
-            filter_context.execute_filter(&search_params.where_filter)?
-        } else {
-            None
-        };
+        let filter_context = FilterContext::new(
+            search_store.document_count,
+            search_store.path_to_field_id_map,
+            &**search_store.uncommitted_fields,
+            &**search_store.committed_fields,
+            search_store.uncommitted_deleted_documents,
+        );
+        let filtered_document_ids = filter_context.execute_filter(&search_params.where_filter)?;
 
         trace!("Calculating token scores for index {}", index.id());
         let token_score_context = TokenScoreContext::new(
@@ -304,14 +298,20 @@ async fn search_on_indexes(
                 if search_params.where_filter.is_empty() {
                     Cow::Borrowed(&token_score_results)
                 } else {
-                    let mut search_params_without_filters = search_params.clone();
-                    search_params_without_filters.where_filter = WhereFilter {
-                        filter_on_fields: vec![],
-                        and: None,
-                        not: None,
-                        or: None,
-                    };
-                    search_params_without_filters.group_by = None;
+                    let filtered_doc_ids = Some(
+                        FilterResult::Not(
+                            Box::new(
+                                FilterResult::Filter(
+                                    PlainFilterResult::from_iter(
+                                        search_store.document_count,
+                                        search_store.uncommitted_deleted_documents
+                                            .iter()
+                                            .cloned(),
+                                    )
+                                )
+                            )
+                        )
+                    );
 
                     let mut token_score_results_for_facets = HashMap::with_capacity((matching_document_count_estimation) as usize);
 
@@ -329,7 +329,7 @@ async fn search_on_indexes(
                         boost: &search_params.boost,
                         properties: &search_params.properties,
                         limit_hint: search_params.limit,
-                        filtered_doc_ids: filtered_document_ids.as_ref(),
+                        filtered_doc_ids: filtered_doc_ids.as_ref(),
                     },
                     &mut token_score_results_for_facets,
                     ).await?;
@@ -351,7 +351,7 @@ async fn search_on_indexes(
                     token_scores: &token_scores,
                 },
                 &mut facets_results,
-            );
+            )?;
         }
 
         if let Some(group_by) = &search_params.group_by {

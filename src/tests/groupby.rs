@@ -653,7 +653,10 @@ async fn test_group_max_results_zero() {
 
     assert!(results.groups.is_some());
     let groups = results.groups.unwrap();
-    assert_eq!(groups.len(), 0);
+    assert_eq!(groups.len(), 1);
+    let group = &groups[0];
+    assert_eq!(group.values, vec!["food".to_string()]);
+    assert_eq!(group.result.len(), 0);
 
     drop(test_context);
 }
@@ -839,9 +842,15 @@ async fn test_group_by_empty_search_results() {
         .await
         .unwrap();
 
+    // No results should be found
     assert_eq!(results.count, 0);
-    println!("Search results: {:#?}", results.groups);
-    assert!(results.groups.is_none() || results.groups.unwrap().is_empty());
+
+    // But the group should still be returned
+    let groups = results.groups.expect("group should be returned");
+    assert_eq!(groups.len(), 1);
+    let group = &groups[0];
+    assert_eq!(group.values, vec!["food".to_string()]);
+    assert_eq!(group.result.len(), 0);
 
     drop(test_context);
 }
