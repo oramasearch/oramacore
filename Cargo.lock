@@ -4437,6 +4437,7 @@ dependencies = [
  "derive_more",
  "duration-str",
  "duration-string",
+ "eventsource-stream",
  "fake",
  "fastembed",
  "fs_extra",

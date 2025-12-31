@@ -11,6 +11,7 @@ mod answer;
 mod generate;
 mod hooks;
 mod mcp;
+pub mod openai_chat;
 mod pin_rules;
 mod search;
 mod system_prompts;
@@ -39,6 +40,7 @@ pub fn apis(write_side: Option<Arc<WriteSide>>, read_side: Option<Arc<ReadSide>>
             .merge(search::apis(read_side.clone()))
             .merge(actions::apis(read_side.clone()))
             .merge(answer::apis(read_side.clone()))
+            .merge(openai_chat::apis(read_side.clone()))
             .merge(generate::apis(read_side.clone()))
             .merge(tools::read_apis(read_side.clone()))
             .merge(system_prompts::read_apis(read_side.clone()))

@@ -43,7 +43,10 @@ impl FromStr for RemoteLLMProvider {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.to_lowercase().as_str() {
+            "orama" | "oramacore" => Ok(RemoteLLMProvider::OramaCore),
             "openai" => Ok(RemoteLLMProvider::OpenAI),
+            "fireworks" => Ok(RemoteLLMProvider::Fireworks),
+            "together" => Ok(RemoteLLMProvider::Together),
             "google" => Ok(RemoteLLMProvider::GoogleVertex),
             "google_vertex" => Ok(RemoteLLMProvider::GoogleVertex),
             "googlevertex" => Ok(RemoteLLMProvider::GoogleVertex),
