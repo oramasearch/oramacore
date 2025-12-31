@@ -10,7 +10,7 @@ permissions:
 jobs:
   build-and-patch-release:
     name: Build and Upload Release Assets
-    runs-on: [self-hosted]
+    runs-on: [self-hosted, X64]
 
     steps:
       - name: Checkout code
@@ -23,9 +23,9 @@ jobs:
 
       - name: Install Python dependencies
         run: |
-          python3 -m pip install --upgrade pip
           python3 -m venv .venv
           source .venv/bin/activate
+          pip install --upgrade pip
           pip install -r requirements.txt
 
       - name: Setup Rust
@@ -89,7 +89,7 @@ jobs:
   build-docker-OramaCore-x86_64:
     needs: [build-and-patch-release]
     name: Build and Upload Docker Images
-    runs-on: [self-hosted]
+    runs-on: [self-hosted, X64]
 
     steps:
       - name: Checkout code
