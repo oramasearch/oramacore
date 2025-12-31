@@ -111,6 +111,7 @@ reqwest = { version = "0.12.12", features = ["blocking", "json"] }
 tempfile = "3"
 fake = "4.0.0"
 glob = "0.3.2"
+eventsource-stream = "0.2"
 
 [[bin]]
 name = "oramacore"

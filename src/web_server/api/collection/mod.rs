@@ -11,7 +11,7 @@ mod answer;
 mod generate;
 mod hooks;
 mod mcp;
-mod openai_chat;
+pub mod openai_chat;
 mod pin_rules;
 mod search;
 mod system_prompts;

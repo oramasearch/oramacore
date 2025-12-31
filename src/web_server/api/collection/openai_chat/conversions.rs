@@ -21,7 +21,7 @@ pub struct OpenAIChatRequest {
 }
 
 #[derive(Debug)]
-pub(crate) enum OpenAIStreamEvent {
+pub enum OpenAIStreamEvent {
     Chunk(String),
     Done,
 }

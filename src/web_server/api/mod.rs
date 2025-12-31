@@ -15,7 +15,7 @@ use crate::{
     build_info::get_build_version,
     collection_manager::sides::{read::ReadSide, write::WriteSide},
 };
-mod collection;
+pub mod collection;
 mod util;
 
 pub fn api_config(

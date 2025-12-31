@@ -12,7 +12,7 @@ use tracing::{error, info};
 
 use crate::collection_manager::sides::{read::ReadSide, write::WriteSide};
 
-mod api;
+pub mod api;
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct HttpConfig {

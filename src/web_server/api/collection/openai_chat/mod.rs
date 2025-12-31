@@ -1,3 +1,4 @@
+// Make conversions public for testing
 pub mod conversions;
 
 use crate::ai::answer::{Answer, AnswerError};
