@@ -216,7 +216,7 @@ async fn test_pin_rules_multiple_indexes() {
     );
     assert!(
         result.hits[2].id.ends_with(":11"),
-        "Expected document ID ending with ':7', got: {}",
+        "Expected document ID ending with ':11', got: {}",
         result.hits[2].id
     );
     assert!(
