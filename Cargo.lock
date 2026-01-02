@@ -4415,11 +4415,7 @@ dependencies = [
 
 [[package]]
 name = "oramacore"
-<<<<<<< HEAD
 version = "1.2.13"
-=======
-version = "1.2.12"
->>>>>>> eebf1762352845b3a27665dfa39911462bb89439
 dependencies = [
  "anyhow",
  "arrayvec",
