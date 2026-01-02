@@ -6,7 +6,9 @@ use ordered_float::NotNan;
 use tracing::warn;
 
 use super::{GroupValue, IndexSortContext};
-use crate::collection_manager::sides::read::sort::sort_iter::MergeSortedIterator;
+use crate::collection_manager::sides::read::sort::sort_iter::{
+    CombinedSortFilter, MergeSortedIterator,
+};
 use crate::collection_manager::sides::read::{IndexSearchStore, ReadError};
 use crate::types::{DocumentId, Number, SortBy, TokenScore};
 use crate::types::{Limit, SearchOffset};
@@ -77,7 +79,8 @@ fn sort_token_scores_by_field<'index>(
             v.push(index_sort_context);
         }
 
-        let mut merge_sorted_iterator = MergeSortedIterator::new(sort_by.order);
+        // Use token_scores as filter to skip batches where no documents have scores
+        let mut merge_sorted_iterator = MergeSortedIterator::new(sort_by.order, token_scores);
         for i in &v {
             merge_sorted_iterator.add(i.execute()?);
         }
@@ -171,11 +174,17 @@ pub fn sort_groups<'index>(
                     v.push(index_sort_context);
                 }
 
-                let mut merge_sorted_iterator = MergeSortedIterator::new(sort_by.order);
+                // Use CombinedSortFilter to filter by both group membership and token_scores
+                let filter = CombinedSortFilter {
+                    set: &docs,
+                    map: token_scores,
+                };
+                let mut merge_sorted_iterator = MergeSortedIterator::new(sort_by.order, filter);
                 for i in &v {
                     merge_sorted_iterator.add(i.execute()?);
                 }
 
+                // With the filter, we still need per-doc filtering since batch may contain mixed docs
                 let data: Vec<DocumentId> = merge_sorted_iterator
                     .flat_map(|(_, h)| h.iter().copied())
                     .filter(|doc_id| docs.contains(doc_id) && token_scores.contains_key(doc_id))
@@ -379,12 +388,75 @@ fn apply_pin_rules_to_group(
 
 mod sort_iter {
     use crate::types::{DocumentId, Number, SortOrder};
-    use std::collections::HashSet;
+    use std::collections::{HashMap, HashSet};
     use std::fmt::Debug;
+    use std::hash::Hash;
     use std::iter::Peekable;
 
     pub trait OrderedKey: Ord + Eq + Clone + Debug {}
     impl OrderedKey for Number {}
+
+    // =============================================================================
+    // SortFilter trait - allows early filtering during sort iteration
+    // =============================================================================
+
+    /// Trait for filtering documents during sort iteration.
+    ///
+    /// This trait enables early filtering of documents as they are yielded by
+    /// the sort iterator, avoiding iteration over documents that won't be in
+    /// the final result.
+    ///
+    /// Implementations are provided for:
+    /// - `()` - No filtering (includes all documents)
+    /// - `&HashSet<DocId>` - Include only documents in the set (for group filtering)
+    /// - `&HashMap<DocId, V>` - Include only documents with entries (for token_scores filtering)
+    pub trait SortFilter<DocId> {
+        fn should_include(&self, doc_id: &DocId) -> bool;
+    }
+
+    /// No-op filter that includes all documents.
+    impl<DocId> SortFilter<DocId> for () {
+        #[inline]
+        fn should_include(&self, _: &DocId) -> bool {
+            true
+        }
+    }
+
+    /// Filter that includes only documents present in the HashSet.
+    /// Used for group filtering where we have a set of document IDs in a group.
+    impl<DocId: Eq + Hash> SortFilter<DocId> for &HashSet<DocId> {
+        #[inline]
+        fn should_include(&self, doc_id: &DocId) -> bool {
+            self.contains(doc_id)
+        }
+    }
+
+    /// Filter that includes only documents with entries in the HashMap.
+    /// Used for token_scores filtering where we want documents that have scores.
+    impl<DocId: Eq + Hash, V> SortFilter<DocId> for &HashMap<DocId, V> {
+        #[inline]
+        fn should_include(&self, doc_id: &DocId) -> bool {
+            self.contains_key(doc_id)
+        }
+    }
+
+    /// Combined filter that requires documents to pass both a HashSet check AND a HashMap check.
+    /// Used for group sorting where we need to filter by both group membership and token_scores.
+    pub struct CombinedFilter<'a, DocId, V> {
+        pub set: &'a HashSet<DocId>,
+        pub map: &'a HashMap<DocId, V>,
+    }
+
+    impl<DocId: Eq + Hash, V> SortFilter<DocId> for CombinedFilter<'_, DocId, V> {
+        #[inline]
+        fn should_include(&self, doc_id: &DocId) -> bool {
+            self.set.contains(doc_id) && self.map.contains_key(doc_id)
+        }
+    }
+
+    // =============================================================================
+    // MergeSortedIterator - N-way merge with filtering
+    // =============================================================================
 
     /// A boxed iterator yielding (sort_key, document_ids) pairs.
     type SortedIter<'s, T> = Box<dyn Iterator<Item = (T, &'s HashSet<DocumentId>)> + 's>;
@@ -393,50 +465,96 @@ mod sort_iter {
     type PeekableSortedIter<'s, T> = Peekable<SortedIter<'s, T>>;
 
     /// Iterator that merges multiple sorted iterators into a single sorted stream.
-    pub struct MergeSortedIterator<'iter, T: OrderedKey> {
-        iters: Vec<PeekableSortedIter<'iter, T>>,
+    ///
+    /// This iterator takes N already-sorted iterators and produces a merged
+    /// output that maintains the sort order. It uses a peek-compare-advance
+    /// strategy to efficiently merge without buffering all data.
+    ///
+    /// The iterator also supports filtering documents via the `SortFilter` trait,
+    /// allowing early exclusion of batches where no documents match the filter.
+    ///
+    /// # Filter Behavior (Batch-Level Filtering)
+    ///
+    /// **Important**: The filter operates at the batch level, not the document level.
+    /// - If NO documents in a batch match the filter → the batch is **skipped entirely**
+    /// - If ANY document in a batch matches the filter → the batch is **returned as-is**
+    ///   (including documents that don't match the filter)
+    ///
+    /// This means the caller is still responsible for filtering individual documents
+    /// within returned batches. The filter's purpose is to skip entirely non-matching
+    /// batches early, avoiding unnecessary iteration over them.
+    pub struct MergeSortedIterator<'iter, Key: OrderedKey, Filter: SortFilter<DocumentId>> {
+        iters: Vec<PeekableSortedIter<'iter, Key>>,
         order: SortOrder,
+        filter: Filter,
     }
 
-    impl<'iter, T: OrderedKey> MergeSortedIterator<'iter, T> {
-        pub fn new(order: SortOrder) -> Self {
+    impl<'iter, Key: OrderedKey, Filter: SortFilter<DocumentId>>
+        MergeSortedIterator<'iter, Key, Filter>
+    {
+        /// Creates a new MergeSortedIterator with the specified filter.
+        ///
+        /// Documents in batches where no document passes the filter will be skipped
+        /// at the iterator level.
+        pub fn new(order: SortOrder, filter: Filter) -> Self {
             Self {
                 iters: vec![],
                 order,
+                filter,
             }
         }
 
-        pub fn add(&mut self, iter: SortedIter<'iter, T>) {
+        /// Adds a sorted iterator to be merged.
+        ///
+        /// The iterator must already be sorted according to the order specified
+        /// during construction.
+        pub fn add(&mut self, iter: SortedIter<'iter, Key>) {
             self.iters.push(iter.peekable());
         }
     }
 
-    impl<'iter, T: OrderedKey> Iterator for MergeSortedIterator<'iter, T> {
-        type Item = (T, &'iter HashSet<DocumentId>);
+    impl<'iter, Key: OrderedKey, Filter: SortFilter<DocumentId>> Iterator
+        for MergeSortedIterator<'iter, Key, Filter>
+    {
+        type Item = (Key, &'iter HashSet<DocumentId>);
 
         fn next(&mut self) -> Option<Self::Item> {
-            // Find the index of the iterator with the best (min/max) key.
-            // We store the best key clone to avoid double mutable borrow of self.iters.
-            let mut best: Option<(usize, T)> = None;
+            loop {
+                // Find the index of the iterator with the best (min/max) key.
+                // We store the best key clone to avoid double mutable borrow of self.iters.
+                let mut best: Option<(usize, Key)> = None;
 
-            for (index, iter) in self.iters.iter_mut().enumerate() {
-                if let Some((key, _)) = iter.peek() {
-                    let is_better = match &best {
-                        None => true,
-                        Some((_, best_key)) => match self.order {
-                            SortOrder::Ascending => key < best_key,
-                            SortOrder::Descending => key > best_key,
-                        },
-                    };
-                    if is_better {
-                        best = Some((index, key.clone()));
+                for (index, iter) in self.iters.iter_mut().enumerate() {
+                    if let Some((key, _)) = iter.peek() {
+                        let is_better = match &best {
+                            None => true,
+                            Some((_, best_key)) => match self.order {
+                                SortOrder::Ascending => key < best_key,
+                                SortOrder::Descending => key > best_key,
+                            },
+                        };
+                        if is_better {
+                            best = Some((index, key.clone()));
+                        }
                     }
                 }
-            }
 
-            best.and_then(|(index, _)| self.iters[index].next())
+                let (index, _) = best?;
+                let (key, docs) = self.iters[index].next()?;
+
+                // Skip batch if no documents match filter
+                let has_matching_doc = docs.iter().any(|doc| self.filter.should_include(doc));
+                if !has_matching_doc {
+                    continue; // Skip this batch entirely
+                }
+
+                return Some((key, docs));
+            }
         }
     }
+
+    // Re-export for use in tests
+    pub use CombinedFilter as CombinedSortFilter;
 
     #[cfg(test)]
     mod sort_iter_test {
@@ -452,7 +570,7 @@ mod sort_iter {
 
         #[test]
         fn test_empty() {
-            let mut merged = MergeSortedIterator::<u8>::new(SortOrder::Ascending);
+            let mut merged = MergeSortedIterator::<u8, ()>::new(SortOrder::Ascending, ());
             assert!(merged.next().is_none());
         }
 
@@ -468,7 +586,7 @@ mod sort_iter {
                     HashSet::from([DocumentId(6), DocumentId(8), DocumentId(9)]),
                 ),
             ];
-            let mut merged = MergeSortedIterator::<u8>::new(SortOrder::Ascending);
+            let mut merged = MergeSortedIterator::<u8, ()>::new(SortOrder::Ascending, ());
             merged.add(Box::new(data.iter().map(|(k, v)| (*k, v))));
             let collected: Vec<_> = merged.collect();
             assert_eq!(collected.len(), 2);
@@ -508,7 +626,7 @@ mod sort_iter {
                 (8, HashSet::from([DocumentId(80)])),
             ];
 
-            let mut merged = MergeSortedIterator::<u8>::new(SortOrder::Ascending);
+            let mut merged = MergeSortedIterator::<u8, ()>::new(SortOrder::Ascending, ());
             merged.add(Box::new(data1.iter().map(|(k, v)| (*k, v))));
             merged.add(Box::new(data2.iter().map(|(k, v)| (*k, v))));
             merged.add(Box::new(data3.iter().map(|(k, v)| (*k, v))));
@@ -548,7 +666,7 @@ mod sort_iter {
                 (3, HashSet::from([DocumentId(30)])),
             ];
 
-            let mut merged = MergeSortedIterator::<u8>::new(SortOrder::Descending);
+            let mut merged = MergeSortedIterator::<u8, ()>::new(SortOrder::Descending, ());
             merged.add(Box::new(data1.iter().map(|(k, v)| (*k, v))));
             merged.add(Box::new(data2.iter().map(|(k, v)| (*k, v))));
             merged.add(Box::new(data3.iter().map(|(k, v)| (*k, v))));
@@ -580,7 +698,7 @@ mod sort_iter {
                 (4, HashSet::from([DocumentId(40)])),
             ];
 
-            let mut merged = MergeSortedIterator::<u8>::new(SortOrder::Ascending);
+            let mut merged = MergeSortedIterator::<u8, ()>::new(SortOrder::Ascending, ());
             merged.add(Box::new(data1.iter().map(|(k, v)| (*k, v))));
             merged.add(Box::new(data2.iter().map(|(k, v)| (*k, v))));
 
@@ -609,7 +727,7 @@ mod sort_iter {
                 (2, HashSet::from([DocumentId(21)])),
             ];
 
-            let mut merged = MergeSortedIterator::<u8>::new(SortOrder::Ascending);
+            let mut merged = MergeSortedIterator::<u8, ()>::new(SortOrder::Ascending, ());
             merged.add(Box::new(data.iter().map(|(k, v)| (*k, v))));
 
             let collected: Vec<_> = merged.collect();
@@ -625,7 +743,7 @@ mod sort_iter {
         #[test]
         fn test_single_empty_iterator() {
             let data: Vec<(u8, HashSet<DocumentId>)> = vec![];
-            let mut merged = MergeSortedIterator::<u8>::new(SortOrder::Ascending);
+            let mut merged = MergeSortedIterator::<u8, ()>::new(SortOrder::Ascending, ());
             merged.add(Box::new(data.iter().map(|(k, v)| (*k, v))));
 
             let collected: Vec<_> = merged.collect();
@@ -645,7 +763,7 @@ mod sort_iter {
                 (4, HashSet::from([DocumentId(40)])),
             ];
 
-            let mut merged = MergeSortedIterator::<u8>::new(SortOrder::Ascending);
+            let mut merged = MergeSortedIterator::<u8, ()>::new(SortOrder::Ascending, ());
             merged.add(Box::new(empty1.iter().map(|(k, v)| (*k, v))));
             merged.add(Box::new(data1.iter().map(|(k, v)| (*k, v))));
             merged.add(Box::new(empty2.iter().map(|(k, v)| (*k, v))));
@@ -668,7 +786,7 @@ mod sort_iter {
             let data2 = [(2_u8, HashSet::from([DocumentId(20)]))];
             let data3 = [(3_u8, HashSet::from([DocumentId(30)]))];
 
-            let mut merged = MergeSortedIterator::<u8>::new(SortOrder::Ascending);
+            let mut merged = MergeSortedIterator::<u8, ()>::new(SortOrder::Ascending, ());
             merged.add(Box::new(data1.iter().map(|(k, v)| (*k, v))));
             merged.add(Box::new(data2.iter().map(|(k, v)| (*k, v))));
             merged.add(Box::new(data3.iter().map(|(k, v)| (*k, v))));
@@ -705,7 +823,7 @@ mod sort_iter {
                 (11, HashSet::from([DocumentId(110)])),
             ];
 
-            let mut merged = MergeSortedIterator::<u8>::new(SortOrder::Ascending);
+            let mut merged = MergeSortedIterator::<u8, ()>::new(SortOrder::Ascending, ());
             merged.add(Box::new(data1.iter().map(|(k, v)| (*k, v))));
             merged.add(Box::new(data2.iter().map(|(k, v)| (*k, v))));
             merged.add(Box::new(data3.iter().map(|(k, v)| (*k, v))));
@@ -736,7 +854,7 @@ mod sort_iter {
                 (90, HashSet::from([DocumentId(900)])),
             ];
 
-            let mut merged = MergeSortedIterator::<u8>::new(SortOrder::Descending);
+            let mut merged = MergeSortedIterator::<u8, ()>::new(SortOrder::Descending, ());
             merged.add(Box::new(data1.iter().map(|(k, v)| (*k, v))));
             merged.add(Box::new(data2.iter().map(|(k, v)| (*k, v))));
 
@@ -770,7 +888,7 @@ mod sort_iter {
                 (4, HashSet::from([DocumentId(40)])),
             ];
 
-            let mut merged = MergeSortedIterator::<u8>::new(SortOrder::Ascending);
+            let mut merged = MergeSortedIterator::<u8, ()>::new(SortOrder::Ascending, ());
             merged.add(Box::new(data1.iter().map(|(k, v)| (*k, v))));
             merged.add(Box::new(data2.iter().map(|(k, v)| (*k, v))));
 
@@ -806,7 +924,7 @@ mod sort_iter {
                 (4, HashSet::from([DocumentId(104)])),
             ];
 
-            let mut merged = MergeSortedIterator::<u8>::new(SortOrder::Ascending);
+            let mut merged = MergeSortedIterator::<u8, ()>::new(SortOrder::Ascending, ());
             merged.add(Box::new(data1.iter().map(|(k, v)| (*k, v))));
             merged.add(Box::new(data2.iter().map(|(k, v)| (*k, v))));
 
@@ -848,7 +966,7 @@ mod sort_iter {
                 (254, HashSet::from([DocumentId(254)])),
             ];
 
-            let mut merged = MergeSortedIterator::<u8>::new(SortOrder::Ascending);
+            let mut merged = MergeSortedIterator::<u8, ()>::new(SortOrder::Ascending, ());
             merged.add(Box::new(data1.iter().map(|(k, v)| (*k, v))));
             merged.add(Box::new(data2.iter().map(|(k, v)| (*k, v))));
 
@@ -877,7 +995,7 @@ mod sort_iter {
                 (-1000, HashSet::from([DocumentId(2000)])),
             ];
 
-            let mut merged = MergeSortedIterator::<i16>::new(SortOrder::Descending);
+            let mut merged = MergeSortedIterator::<i16, ()>::new(SortOrder::Descending, ());
             merged.add(Box::new(data1.iter().map(|(k, v)| (*k, v))));
             merged.add(Box::new(data2.iter().map(|(k, v)| (*k, v))));
 
@@ -888,6 +1006,156 @@ mod sort_iter {
             assert_eq!(keys, vec![32767, 1000, 0, -1000, -32768]);
             assert!(set_eq(collected[0].1, HashSet::from([DocumentId(32767)])));
             assert!(set_eq(collected[4].1, HashSet::from([DocumentId(32768)])));
+        }
+
+        // =============================================================================
+        // Filter tests
+        // =============================================================================
+
+        #[test]
+        fn test_filter_skips_empty_batches() {
+            // Data with 3 batches
+            let data = [
+                (1_u8, HashSet::from([DocumentId(10), DocumentId(11)])),
+                (2, HashSet::from([DocumentId(20)])),
+                (3, HashSet::from([DocumentId(30), DocumentId(31)])),
+            ];
+
+            // Filter that only includes DocumentId(20) and DocumentId(31)
+            let filter_set: HashSet<DocumentId> = HashSet::from([DocumentId(20), DocumentId(31)]);
+            let mut merged = MergeSortedIterator::<u8, _>::new(SortOrder::Ascending, &filter_set);
+            merged.add(Box::new(data.iter().map(|(k, v)| (*k, v))));
+
+            let collected: Vec<_> = merged.collect();
+
+            // Should skip batch 1 (no matches), return batch 2 and 3
+            assert_eq!(collected.len(), 2);
+            assert_eq!(collected[0].0, 2); // Batch with DocumentId(20)
+                                           // Verify batch 2 document set
+            assert!(set_eq(collected[0].1, HashSet::from([DocumentId(20)])));
+
+            assert_eq!(collected[1].0, 3); // Batch with DocumentId(31) (and 30)
+                                           // Verify batch 3 returns FULL set (batch-level filtering returns entire batch)
+            assert!(set_eq(
+                collected[1].1,
+                HashSet::from([DocumentId(30), DocumentId(31)])
+            ));
+        }
+
+        #[test]
+        fn test_filter_with_hashmap() {
+            let data = [
+                (1_u8, HashSet::from([DocumentId(10), DocumentId(11)])),
+                (2, HashSet::from([DocumentId(20)])),
+                (3, HashSet::from([DocumentId(30)])),
+            ];
+
+            // Filter using HashMap (simulating token_scores)
+            let mut scores: HashMap<DocumentId, f32> = HashMap::new();
+            scores.insert(DocumentId(11), 1.0);
+            scores.insert(DocumentId(30), 2.0);
+
+            let mut merged = MergeSortedIterator::<u8, _>::new(SortOrder::Ascending, &scores);
+            merged.add(Box::new(data.iter().map(|(k, v)| (*k, v))));
+
+            let collected: Vec<_> = merged.collect();
+
+            // Should include batch 1 (has DocumentId(11)) and batch 3 (has DocumentId(30))
+            // Should skip batch 2 (DocumentId(20) not in scores)
+            assert_eq!(collected.len(), 2);
+            assert_eq!(collected[0].0, 1);
+            // Verify batch 1 returns FULL set (both docs, even though only DocumentId(11) is in filter)
+            assert!(set_eq(
+                collected[0].1,
+                HashSet::from([DocumentId(10), DocumentId(11)])
+            ));
+
+            assert_eq!(collected[1].0, 3);
+            assert!(set_eq(collected[1].1, HashSet::from([DocumentId(30)])));
+        }
+
+        #[test]
+        fn test_combined_filter() {
+            let data = [
+                (1_u8, HashSet::from([DocumentId(10), DocumentId(11)])),
+                (2, HashSet::from([DocumentId(20), DocumentId(21)])),
+                (3, HashSet::from([DocumentId(30)])),
+            ];
+
+            // Group filter - only allow DocumentId(11), DocumentId(20), DocumentId(30)
+            let group_set: HashSet<DocumentId> =
+                HashSet::from([DocumentId(11), DocumentId(20), DocumentId(30)]);
+
+            // Score filter - only DocumentId(11) and DocumentId(21) have scores
+            let mut scores: HashMap<DocumentId, f32> = HashMap::new();
+            scores.insert(DocumentId(11), 1.0);
+            scores.insert(DocumentId(21), 2.0);
+
+            // Combined filter: must be in BOTH group AND scores
+            // Only DocumentId(11) passes both filters
+            let filter = CombinedFilter {
+                set: &group_set,
+                map: &scores,
+            };
+
+            let mut merged = MergeSortedIterator::<u8, _>::new(SortOrder::Ascending, filter);
+            merged.add(Box::new(data.iter().map(|(k, v)| (*k, v))));
+
+            let collected: Vec<_> = merged.collect();
+
+            // Only batch 1 should be returned (has DocumentId(11) which is in both filters)
+            // Batch 2: DocumentId(20) in group but not scores, DocumentId(21) in scores but not group
+            // Batch 3: DocumentId(30) in group but not scores
+            assert_eq!(collected.len(), 1);
+            assert_eq!(collected[0].0, 1);
+            // Verify batch 1 returns FULL set (batch-level filtering returns entire batch)
+            assert!(set_eq(
+                collected[0].1,
+                HashSet::from([DocumentId(10), DocumentId(11)])
+            ));
+        }
+
+        #[test]
+        fn test_noop_filter_includes_all() {
+            let data = [
+                (1_u8, HashSet::from([DocumentId(10)])),
+                (2, HashSet::from([DocumentId(20)])),
+                (3, HashSet::from([DocumentId(30)])),
+            ];
+
+            // () filter should include everything
+            let mut merged = MergeSortedIterator::<u8, ()>::new(SortOrder::Ascending, ());
+            merged.add(Box::new(data.iter().map(|(k, v)| (*k, v))));
+
+            let collected: Vec<_> = merged.collect();
+
+            // All batches should be included with correct keys and document sets
+            assert_eq!(collected.len(), 3);
+            assert_eq!(collected[0].0, 1);
+            assert!(set_eq(collected[0].1, HashSet::from([DocumentId(10)])));
+            assert_eq!(collected[1].0, 2);
+            assert!(set_eq(collected[1].1, HashSet::from([DocumentId(20)])));
+            assert_eq!(collected[2].0, 3);
+            assert!(set_eq(collected[2].1, HashSet::from([DocumentId(30)])));
+        }
+
+        #[test]
+        fn test_filter_all_batches_empty() {
+            let data = [
+                (1_u8, HashSet::from([DocumentId(10)])),
+                (2, HashSet::from([DocumentId(20)])),
+                (3, HashSet::from([DocumentId(30)])),
+            ];
+
+            // Filter that matches nothing
+            let filter_set: HashSet<DocumentId> = HashSet::from([DocumentId(999)]);
+            let mut merged = MergeSortedIterator::<u8, _>::new(SortOrder::Ascending, &filter_set);
+            merged.add(Box::new(data.iter().map(|(k, v)| (*k, v))));
+
+            let collected: Vec<_> = merged.collect();
+
+            // No batches should be returned
+            assert_eq!(collected.len(), 0);
         }
     }
 }
