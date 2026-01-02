@@ -339,6 +339,10 @@ impl Index {
         })
     }
 
+    pub fn get_text_parser(&self) -> &TextParser {
+        self.text_parser.as_ref()
+    }
+
     pub async fn get_search_store<'index>(&'index self) -> IndexSearchStore<'index> {
         let (committed_fields, uncommitted_fields) = tokio::join!(
             self.committed_fields.read("get_all_document_ids"),

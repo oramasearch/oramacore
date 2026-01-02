@@ -279,7 +279,7 @@ const MAX_PROMOTED_ITEMS: usize = 10_000;
 
 /// Internal shared implementation for applying pin rules with optional document filtering
 fn apply_pin_rules_internal<F>(
-    pins: &[Consequence<DocumentId>],
+    pin_rules: &[Consequence<DocumentId>],
     token_scores: &HashMap<DocumentId, f32>,
     mut top: Vec<TokenScore>,
     document_filter: Option<F>,
@@ -287,12 +287,12 @@ fn apply_pin_rules_internal<F>(
 where
     F: Fn(&DocumentId) -> bool,
 {
-    if pins.is_empty() {
+    if pin_rules.is_empty() {
         return top;
     }
 
     // Estimate the total number of promote items to avoid excessive memory allocation
-    let estimated_promote_items: usize = pins.iter().map(|c| c.promote.len()).sum();
+    let estimated_promote_items: usize = pin_rules.iter().map(|c| c.promote.len()).sum();
     if estimated_promote_items > MAX_PROMOTED_ITEMS {
         // Log warning but continue with a truncated set
         warn!(
@@ -304,7 +304,7 @@ where
 
     let mut promote_items = Vec::with_capacity(estimated_promote_items.min(MAX_PROMOTED_ITEMS));
     if let Some(ref filter) = document_filter {
-        for consequence in pins {
+        for consequence in pin_rules {
             promote_items.extend(
                 consequence
                     .promote
@@ -314,7 +314,7 @@ where
             );
         }
     } else {
-        for consequence in pins {
+        for consequence in pin_rules {
             promote_items.extend(consequence.promote.iter().cloned());
         }
     }
@@ -374,12 +374,12 @@ fn apply_pin_rules(
 
 fn apply_pin_rules_to_group(
     all_document_ids: HashSet<DocumentId>,
-    pins: &[Consequence<DocumentId>],
+    pin_rules: &[Consequence<DocumentId>],
     token_scores: &HashMap<DocumentId, f32>,
     top: Vec<TokenScore>,
 ) -> Vec<TokenScore> {
     apply_pin_rules_internal(
-        pins,
+        pin_rules,
         token_scores,
         top,
         Some(|doc_id: &DocumentId| all_document_ids.contains(doc_id)),
