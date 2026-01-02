@@ -106,8 +106,7 @@ impl<'collection, 'analytics_storage> Search<'collection, 'analytics_storage> {
             &*collection.get_pin_rules_reader("search").await,
             &search_params,
             &indexes,
-        )
-        .await;
+        );
 
         let has_pin_rules = !pin_rule_consequences.is_empty();
 
@@ -240,10 +239,10 @@ pub fn extract_term_from_search_mode(search_mode: &SearchMode) -> &str {
     }
 }
 
-async fn extract_pin_rules<'collection>(
+fn extract_pin_rules<'collection>(
     rules: &PinRulesReader<DocumentId>,
     search_params: &SearchParams,
-    indexes: &ReadIndexesLockGuard<'collection, '_>,
+    indexes: &ReadIndexesLockGuard<'collection>,
 ) -> Vec<Consequence<DocumentId>> {
     let term = extract_term_from_search_mode(&search_params.mode);
     let mut consequences: Vec<_> = indexes
