@@ -1,16 +1,13 @@
+use oramacore_lib::{
+    data_structures::ShouldInclude,
+    filters::{DocId, FilterResult, PlainFilterResult},
+    pin_rules::{Consequence, PinRulesReader},
+};
 use std::{
     borrow::Cow,
     collections::{HashMap, HashSet},
     hash::Hash,
     time::Instant,
-};
-
-use anyhow::{bail, Result};
-use futures::StreamExt;
-use oramacore_lib::{
-    data_structures::ShouldInclude,
-    filters::{DocId, FilterResult},
-    pin_rules::{Consequence, PinRulesReader},
 };
 
 use crate::{
@@ -20,13 +17,17 @@ use crate::{
             SearchAnalyticEventV1,
         },
         collection::ReadIndexesLockGuard,
-        sort::sort_documents_in_groups,
-        GroupValue, ReadError, SortContext,
+        facet::{FacetContext, FacetParams},
+        filter::FilterContext,
+        group::{GroupContext, GroupParams},
+        sort::{sort_groups, sort_token_scores},
+        token_score::{TokenScoreContext, TokenScoreParams},
+        GroupValue, ReadError,
     },
     metrics::{search::SEARCH_CALCULATION_TIME, SearchCollectionLabels},
     types::{
-        DocumentId, FacetResult, GroupByConfig, GroupedResult, SearchMode, SearchParams,
-        SearchResult, SearchResultHit, SortBy, TokenScore, WhereFilter,
+        DocumentId, FacetResult, GroupedResult, SearchMode, SearchParams, SearchResult,
+        SearchResultHit, TokenScore,
     },
 };
 
@@ -77,9 +78,6 @@ impl<'collection, 'analytics_storage> Search<'collection, 'analytics_storage> {
 
         let collection_id = collection.id();
 
-        let limit = search_params.limit;
-        let offset = search_params.offset;
-
         let has_filters = !search_params.where_filter.is_empty();
         let has_facets = !search_params.facets.is_empty();
         let has_groups = search_params.group_by.is_none();
@@ -94,149 +92,48 @@ impl<'collection, 'analytics_storage> Search<'collection, 'analytics_storage> {
             has_sorting: if has_sorting { "true" } else { "false" },
         });
 
-        let index_ids = collection
-            .get_index_ids(search_params.indexes.as_ref())
-            .await?;
-
         // Let's suppose the number of matching document is 1/3 of the total number of documents
         // This is a very rough estimation, but it is better than nothing
         // This allows us to avoid reallocation of the result map
         // TODO: we can use an Area allocator to reuse the memory between searches
-        let document_count_estimation = collection.get_document_count_estimation();
-        let indexes = collection.get_indexes_lock(&index_ids).await?;
-        let token_scores =
-            calculate_token_score_for_indexes(&indexes, &search_params, document_count_estimation)
-                .await?;
+        let matching_document_count_estimation = collection.get_document_count_estimation() / 3;
 
-        let facets = if has_facets {
-            // Orama provides a UI component that shows the search results
-            // and the number of how many documents fall in each variant of field value (facets).
-            // By default, the "all" category is selected and list all the results,
-            // but if a user clicks on a category, it will see the results filtered by that category.
-            // Hence, the second call has filters.
-            // Anyway, the second call re-ask the number for each variant. That means,
-            // the call contains facets and filters, and the returned facets are affected by the chosen category.
-            // So, the user will see the facets number change when it clicks on a category.
-            // And this is weird.
-            // So, the pair (facets, filters) has to be reconsidered:
-            // - we calculate directly the facets if there are no filters
-            // - we recalculate the score without any filters and after the facets
-            // NB: This is not performant, but required for a good UI.
-            //     The FE could reuse the facets calculation of the first call
-            //     keeping the results in memory.
-            let token_scores: Cow<'_, HashMap<DocumentId, f32>> =
-                if search_params.where_filter.is_empty() {
-                    Cow::Borrowed(&token_scores)
-                } else {
-                    let mut search_params_without_filters = search_params.clone();
-                    search_params_without_filters.where_filter = WhereFilter {
-                        filter_on_fields: vec![],
-                        and: None,
-                        not: None,
-                        or: None,
-                    };
-                    let token_scores = calculate_token_score_for_indexes(
-                        &indexes,
-                        &search_params_without_filters,
-                        document_count_estimation,
-                    )
-                    .await?;
+        let indexes = collection
+            .get_index_read_locks(search_params.indexes.as_ref())
+            .await?;
 
-                    Cow::Owned(token_scores)
-                };
-
-            let facets = calculate_facets(&indexes, &search_params, token_scores.as_ref()).await?;
-
-            Some(facets)
-        } else {
-            None
-        };
-
-        let pin_rules = extract_pin_rules(
+        let pin_rule_consequences = extract_pin_rules(
             &*collection.get_pin_rules_reader("search").await,
             &search_params,
         )
         .await;
 
-        let groups = if let Some(group_by) = &search_params.group_by {
-            let groups = calculate_groups(
-                &indexes,
-                &token_scores,
-                group_by,
-                search_params.sort_by.as_ref(),
-                &pin_rules,
-            )
-            .await?;
+        let has_pin_rules = !pin_rule_consequences.is_empty();
 
-            let collection_document_storage = collection.get_document_storage();
-
-            let groups: Vec<_> = futures::stream::iter(groups.into_iter())
-                .filter_map(|(k, ids)| async {
-                    if ids.is_empty() {
-                        return None;
-                    }
-
-                    let docs = collection_document_storage
-                        .get_documents_by_ids(ids.clone())
-                        .await
-                        .ok()?;
-
-                    let result = ids
-                        .into_iter()
-                        .take(group_by.max_results)
-                        .map(|id| {
-                            docs.iter()
-                                .find(|(doc_id, _)| doc_id == &id)
-                                .cloned()
-                                .map(|(id, doc)| {
-                                    let doc_id = doc.id.clone();
-                                    SearchResultHit {
-                                        id: doc_id.unwrap_or_default(),
-                                        score: *token_scores.get(&id).unwrap_or(&0.0),
-                                        document: Some(doc.clone()),
-                                    }
-                                })
-                                .unwrap_or_else(|| SearchResultHit {
-                                    id: Default::default(),
-                                    score: *token_scores.get(&id).unwrap_or(&0.0),
-                                    document: None,
-                                })
-                        })
-                        .collect();
-
-                    Some(GroupedResult {
-                        values: k.into_iter().map(|v| v.into()).collect(),
-                        result,
-                    })
-                })
-                .collect()
-                .await;
-
-            Some(groups)
-        } else {
-            None
-        };
-
-        let count = token_scores.len();
-
-        let top_results: Vec<TokenScore> =
-            sort_and_truncate(&indexes, &token_scores, &search_params, &pin_rules).await?;
-        trace!("Top results: {:?}", top_results);
-
-        let result = top_results
-            .into_iter()
-            .skip(offset.0)
-            .take(limit.0)
-            .collect::<Vec<_>>();
+        let (top_results, count, facets, groups) = search_on_indexes(
+            &indexes,
+            &search_params,
+            matching_document_count_estimation,
+            pin_rule_consequences,
+        )
+        .await?;
 
         let collection_document_storage = collection.get_document_storage();
+        let group = groups
+            .as_ref()
+            .map(|g| {
+                Box::new(
+                    g.values()
+                        .flat_map(|token_scores| token_scores.iter().map(|ts| ts.document_id)),
+                ) as Box<dyn Iterator<Item = DocumentId>>
+            })
+            .unwrap_or_else(|| Box::new(std::iter::empty()));
+        let all_docs_ids = top_results.iter().map(|ts| ts.document_id).chain(group);
         let docs = collection_document_storage
-            .get_documents_by_ids(result.iter().map(|m| m.document_id).collect())
+            .get_documents_by_ids(all_docs_ids.collect())
             .await?;
 
-        trace!("Calculates hits");
-
-        let hits = result
+        let hits = top_results
             .into_iter()
             .map(|ts| {
                 let TokenScore {
@@ -262,12 +159,42 @@ impl<'collection, 'analytics_storage> Search<'collection, 'analytics_storage> {
             })
             .collect();
 
+        let groups = if let Some(grouped_results) = groups {
+            let mut final_groups = Vec::new();
+            for (group_value, token_scores) in grouped_results {
+                let mut hits = Vec::new();
+                for token_score in token_scores {
+                    if let Some((_, doc)) = docs
+                        .iter()
+                        .find(|(d_id, _)| d_id == &token_score.document_id)
+                    {
+                        let doc_id = doc.id.clone().unwrap_or_default();
+                        hits.push(SearchResultHit {
+                            id: doc_id,
+                            score: token_score.score,
+                            document: Some(doc.clone()),
+                        });
+                    }
+                }
+
+                let group = GroupedResult {
+                    result: hits,
+                    values: group_value.into_iter().map(|v| v.into()).collect(),
+                };
+
+                final_groups.push(group);
+            }
+            Some(final_groups)
+        } else {
+            None
+        };
+
         drop(m);
 
         let result = SearchResult {
             count,
             hits,
-            facets,
+            facets: Some(facets),
             groups,
         };
 
@@ -282,7 +209,7 @@ impl<'collection, 'analytics_storage> Search<'collection, 'analytics_storage> {
                     &result,
                     search_analytics_event_origin,
                     search_duration,
-                    !pin_rules.is_empty(),
+                    has_pin_rules,
                     false,
                     analytics_metadata,
                     interaction_id,
@@ -320,21 +247,152 @@ async fn extract_pin_rules(
     rules.apply(term)
 }
 
-async fn calculate_token_score_for_indexes(
-    indexes: &ReadIndexesLockGuard<'_, '_>,
+async fn search_on_indexes(
+    indexes: &ReadIndexesLockGuard<'_>,
     search_params: &SearchParams,
-    document_count_estimation: u64,
-) -> Result<HashMap<DocumentId, f32>, ReadError> {
-    let mut token_scores: HashMap<DocumentId, f32> =
-        HashMap::with_capacity((document_count_estimation / 3) as usize);
+    matching_document_count_estimation: u64,
+    pin_rule_consequences: Vec<Consequence<DocumentId>>,
+) -> Result<
+    (
+        Vec<TokenScore>,
+        usize,
+        HashMap<String, FacetResult>,
+        Option<HashMap<Vec<GroupValue>, Vec<TokenScore>>>,
+    ),
+    ReadError,
+> {
+    let mut token_score_results: HashMap<DocumentId, f32> =
+        HashMap::with_capacity((matching_document_count_estimation) as usize);
+    let mut facets_results = HashMap::new();
+    let mut group_results = HashMap::new();
+
+    let mut stores = Vec::with_capacity(indexes.len());
 
     for index in indexes.iter() {
-        index
-            .calculate_token_score(search_params, &mut token_scores)
+        let search_store = index.get_search_store().await;
+
+        let filter_context = FilterContext::new(
+            search_store.document_count,
+            search_store.path_to_field_id_map,
+            &search_store.uncommitted_fields,
+            &search_store.committed_fields,
+            search_store.uncommitted_deleted_documents,
+        );
+        let filtered_document_ids = filter_context.execute_filter(&search_params.where_filter)?;
+
+        trace!("Calculating token scores for index {}", index.id());
+        let token_score_context = TokenScoreContext::new(
+            index.id(),
+            search_store.document_count,
+            &search_store.uncommitted_fields,
+            &search_store.committed_fields,
+            search_store.text_parser,
+            search_store.read_side_context,
+            search_store.path_to_field_id_map,
+        );
+        token_score_context
+            .execute(
+                &TokenScoreParams {
+                    mode: &search_params.mode,
+                    boost: &search_params.boost,
+                    properties: &search_params.properties,
+                    limit_hint: search_params.limit,
+                    filtered_doc_ids: filtered_document_ids.as_ref(),
+                },
+                &mut token_score_results,
+            )
             .await?;
+
+        if !search_params.facets.is_empty() {
+            // Orama provides a UI component that shows the search results
+            // and the number of how many documents fall in each variant of field value (facets).
+            // By default, the "all" category is selected and list all the results,
+            // but if a user clicks on a category, it will see the results filtered by that category.
+            // Hence, the second call has filters.
+            // Anyway, the second call re-ask the number for each variant. That means,
+            // the call contains facets and filters, and the returned facets are affected by the chosen category.
+            // So, the user will see the facets number change when it clicks on a category.
+            // And this is weird.
+            // So, the pair (facets, filters) has to be reconsidered:
+            // - we calculate directly the facets if there are no filters
+            // - we recalculate the score without any filters and after the facets
+            // NB: This is not performant, but required for a good UI.
+            //     The FE could reuse the facets calculation of the first call
+            //     keeping the results in memory.
+            let token_scores: Cow<'_, HashMap<DocumentId, f32>> =
+                if search_params.where_filter.is_empty() {
+                    Cow::Borrowed(&token_score_results)
+                } else {
+                    let filtered_doc_ids = Some(FilterResult::Not(Box::new(FilterResult::Filter(
+                        PlainFilterResult::from_iter(
+                            search_store.document_count,
+                            search_store.uncommitted_deleted_documents.iter().cloned(),
+                        ),
+                    ))));
+
+                    let mut token_score_results_for_facets =
+                        HashMap::with_capacity((matching_document_count_estimation) as usize);
+
+                    let token_score_context = TokenScoreContext::new(
+                        index.id(),
+                        search_store.document_count,
+                        &search_store.uncommitted_fields,
+                        &search_store.committed_fields,
+                        search_store.text_parser,
+                        search_store.read_side_context,
+                        search_store.path_to_field_id_map,
+                    );
+                    token_score_context
+                        .execute(
+                            &TokenScoreParams {
+                                mode: &search_params.mode,
+                                boost: &search_params.boost,
+                                properties: &search_params.properties,
+                                limit_hint: search_params.limit,
+                                filtered_doc_ids: filtered_doc_ids.as_ref(),
+                            },
+                            &mut token_score_results_for_facets,
+                        )
+                        .await?;
+
+                    Cow::Owned(token_score_results_for_facets)
+                };
+
+            trace!("Calculating facets for index {}", index.id());
+            let facet_context = FacetContext::new(
+                search_store.path_to_field_id_map,
+                &search_store.uncommitted_fields,
+                &search_store.committed_fields,
+            );
+
+            facet_context.execute(
+                &FacetParams {
+                    facets: &search_params.facets,
+                    token_scores: &token_scores,
+                },
+                &mut facets_results,
+            )?;
+        }
+
+        if let Some(group_by) = &search_params.group_by {
+            let group_context = GroupContext::new(
+                search_store.path_to_field_id_map,
+                &search_store.uncommitted_fields,
+                &search_store.committed_fields,
+            );
+
+            group_context.execute(
+                &GroupParams {
+                    properties: &group_by.properties,
+                },
+                &mut group_results,
+            )?;
+        }
+
+        stores.push(search_store);
     }
 
-    if token_scores.is_empty() {
+    if token_score_results.is_empty() {
         // Test if at least one index have the filter properties
         let all_keys: Vec<String> = search_params.where_filter.get_all_keys();
         for k in all_keys {
@@ -352,73 +410,55 @@ async fn calculate_token_score_for_indexes(
         }
     }
 
-    Ok(token_scores)
-}
-
-async fn calculate_facets(
-    indexes: &ReadIndexesLockGuard<'_, '_>,
-    search_params: &SearchParams,
-    token_scores: &HashMap<DocumentId, f32>,
-) -> Result<HashMap<String, FacetResult>> {
-    let mut result: HashMap<String, FacetResult> = HashMap::new();
-
-    for index in indexes.iter() {
-        index
-            .calculate_facets(token_scores, &search_params.facets, &mut result)
-            .await?;
-    }
-
     let expected_facets_count = search_params.facets.len();
-    if result.len() != expected_facets_count {
+    if facets_results.len() != expected_facets_count {
         // The user asked for some facets that are not present in the collection
-        let present_facet_fields: Vec<&String> = result.keys().collect();
+        let present_facet_fields: Vec<&String> = facets_results.keys().collect();
         let requested_facet_fields: Vec<&String> = search_params.facets.keys().collect();
-        let missing_facet_fields: Vec<&&String> = requested_facet_fields
+        let missing_facet_fields: Vec<String> = requested_facet_fields
             .iter()
             .filter(|f| !present_facet_fields.contains(f))
+            .cloned()
+            .cloned()
             .collect();
-        bail!("Some fields are not present in the collection for facets: {missing_facet_fields:?}");
+        return Err(ReadError::FacetFieldNotFound(missing_facet_fields));
     }
 
-    Ok(result)
-}
+    let group_by_results = if let Some(group_by_config) = &search_params.group_by {
+        let sorted_group_results = sort_groups(
+            &stores,
+            &token_score_results,
+            group_results,
+            group_by_config.max_results,
+            search_params.sort_by.as_ref(),
+            &pin_rule_consequences,
+        )?;
 
-pub async fn calculate_groups(
-    indexes: &ReadIndexesLockGuard<'_, '_>,
-    token_scores: &HashMap<DocumentId, f32>,
-    group_by_config: &GroupByConfig,
-    sort_by: Option<&SortBy>,
-    pin_rules: &[Consequence<DocumentId>],
-) -> Result<HashMap<Vec<GroupValue>, Vec<DocumentId>>> {
-    let mut results = HashMap::new();
-    for index in indexes.iter() {
-        index
-            .calculate_groups(&group_by_config.properties, &mut results)
-            .await?
-    }
+        Some(sorted_group_results)
+    } else {
+        None
+    };
 
-    // Sort documents within each group
-    let sorted_results = sort_documents_in_groups(
-        indexes,
-        results,
-        token_scores,
-        sort_by,
-        group_by_config.max_results,
-        pin_rules,
-    )
-    .await?;
+    // This is all matching documents across all indexes
+    let count = token_score_results.len();
 
-    Ok(sorted_results)
-}
+    let top_results = sort_token_scores(
+        &stores,
+        &token_score_results,
+        search_params.limit,
+        search_params.offset,
+        search_params.sort_by.as_ref(),
+        &pin_rule_consequences,
+    )?;
+    trace!("Top results: {:?} (of {})", top_results, count);
 
-pub async fn sort_and_truncate(
-    indexes: &ReadIndexesLockGuard<'_, '_>,
-    token_scores: &HashMap<DocumentId, f32>,
-    search_params: &SearchParams,
-    pin_rules: &[Consequence<DocumentId>],
-) -> Result<Vec<TokenScore>, ReadError> {
-    let context = SortContext::new(indexes, token_scores, search_params, pin_rules);
-    context.execute().await
+    let search_top_results = top_results
+        .into_iter()
+        .skip(search_params.offset.0)
+        .take(search_params.limit.0)
+        .collect::<Vec<_>>();
+
+    Ok((search_top_results, count, facets_results, group_by_results))
 }
 
 pub struct SearchDocumentContext<'a, DocumentId> {

@@ -15,7 +15,6 @@ use duration_string::DurationString;
 use futures::Stream;
 pub use index::*;
 use oramacore_lib::hook_storage::{HookReader, HookReaderError};
-pub use sort::SortContext;
 
 pub use collection::CollectionStats;
 use duration_str::deserialize_duration;
@@ -136,10 +135,14 @@ pub enum ReadError {
     Hook(#[from] HookReaderError),
     #[error("Unknown field for filter: {0:?}")]
     FilterFieldNotFound(String),
+    #[error("Unknown fields for facet: {0:?}")]
+    FacetFieldNotFound(Vec<String>),
     #[error("Unknown field for sort: {0:?}")]
     SortFieldNotFound(String),
     #[error("Cannot sort by {0:?}. Only number, date or boolean fields are supported for sorting, but got {1:?} for property {0:?}")]
     InvalidSortField(String, String),
+    #[error("Unknown index ids: {0:?}. Available indexes: {1:?}")]
+    UnknownIndex(Vec<IndexId>, Vec<IndexId>),
 }
 
 pub struct ReadSide {

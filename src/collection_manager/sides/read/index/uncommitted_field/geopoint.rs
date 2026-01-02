@@ -67,8 +67,8 @@ impl UncommittedField for UncommittedGeoPointFilterField {
 impl Field for UncommittedGeoPointFilterField {
     type FieldStats = UncommittedGeoPointFieldStats;
 
-    fn field_path(&self) -> &Box<[String]> {
-        &self.field_path
+    fn field_path(&self) -> &[String] {
+        self.field_path.as_ref()
     }
 
     fn stats(&self) -> UncommittedGeoPointFieldStats {

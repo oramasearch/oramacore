@@ -134,8 +134,8 @@ impl CommittedField for CommittedGeoPointField {
 impl Field for CommittedGeoPointField {
     type FieldStats = CommittedGeoPointFieldStats;
 
-    fn field_path(&self) -> &Box<[String]> {
-        &self.field_path
+    fn field_path(&self) -> &[String] {
+        self.field_path.as_ref()
     }
 
     fn stats(&self) -> CommittedGeoPointFieldStats {
@@ -205,7 +205,7 @@ impl CommittedFieldMetadata for GeoPointFieldInfo {
     fn set_data_dir(&mut self, data_dir: PathBuf) {
         self.data_dir = data_dir;
     }
-    fn field_path(&self) -> &Box<[String]> {
-        &self.field_path
+    fn field_path(&self) -> &[String] {
+        self.field_path.as_ref()
     }
 }

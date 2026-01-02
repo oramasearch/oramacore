@@ -1,6 +1,7 @@
 use assert_approx_eq::assert_approx_eq;
 use serde_json::json;
 
+use crate::collection_manager::sides::read::ReadError;
 use crate::tests::utils::init_log;
 use crate::tests::utils::TestContext;
 
@@ -465,8 +466,8 @@ async fn test_fulltext_multi_index() {
             .unwrap(),
         )
         .await;
-    assert!(output.is_err());
-    assert!(format!("{:?}", output.err().unwrap()).contains("Unknown indexes"));
+    let err = output.expect_err("specifying unknown index should trigger an error");
+    assert!(matches!(err, ReadError::UnknownIndex(_, _)));
 
     drop(test_context);
 }

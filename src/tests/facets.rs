@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use serde_json::json;
 
+use crate::collection_manager::sides::read::ReadError;
 use crate::tests::utils::{init_log, TestContext};
 use crate::types::FacetResult;
 
@@ -239,10 +240,11 @@ async fn test_facets_unknown_field() {
         )
         .await;
 
-    assert!(
-        format!("{output:?}").contains("Some fields are not present in the collection for facets")
-    );
-    assert!(format!("{output:?}").contains("unknown"));
+    let err = output.expect_err("Should return an error");
+
+    assert!(matches!(err, ReadError::FacetFieldNotFound(_)));
+
+    assert!(format!("{err:?}").contains("unknown"));
 
     drop(test_context);
 }
