@@ -15,7 +15,7 @@ use super::super::OffloadFieldConfig;
 pub trait CommittedFieldMetadata {
     fn data_dir(&self) -> &PathBuf;
     fn set_data_dir(&mut self, data_dir: PathBuf);
-    fn field_path(&self) -> &Box<[String]>;
+    fn field_path(&self) -> &[String];
 }
 
 pub trait CommittedField: Field + Sized {
@@ -50,7 +50,7 @@ pub trait UncommittedField: Field {
 pub trait Field {
     type FieldStats;
 
-    fn field_path(&self) -> &Box<[String]>;
+    fn field_path(&self) -> &[String];
 
     fn stats(&self) -> Self::FieldStats;
 }

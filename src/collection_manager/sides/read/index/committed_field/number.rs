@@ -79,6 +79,13 @@ impl CommittedNumberField {
     ) -> impl DoubleEndedIterator<Item = (SerializableNumber, HashSet<DocumentId>)> + '_ {
         self.vec.iter().cloned()
     }
+
+    /// Returns an iterator over (SerializableNumber, &HashSet<DocumentId>) pairs without cloning the HashSet.
+    pub fn iter_ref(
+        &self,
+    ) -> impl DoubleEndedIterator<Item = (SerializableNumber, &HashSet<DocumentId>)> + '_ {
+        self.vec.iter().map(|(n, h)| (n.clone(), h))
+    }
 }
 
 impl CommittedField for CommittedNumberField {
@@ -207,8 +214,8 @@ impl CommittedField for CommittedNumberField {
 impl Field for CommittedNumberField {
     type FieldStats = CommittedNumberFieldStats;
 
-    fn field_path(&self) -> &Box<[String]> {
-        &self.field_path
+    fn field_path(&self) -> &[String] {
+        self.field_path.as_ref()
     }
 
     fn stats(&self) -> CommittedNumberFieldStats {
@@ -348,8 +355,8 @@ impl CommittedFieldMetadata for NumberFieldInfo {
     fn set_data_dir(&mut self, data_dir: PathBuf) {
         self.data_dir = data_dir;
     }
-    fn field_path(&self) -> &Box<[String]> {
-        &self.field_path
+    fn field_path(&self) -> &[String] {
+        self.field_path.as_ref()
     }
 }
 

@@ -57,6 +57,13 @@ impl UncommittedNumberField {
             .iter()
             .map(|(number, doc_ids)| (*number, doc_ids.clone()))
     }
+
+    /// Returns an iterator over (Number, &HashSet<DocumentId>) pairs without cloning.
+    pub fn iter_ref(&self) -> impl DoubleEndedIterator<Item = (Number, &HashSet<DocumentId>)> + '_ {
+        self.inner
+            .iter()
+            .map(|(number, doc_ids)| (*number, doc_ids))
+    }
 }
 
 #[inline]
@@ -115,8 +122,8 @@ impl UncommittedField for UncommittedNumberField {
 impl Field for UncommittedNumberField {
     type FieldStats = UncommittedNumberFieldStats;
 
-    fn field_path(&self) -> &Box<[String]> {
-        &self.field_path
+    fn field_path(&self) -> &[String] {
+        self.field_path.as_ref()
     }
 
     fn stats(&self) -> UncommittedNumberFieldStats {

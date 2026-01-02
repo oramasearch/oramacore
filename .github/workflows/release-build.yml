@@ -35,6 +35,11 @@ jobs:
           toolchain: 1.88.0
           override: true
 
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          cache-all-crates: "true"
+
       - name: Build Default Binary
         env:
           PYO3_PYTHON: python3

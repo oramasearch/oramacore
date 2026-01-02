@@ -1,10 +1,9 @@
 use crate::ai::answer::AnswerEvent;
 use crate::ai::RemoteLLMProvider;
 use crate::types::{CollectionId, Interaction, InteractionLLMConfig, InteractionMessage, Role};
-use anyhow::{anyhow, bail, Result};
+use anyhow::{bail, Result};
 use async_openai::types::ChatCompletionRequestMessage;
 use serde::Deserialize;
-use std::str::FromStr;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 #[derive(Debug, Clone, Deserialize)]
@@ -31,6 +30,12 @@ pub struct ResponseAccumulator {
     content: String,
     model: String,
     search_results: Option<Vec<String>>,
+}
+
+impl Default for ResponseAccumulator {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl ResponseAccumulator {
@@ -258,14 +263,14 @@ fn parse_provider_and_model(model_str: &str) -> Result<InteractionLLMConfig> {
     if let Some((provider_str, model_name)) = model_str.split_once('/') {
         let provider = provider_str
             .parse::<RemoteLLMProvider>()
-            .map_err(|e| anyhow::anyhow!("Invalid provider '{}': {}", provider_str, e))?;
+            .map_err(|e| anyhow::anyhow!("Invalid provider '{provider_str}': {e}"))?;
 
         Ok(InteractionLLMConfig {
             provider,
             model: model_name.to_string(),
         })
     } else {
-        bail!("No provider prefix in model string: {}", model_str)
+        bail!("No provider prefix in model string: {model_str}")
     }
 }
 
@@ -488,7 +493,7 @@ mod tests {
 
     #[test]
     fn test_response_accumulator() {
-        use crate::types::{InteractionLLMConfig, SearchResultHit};
+        use crate::types::InteractionLLMConfig;
 
         let mut accumulator = ResponseAccumulator::new();
 

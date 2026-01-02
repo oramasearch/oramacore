@@ -37,6 +37,11 @@ impl CommittedDateField {
     pub fn iter(&self) -> impl DoubleEndedIterator<Item = (i64, HashSet<DocumentId>)> + '_ {
         self.vec.iter().cloned()
     }
+
+    /// Returns an iterator over (i64, &HashSet<DocumentId>) pairs without cloning.
+    pub fn iter_ref(&self) -> impl DoubleEndedIterator<Item = (i64, &HashSet<DocumentId>)> + '_ {
+        self.vec.iter().map(|(n, h)| (*n, h))
+    }
 }
 
 impl CommittedField for CommittedDateField {
@@ -158,8 +163,8 @@ impl CommittedField for CommittedDateField {
 impl Field for CommittedDateField {
     type FieldStats = CommittedDateFieldStats;
 
-    fn field_path(&self) -> &Box<[String]> {
-        &self.field_path
+    fn field_path(&self) -> &[String] {
+        self.field_path.as_ref()
     }
 
     fn stats(&self) -> CommittedDateFieldStats {
@@ -235,7 +240,7 @@ impl CommittedFieldMetadata for DateFieldInfo {
     fn set_data_dir(&mut self, data_dir: PathBuf) {
         self.data_dir = data_dir;
     }
-    fn field_path(&self) -> &Box<[String]> {
-        &self.field_path
+    fn field_path(&self) -> &[String] {
+        self.field_path.as_ref()
     }
 }

@@ -635,8 +635,8 @@ impl CommittedField for CommittedStringField {
 impl Field for CommittedStringField {
     type FieldStats = CommittedStringFieldStats;
 
-    fn field_path(&self) -> &Box<[String]> {
-        &self.metadata.field_path
+    fn field_path(&self) -> &[String] {
+        self.metadata.field_path.as_ref()
     }
 
     fn stats(&self) -> CommittedStringFieldStats {
@@ -807,8 +807,8 @@ impl CommittedFieldMetadata for StringFieldInfo {
     fn set_data_dir(&mut self, data_dir: PathBuf) {
         self.data_dir = data_dir;
     }
-    fn field_path(&self) -> &Box<[String]> {
-        &self.field_path
+    fn field_path(&self) -> &[String] {
+        self.field_path.as_ref()
     }
 }
 

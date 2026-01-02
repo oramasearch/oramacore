@@ -82,8 +82,8 @@ impl UncommittedField for UncommittedStringFilterField {
 impl Field for UncommittedStringFilterField {
     type FieldStats = UncommittedStringFilterFieldStats;
 
-    fn field_path(&self) -> &Box<[String]> {
-        &self.field_path
+    fn field_path(&self) -> &[String] {
+        self.field_path.as_ref()
     }
 
     fn stats(&self) -> UncommittedStringFilterFieldStats {

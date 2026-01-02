@@ -35,11 +35,18 @@ jobs:
         run: |
           sudo update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.11 1
           sudo update-alternatives --install /usr/bin/python python /usr/bin/python3.11 1
+      - name: Cache pip packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
       - name: Install Python dependencies
         run: |
-          python -m pip install --upgrade pip
           python -m venv .venv
           source .venv/bin/activate
+          pip install --upgrade pip
           pip install -r requirements.txt
       - name: Set Python environment variables for linking
         run: |
@@ -53,6 +60,10 @@ jobs:
           toolchain: 1.88.0
           target: x86_64-unknown-linux-gnu
           rustflags: ""
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          cache-all-crates: "true"
       - name: Environment
         run: |
           gcc --version
@@ -69,7 +80,6 @@ jobs:
       - name: Test
         run: |
           source .venv/bin/activate
-          bash download-test-model.sh
           cargo test --all --target x86_64-unknown-linux-gnu
       - name: Build
         run: |

@@ -2,11 +2,9 @@ use std::collections::HashSet;
 
 use anyhow::{bail, Context, Result};
 use oramacore_lib::filters::{FilterResult, PlainFilterResult};
+use tracing::trace;
 
-use crate::{
-    lock::OramaAsyncLockReadGuard,
-    types::{DateFilter, DocumentId, Filter, GeoSearchFilter, NumberFilter, WhereFilter},
-};
+use crate::types::{DateFilter, DocumentId, Filter, GeoSearchFilter, NumberFilter, WhereFilter};
 
 use super::{path_to_index_id_map::PathToIndexId, CommittedFields, FieldType, UncommittedFields};
 
@@ -167,7 +165,7 @@ impl TryFromFilter for GeoSearchFilter {
 ///
 /// # Returns
 /// A FilterResult containing the union of matching document IDs from both fields
-fn calculate_filter_on_field<'a, UF, CF, FP>(
+fn calculate_filter_on_field<UF, CF, FP>(
     document_count_estimate: u64,
     uncommitted_field: &UF,
     committed_field: Option<&CF>,
@@ -455,8 +453,8 @@ fn calculate_filter(
 pub struct FilterContext<'index> {
     document_count: u64,
     path_to_index_id_map: &'index PathToIndexId,
-    uncommitted_fields: OramaAsyncLockReadGuard<'index, UncommittedFields>,
-    committed_fields: OramaAsyncLockReadGuard<'index, CommittedFields>,
+    uncommitted_fields: &'index UncommittedFields,
+    committed_fields: &'index CommittedFields,
     uncommitted_deleted_documents: &'index HashSet<DocumentId>,
 }
 
@@ -469,8 +467,8 @@ impl<'index> FilterContext<'index> {
     pub fn new(
         document_count: u64,
         path_to_index_id_map: &'index PathToIndexId,
-        uncommitted_fields: OramaAsyncLockReadGuard<'index, UncommittedFields>,
-        committed_fields: OramaAsyncLockReadGuard<'index, CommittedFields>,
+        uncommitted_fields: &'index UncommittedFields,
+        committed_fields: &'index CommittedFields,
         uncommitted_deleted_documents: &'index HashSet<DocumentId>,
     ) -> Self {
         Self {
@@ -509,12 +507,14 @@ impl<'index> FilterContext<'index> {
             )))));
         }
 
+        trace!("Calculating filtered doc ids");
+
         let mut output = calculate_filter(
             self.document_count,
             self.path_to_index_id_map,
             where_filter,
-            &self.uncommitted_fields,
-            &self.committed_fields,
+            self.uncommitted_fields,
+            self.committed_fields,
         )?;
 
         // Integrate deleted documents using AND + NOT logic

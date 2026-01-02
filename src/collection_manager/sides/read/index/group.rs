@@ -10,7 +10,6 @@ use crate::{
     collection_manager::sides::read::index::uncommitted_field::{
         UncommittedBoolField, UncommittedNumberField, UncommittedStringFilterField,
     },
-    lock::OramaAsyncLockReadGuard,
     types::{DocumentId, FieldId, Number, NumberFilter},
 };
 
@@ -221,8 +220,8 @@ pub struct GroupParams<'search> {
 /// GroupContext constructor, maintaining proper encapsulation.
 pub struct GroupContext<'index> {
     path_to_index_id_map: &'index PathToIndexId,
-    uncommitted_fields: OramaAsyncLockReadGuard<'index, UncommittedFields>,
-    committed_fields: OramaAsyncLockReadGuard<'index, CommittedFields>,
+    uncommitted_fields: &'index UncommittedFields,
+    committed_fields: &'index CommittedFields,
 }
 
 impl<'index> GroupContext<'index> {
@@ -233,8 +232,8 @@ impl<'index> GroupContext<'index> {
     /// is responsible for gathering the data and passing it in.
     pub fn new(
         path_to_index_id_map: &'index PathToIndexId,
-        uncommitted_fields: OramaAsyncLockReadGuard<'index, UncommittedFields>,
-        committed_fields: OramaAsyncLockReadGuard<'index, CommittedFields>,
+        uncommitted_fields: &'index UncommittedFields,
+        committed_fields: &'index CommittedFields,
     ) -> Self {
         Self {
             path_to_index_id_map,
@@ -276,8 +275,8 @@ impl<'index> GroupContext<'index> {
             let field_variants = calculate_group_for_field(
                 *field_id,
                 *field_type,
-                &self.uncommitted_fields,
-                &self.committed_fields,
+                self.uncommitted_fields,
+                self.committed_fields,
             )?;
             all_variants.insert(*field_id, field_variants);
         }

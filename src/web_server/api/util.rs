@@ -442,6 +442,18 @@ impl IntoResponse for ReadError {
                 format!("Cannot sort by \"{field_name}\": no index has that field"),
             )
                 .into_response(),
+            Self::FacetFieldNotFound(field_names) => (
+                StatusCode::BAD_REQUEST,
+                format!("Cannot facet by \"{field_names:?}\": no index has that field"),
+            )
+                .into_response(),
+            Self::UnknownIndex(unknown_index_ids, available_index_ids) => (
+                StatusCode::BAD_REQUEST,
+                format!(
+                    "Unknown indexes requested: {unknown_index_ids:?}. Available indexes: {available_index_ids:?}"
+                ),
+            )
+                .into_response(),
         }
     }
 }
