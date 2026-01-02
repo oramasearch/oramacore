@@ -724,6 +724,20 @@ impl WriteSide {
             collection
                 .check_claim_limitations(write_api_key, document_list.len(), 0)
                 .await?;
+        } else {
+            // Temp index: check against linked runtime index
+            // The formula: temp_docs + all_runtime_indexes - linked_runtime_index <= max_doc_count
+            let linked_runtime_id = index
+                .get_runtime_index_id()
+                .expect("Temp index must have a linked runtime index");
+            collection
+                .check_claim_limitations_for_temp_index(
+                    write_api_key,
+                    index_id,
+                    linked_runtime_id,
+                    document_list.len(),
+                )
+                .await?;
         }
 
         // The doc_id_str is the composition of index_id + document_id
