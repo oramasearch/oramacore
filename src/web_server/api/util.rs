@@ -338,6 +338,31 @@ impl IntoResponse for WriteError {
                 );
                 (StatusCode::PAYMENT_REQUIRED, body).into_response()
             }
+            Self::ShelfAlreadyExists(collection_id, shelf_name) => {
+                let body =
+                    format!("Shelf '{shelf_name}' already exists in collection {collection_id}");
+                (StatusCode::CONFLICT, body).into_response()
+            }
+            Self::ShelfNotFound(collection_id, shelf_name) => {
+                let body = format!("Shelf '{shelf_name}' not found in collection {collection_id}");
+                (StatusCode::NOT_FOUND, body).into_response()
+            }
+            Self::ShelfNameInvalid(msg) => {
+                let body = format!("Invalid shelf name: {msg}");
+                (StatusCode::BAD_REQUEST, body).into_response()
+            }
+            Self::ShelfTooLarge(actual, max) => {
+                let body = format!("Shelf too large: {actual} bytes (max: {max} bytes)");
+                (StatusCode::PAYLOAD_TOO_LARGE, body).into_response()
+            }
+            Self::ShelfDocumentLimitExceeded(actual, max) => {
+                let body = format!("Too many documents in shelf: {actual} (max: {max})");
+                (StatusCode::PAYLOAD_TOO_LARGE, body).into_response()
+            }
+            Self::TooManyShelves(actual, max) => {
+                let body = format!("Too many shelves in collection: {actual} (max: {max})");
+                (StatusCode::PAYLOAD_TOO_LARGE, body).into_response()
+            }
         }
     }
 }
@@ -452,6 +477,11 @@ impl IntoResponse for ReadError {
                 format!(
                     "Unknown indexes requested: {unknown_index_ids:?}. Available indexes: {available_index_ids:?}"
                 ),
+            )
+                .into_response(),
+            Self::ShelfNotFound(collection_id, shelf_name) => (
+                StatusCode::NOT_FOUND,
+                format!("Shelf '{shelf_name}' not found in collection {collection_id}"),
             )
                 .into_response(),
         }
