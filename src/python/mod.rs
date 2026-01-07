@@ -1,7 +1,7 @@
 use include_dir::{include_dir, Dir};
 use pyo3::{prelude::*, types::PyDict};
 use std::{path::PathBuf, sync::Arc};
-use tracing::info;
+use tracing::{info, warn};
 
 use crate::ai::AIServiceConfig;
 
@@ -9,7 +9,7 @@ pub mod embeddings;
 pub mod mcp;
 
 // @todo: we should ensure that we're running in the correct venv and Python version.
-static VENV_DIR: &str = ".venv/lib/python3.11/site-packages";
+static DEFAULT_VENV_DIR: &str = ".venv/lib/python3.11/site-packages";
 static PYTHON_SCRIPTS: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/src/python/scripts");
 
 pub struct PythonService {
@@ -52,8 +52,16 @@ impl PythonService {
         let sys = py.import("sys")?;
         let path = sys.getattr("path")?;
 
-        if std::path::Path::new(VENV_DIR).exists() {
-            path.call_method1("insert", (0, VENV_DIR))?;
+        let venv_dir = std::env::var("ORAMACORE_PYTHON_VENV_DIR")
+            .unwrap_or_else(|_| DEFAULT_VENV_DIR.to_string());
+
+        if std::path::Path::new(&venv_dir).exists() {
+            path.call_method1("insert", (0, &venv_dir))?;
+        } else {
+            warn!(
+                "Specified Python venv directory does not exist: {}. Continuing without it.",
+                venv_dir
+            );
         }
 
         info!("Using Python scripts from: {:?}", python_scripts_dir);
