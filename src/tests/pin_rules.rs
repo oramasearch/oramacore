@@ -808,11 +808,10 @@ async fn test_pin_rule_commit() {
         .join("collections")
         .join(collection_client.collection_id.to_string())
         .join("pin_rules");
-    let reader_rule_file = reader_pin_rules_dir.join(format!("{}.rule", TEST_COMMIT_RULE_ID));
+    let reader_rule_file = reader_pin_rules_dir.join(format!("{TEST_COMMIT_RULE_ID}.rule"));
     assert!(
         reader_rule_file.exists(),
-        "Pin rule file should exist in reader side: {:?}",
-        reader_rule_file
+        "Pin rule file should exist in reader side: {reader_rule_file:?}"
     );
 
     // Check that the rule file exists in the writer side
@@ -821,11 +820,10 @@ async fn test_pin_rule_commit() {
         .join("collections")
         .join(collection_client.collection_id.to_string())
         .join("pin_rules");
-    let writer_rule_file = writer_pin_rules_dir.join(format!("{}.rule", TEST_COMMIT_RULE_ID));
+    let writer_rule_file = writer_pin_rules_dir.join(format!("{TEST_COMMIT_RULE_ID}.rule"));
     assert!(
         writer_rule_file.exists(),
-        "Pin rule file should exist in writer side: {:?}",
-        writer_rule_file
+        "Pin rule file should exist in writer side: {writer_rule_file:?}"
     );
 
     // Verify the content of the writer side rule file
@@ -870,7 +868,7 @@ async fn test_pin_rule_commit() {
             let rule_ids = pin_rules_reader.get_rule_ids();
 
             if !rule_ids.contains(&TEST_COMMIT_RULE_ID.to_string()) {
-                anyhow::bail!("{} not found after reload", TEST_COMMIT_RULE_ID);
+                anyhow::bail!("{TEST_COMMIT_RULE_ID} not found after reload");
             }
 
             Ok(())
@@ -899,8 +897,7 @@ async fn test_pin_rule_commit() {
     );
     assert_eq!(
         &ids_after_reload[1], "5",
-        "Second result should be promoted {} after reload",
-        TEST_COMMIT_RULE_ID
+        "Second result should be promoted {TEST_COMMIT_RULE_ID} after reload"
     );
 
     drop(test_context);
