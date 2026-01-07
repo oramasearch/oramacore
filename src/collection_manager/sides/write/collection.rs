@@ -594,6 +594,65 @@ impl CollectionWriter {
         Ok(())
     }
 
+    /// Check JWT claim limitations for a temp index.
+    ///
+    /// When inserting documents to a temp index, we need a dedicated check:
+    /// - Count all runtime indexes EXCEPT the linked one (which the temp will replace)
+    /// - Add temp index current docs + new docs being inserted
+    /// - Compare against the max_doc_count limit
+    ///
+    /// This ensures users don't waste time inserting documents into a temp index
+    /// only to have the replacement fail later.
+    pub async fn check_claim_limitations_for_temp_index(
+        &self,
+        api_key: WriteApiKey,
+        temp_index_id: IndexId,
+        linked_runtime_index_id: IndexId,
+        new_add: usize,
+    ) -> Result<(), WriteError> {
+        let claims = match api_key {
+            WriteApiKey::ApiKey(_) => {
+                // No limit for traditional API keys
+                return Ok(());
+            }
+            WriteApiKey::Claims(claim) => claim,
+        };
+
+        let max_doc_count = claims.limits.max_doc_count;
+
+        // Count runtime indexes EXCEPT the linked one (which temp will replace)
+        let mut document_count = 0_usize;
+        let indexes = self
+            .indexes
+            .read("check_claim_limitations_for_temp_index")
+            .await;
+        for (id, index) in indexes.iter() {
+            if *id != linked_runtime_index_id {
+                document_count += index.get_document_count("check_doc_number").await;
+            }
+        }
+        drop(indexes);
+
+        // Add temp index current documents
+        let temp_indexes = self
+            .temp_indexes
+            .read("check_claim_limitations_for_temp_index")
+            .await;
+        if let Some(temp_index) = temp_indexes.get(&temp_index_id) {
+            document_count += temp_index.get_document_count("check_doc_number").await;
+        }
+        drop(temp_indexes);
+
+        // Add new documents being inserted
+        let future_document_count = document_count.saturating_add(new_add);
+
+        if future_document_count > max_doc_count {
+            return Err(WriteError::DocumentLimitExceeded(self.id, max_doc_count));
+        }
+
+        Ok(())
+    }
+
     pub async fn as_dto(&self) -> DescribeCollectionResponse {
         let mut indexes_desc = vec![];
         let mut document_count = 0_usize;
