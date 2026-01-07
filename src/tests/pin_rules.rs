@@ -1,5 +1,6 @@
-use crate::tests::utils::TestContext;
 use crate::tests::utils::{extrapolate_ids_from_result, init_log};
+use crate::tests::utils::{wait_for, TestContext};
+use futures::FutureExt;
 use serde_json::json;
 use std::convert::TryInto;
 
@@ -746,6 +747,161 @@ async fn test_pin_rules_promote_non_matching_documents() {
         .find(|hit| hit.id.ends_with(":1"))
         .unwrap();
     assert!(doc_1_hit.score > 0.0);
+
+    drop(test_context);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_pin_rule_commit() {
+    init_log();
+
+    let test_context = TestContext::new().await;
+    let collection_client = test_context.create_collection().await.unwrap();
+    let index_client = collection_client.create_index().await.unwrap();
+
+    // Insert documents
+    let docs: Vec<_> = (0_u8..10_u8)
+        .map(|i| {
+            json!({
+                "id": format!("{}", i),
+                "name": format!("Product {}", i),
+            })
+        })
+        .collect();
+    index_client
+        .insert_documents(docs.try_into().unwrap())
+        .await
+        .unwrap();
+
+    // Insert pin rule
+    const TEST_COMMIT_RULE_ID: &str = "test-commit-rule";
+    index_client
+        .insert_pin_rules(
+            json!({
+                "id": TEST_COMMIT_RULE_ID,
+                "conditions": [
+                    {
+                        "pattern": "product",
+                        "anchoring": "contains"
+                    }
+                ],
+                "consequence": {
+                    "promote": [
+                        {
+                            "doc_id": "5",
+                            "position": 1
+                        }
+                    ]
+                }
+            })
+            .try_into()
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    test_context.commit_all().await.unwrap();
+
+    // Check that the rule file exists in the reader side
+    let reader_data_dir = &test_context.config.reader_side.config.data_dir;
+    let reader_pin_rules_dir = reader_data_dir
+        .join("collections")
+        .join(collection_client.collection_id.to_string())
+        .join("pin_rules");
+    let reader_rule_file = reader_pin_rules_dir.join(format!("{}.rule", TEST_COMMIT_RULE_ID));
+    assert!(
+        reader_rule_file.exists(),
+        "Pin rule file should exist in reader side: {:?}",
+        reader_rule_file
+    );
+
+    // Check that the rule file exists in the writer side
+    let writer_data_dir = &test_context.config.writer_side.config.data_dir;
+    let writer_pin_rules_dir = writer_data_dir
+        .join("collections")
+        .join(collection_client.collection_id.to_string())
+        .join("pin_rules");
+    let writer_rule_file = writer_pin_rules_dir.join(format!("{}.rule", TEST_COMMIT_RULE_ID));
+    assert!(
+        writer_rule_file.exists(),
+        "Pin rule file should exist in writer side: {:?}",
+        writer_rule_file
+    );
+
+    // Verify the content of the writer side rule file
+    let writer_rule_content = std::fs::read_to_string(&writer_rule_file).unwrap();
+    let writer_rule: serde_json::Value = serde_json::from_str(&writer_rule_content).unwrap();
+    assert_eq!(writer_rule["id"], TEST_COMMIT_RULE_ID);
+    assert_eq!(writer_rule["conditions"][0]["pattern"], "product");
+    assert_eq!(writer_rule["conditions"][0]["anchoring"], "contains");
+    // as string
+    assert_eq!(writer_rule["consequence"]["promote"][0]["doc_id"], "5");
+    assert_eq!(writer_rule["consequence"]["promote"][0]["position"], 1);
+
+    // Verify the content of the reader side rule file (should have numeric doc_id)
+    let reader_rule_content = std::fs::read_to_string(&reader_rule_file).unwrap();
+    let reader_rule: serde_json::Value = serde_json::from_str(&reader_rule_content).unwrap();
+    assert_eq!(reader_rule["id"], TEST_COMMIT_RULE_ID);
+    assert_eq!(reader_rule["conditions"][0]["pattern"], "product");
+    assert_eq!(reader_rule["conditions"][0]["anchoring"], "contains");
+    // as DocumentId, and +1 since document count starts from 1
+    assert_eq!(reader_rule["consequence"]["promote"][0]["doc_id"], 6);
+    assert_eq!(reader_rule["consequence"]["promote"][0]["position"], 1);
+
+    let collection_id = collection_client.collection_id;
+    let write_api_key = collection_client.write_api_key;
+    let read_api_key = collection_client.read_api_key;
+
+    // Now reload the system to verify pin rules are loaded from disk
+    let test_context = test_context.reload().await;
+
+    let collection_client = test_context
+        .get_test_collection_client(collection_id, write_api_key, read_api_key)
+        .unwrap();
+
+    // Wait for the reader to fully load the collection and pin rules
+    wait_for(&collection_client, |c| {
+        let reader = c.reader;
+        let read_api_key = c.read_api_key;
+        let collection_id = c.collection_id;
+        async move {
+            let collection = reader.get_collection(collection_id, read_api_key).await?;
+            let pin_rules_reader = collection.get_pin_rules_reader("reload-test").await;
+            let rule_ids = pin_rules_reader.get_rule_ids();
+
+            if !rule_ids.contains(&TEST_COMMIT_RULE_ID.to_string()) {
+                anyhow::bail!("{} not found after reload", TEST_COMMIT_RULE_ID);
+            }
+
+            Ok(())
+        }
+        .boxed()
+    })
+    .await
+    .expect("Pin rules should be loaded from disk after reload");
+
+    // Verify the rules still work correctly after reload
+    let result_after_reload = collection_client
+        .search(
+            json!({
+                "term": "product"
+            })
+            .try_into()
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    let ids_after_reload = extrapolate_ids_from_result(&result_after_reload);
+    assert_eq!(
+        &ids_after_reload[0], "0",
+        "First result should be natural result after reload"
+    );
+    assert_eq!(
+        &ids_after_reload[1], "5",
+        "Second result should be promoted {} after reload",
+        TEST_COMMIT_RULE_ID
+    );
 
     drop(test_context);
 }
