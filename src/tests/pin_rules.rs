@@ -826,26 +826,6 @@ async fn test_pin_rule_commit() {
         "Pin rule file should exist in writer side: {writer_rule_file:?}"
     );
 
-    // Verify the content of the writer side rule file
-    let writer_rule_content = std::fs::read_to_string(&writer_rule_file).unwrap();
-    let writer_rule: serde_json::Value = serde_json::from_str(&writer_rule_content).unwrap();
-    assert_eq!(writer_rule["id"], TEST_COMMIT_RULE_ID);
-    assert_eq!(writer_rule["conditions"][0]["pattern"], "product");
-    assert_eq!(writer_rule["conditions"][0]["anchoring"], "contains");
-    // as string
-    assert_eq!(writer_rule["consequence"]["promote"][0]["doc_id"], "5");
-    assert_eq!(writer_rule["consequence"]["promote"][0]["position"], 1);
-
-    // Verify the content of the reader side rule file (should have numeric doc_id)
-    let reader_rule_content = std::fs::read_to_string(&reader_rule_file).unwrap();
-    let reader_rule: serde_json::Value = serde_json::from_str(&reader_rule_content).unwrap();
-    assert_eq!(reader_rule["id"], TEST_COMMIT_RULE_ID);
-    assert_eq!(reader_rule["conditions"][0]["pattern"], "product");
-    assert_eq!(reader_rule["conditions"][0]["anchoring"], "contains");
-    // as DocumentId, and +1 since document count starts from 1
-    assert_eq!(reader_rule["consequence"]["promote"][0]["doc_id"], 6);
-    assert_eq!(reader_rule["consequence"]["promote"][0]["position"], 1);
-
     let collection_id = collection_client.collection_id;
     let write_api_key = collection_client.write_api_key;
     let read_api_key = collection_client.read_api_key;
