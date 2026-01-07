@@ -882,3 +882,122 @@ async fn test_pin_rule_commit() {
 
     drop(test_context);
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_pin_rule_delete_removes_files() {
+    init_log();
+
+    let test_context = TestContext::new().await;
+    let collection_client = test_context.create_collection().await.unwrap();
+    let index_client = collection_client.create_index().await.unwrap();
+
+    // Insert documents
+    let docs: Vec<_> = (0_u8..10_u8)
+        .map(|i| {
+            json!({
+                "id": format!("{}", i),
+                "name": format!("Product {}", i),
+            })
+        })
+        .collect();
+    index_client
+        .insert_documents(docs.try_into().unwrap())
+        .await
+        .unwrap();
+
+    // Insert pin rule
+    const TEST_DELETE_RULE_ID: &str = "test-delete-rule";
+    index_client
+        .insert_pin_rules(
+            json!({
+                "id": TEST_DELETE_RULE_ID,
+                "conditions": [
+                    {
+                        "pattern": "product",
+                        "anchoring": "contains"
+                    }
+                ],
+                "consequence": {
+                    "promote": [
+                        {
+                            "doc_id": "5",
+                            "position": 1
+                        }
+                    ]
+                }
+            })
+            .try_into()
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    // Commit to ensure files are written to disk
+    test_context.commit_all().await.unwrap();
+
+    // Verify that the rule files exist in both reader and writer sides before deletion
+    let reader_data_dir = &test_context.config.reader_side.config.data_dir;
+    let reader_pin_rules_dir = reader_data_dir
+        .join("collections")
+        .join(collection_client.collection_id.to_string())
+        .join("pin_rules");
+    let reader_rule_file = reader_pin_rules_dir.join(format!("{TEST_DELETE_RULE_ID}.rule"));
+    assert!(
+        reader_rule_file.exists(),
+        "Pin rule file should exist in reader side before deletion: {reader_rule_file:?}"
+    );
+
+    let writer_data_dir = &test_context.config.writer_side.config.data_dir;
+    let writer_pin_rules_dir = writer_data_dir
+        .join("collections")
+        .join(collection_client.collection_id.to_string())
+        .join("pin_rules");
+    let writer_rule_file = writer_pin_rules_dir.join(format!("{TEST_DELETE_RULE_ID}.rule"));
+    assert!(
+        writer_rule_file.exists(),
+        "Pin rule file should exist in writer side before deletion: {writer_rule_file:?}"
+    );
+
+    // Delete the pin rule
+    index_client
+        .delete_pin_rules(TEST_DELETE_RULE_ID.to_string())
+        .await
+        .unwrap();
+
+    // Commit to ensure deletion is persisted to disk
+    test_context.commit_all().await.unwrap();
+
+    // Verify that the rule files are removed from both reader and writer sides
+    assert!(
+        !reader_rule_file.exists(),
+        "Pin rule file should be removed from reader side: {reader_rule_file:?}"
+    );
+    assert!(
+        !writer_rule_file.exists(),
+        "Pin rule file should be removed from writer side: {writer_rule_file:?}"
+    );
+
+    // Verify the rule no longer affects search results
+    let result = collection_client
+        .search(
+            json!({
+                "term": "product"
+            })
+            .try_into()
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    let ids = extrapolate_ids_from_result(&result);
+    assert_eq!(
+        &ids[0], "0",
+        "First result should be natural order after rule deletion"
+    );
+    assert_ne!(
+        &ids[1], "5",
+        "Document 5 should not be promoted after rule deletion"
+    );
+
+    drop(test_context);
+}
