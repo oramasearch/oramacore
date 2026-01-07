@@ -222,9 +222,12 @@ impl CollectionWriter {
 
         let indexes_lock = self.indexes.get_mut();
         let temp_indexes_lock = self.temp_indexes.get_mut();
+        let pin_rules_lock = self.pin_rules_writer.get_mut();
 
         let is_dirty = indexes_lock.values().any(|i| i.is_dirty())
-            || temp_indexes_lock.values().any(|i| i.is_dirty());
+            || temp_indexes_lock.values().any(|i| i.is_dirty())
+            || pin_rules_lock.has_pending_changes();
+
         if !self.is_new && !is_dirty {
             info!("Collection is not dirty, skipping commit");
             return Ok(());
@@ -249,11 +252,9 @@ impl CollectionWriter {
             .commit()
             .context("Cannot commit collection document storage")?;
 
-        let mut pin_rules_writer = self.pin_rules_writer.write("commit").await;
-        pin_rules_writer
+        pin_rules_lock
             .commit(data_dir.join("pin_rules"))
             .context("Cannot commit pin rules")?;
-        drop(pin_rules_writer);
 
         let temporary_indexes = temp_indexes_lock.keys().copied().collect::<Vec<_>>();
         let indexes_path = data_dir.join("temp_indexes");

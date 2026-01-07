@@ -773,6 +773,9 @@ async fn test_pin_rule_commit() {
         .await
         .unwrap();
 
+    // trigger the commit for the index and collection
+    test_context.commit_all().await.unwrap();
+
     // Insert pin rule
     const TEST_COMMIT_RULE_ID: &str = "test-commit-rule";
     index_client
@@ -800,6 +803,7 @@ async fn test_pin_rule_commit() {
         .await
         .unwrap();
 
+    // commit only the pin rules, to be sure it is triggered
     test_context.commit_all().await.unwrap();
 
     // Check that the rule file exists in the reader side
