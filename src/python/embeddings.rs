@@ -236,6 +236,8 @@ mod tests {
     use super::*;
 
     static PYTHON_SERVICE: LazyLock<Arc<PythonService>> = LazyLock::new(|| {
+        Python::initialize();
+
         let config = create_oramacore_config();
         Arc::new(
             PythonService::new(config.ai_server)
