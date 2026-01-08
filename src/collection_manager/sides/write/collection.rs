@@ -218,7 +218,7 @@ impl CollectionWriter {
             ),
             shelf_writer: OramaAsyncLock::new(
                 "shelf_writer",
-                ShelfWriter::try_new(data_dir.join("shelf"))
+                ShelfWriter::try_new(data_dir.join("shelves"))
                     .context("Cannot create shelf writer")?,
             ),
 
@@ -234,10 +234,12 @@ impl CollectionWriter {
         let indexes_lock = self.indexes.get_mut();
         let temp_indexes_lock = self.temp_indexes.get_mut();
         let pin_rules_lock = self.pin_rules_writer.get_mut();
+        let shelf_lock = self.shelf_writer.get_mut();
 
         let is_dirty = indexes_lock.values().any(|i| i.is_dirty())
             || temp_indexes_lock.values().any(|i| i.is_dirty())
-            || pin_rules_lock.has_pending_changes();
+            || pin_rules_lock.has_pending_changes()
+            || shelf_lock.has_pending_changes();
 
         if !self.is_new && !is_dirty {
             info!("Collection is not dirty, skipping commit");
@@ -266,6 +268,10 @@ impl CollectionWriter {
         pin_rules_lock
             .commit(data_dir.join("pin_rules"))
             .context("Cannot commit pin rules")?;
+
+        shelf_lock
+            .commit(data_dir.join("shelves"))
+            .context("Cannot commit shelves")?;
 
         let temporary_indexes = temp_indexes_lock.keys().copied().collect::<Vec<_>>();
         let indexes_path = data_dir.join("temp_indexes");
