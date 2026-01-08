@@ -842,6 +842,40 @@ impl TestIndexClient<'_> {
 
         Ok(())
     }
+
+    pub async fn delete_pin_rules(&self, rule_id: String) -> Result<()> {
+        let collection = self
+            .writer
+            .get_collection(self.collection_id, self.write_api_key)
+            .await?;
+
+        collection
+            .delete_merchandising_pin_rule(rule_id.clone())
+            .await
+            .context("Failed to delete pin_rule")?;
+
+        wait_for(self, |s| {
+            let reader = s.reader;
+            let read_api_key = s.read_api_key;
+            let collection_id = s.collection_id;
+            let r = &rule_id;
+            async move {
+                let collection = reader.get_collection(collection_id, read_api_key).await?;
+                let reader = collection.get_pin_rules_reader("test").await;
+                let ids = reader.get_rule_ids();
+
+                if !ids.contains(r) {
+                    return Ok(());
+                }
+
+                bail!("Pin rule still exist");
+            }
+            .boxed()
+        })
+        .await?;
+
+        Ok(())
+    }
 }
 
 pub fn extrapolate_ids_from_result(result: &SearchResult) -> Vec<String> {

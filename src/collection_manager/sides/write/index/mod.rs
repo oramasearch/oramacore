@@ -298,15 +298,16 @@ impl Index {
     pub async fn commit(&self, data_dir: PathBuf) -> Result<()> {
         std::fs::create_dir_all(&data_dir).context("Cannot create data directory")?;
 
+        let (filter_fields, score_fields) = tokio::join!(
+            self.filter_fields.read("commit"),
+            self.score_fields.read("commit")
+        );
+
         if !self.is_dirty.load(Ordering::SeqCst) {
             info!("Index is not dirty, skipping commit");
             return Ok(());
         }
 
-        let (filter_fields, score_fields) = tokio::join!(
-            self.filter_fields.read("commit"),
-            self.score_fields.read("commit")
-        );
         let dump = IndexDump::V1(IndexDumpV1 {
             id: self.index_id,
             locale: self.locale,
@@ -318,8 +319,6 @@ impl Index {
             created_at: self.created_at,
             enum_strategy: self.enum_strategy,
         });
-        drop(filter_fields);
-        drop(score_fields);
 
         BufferedFile::create_or_overwrite(data_dir.join("info.json"))
             .context("Cannot create info.json file")?
@@ -332,6 +331,9 @@ impl Index {
             .context("Cannot commit index")?;
 
         self.is_dirty.store(false, Ordering::SeqCst);
+
+        drop(filter_fields);
+        drop(score_fields);
 
         Ok(())
     }

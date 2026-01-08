@@ -21,7 +21,7 @@ use crate::{
 pub fn read_apis(read_side: Arc<ReadSide>) -> Router {
     Router::new()
         .route(
-            "/v1/collections/{collection_id}/merchandinsing/pin_rules/ids",
+            "/v1/collections/{collection_id}/merchandising/pin_rules/ids",
             get(list_merchandising_pin_rules_ids_v1),
         )
         .with_state(read_side)
@@ -30,15 +30,15 @@ pub fn read_apis(read_side: Arc<ReadSide>) -> Router {
 pub fn write_apis(write_side: Arc<WriteSide>) -> Router {
     Router::new()
         .route(
-            "/v1/collections/{collection_id}/merchandinsing/pin_rules/insert",
+            "/v1/collections/{collection_id}/merchandising/pin_rules/insert",
             post(insert_merchandising_pin_rules_v1),
         )
         .route(
-            "/v1/collections/{collection_id}/merchandinsing/pin_rules/delete",
+            "/v1/collections/{collection_id}/merchandising/pin_rules/delete",
             post(delete_merchandising_pin_rules_v1),
         )
         .route(
-            "/v1/collections/{collection_id}/merchandinsing/pin_rules/list",
+            "/v1/collections/{collection_id}/merchandising/pin_rules/list",
             get(list_merchandising_pin_rules_v1),
         )
         .with_state(write_side)

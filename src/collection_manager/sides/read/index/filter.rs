@@ -493,6 +493,9 @@ impl<'index> FilterContext<'index> {
         self,
         where_filter: &WhereFilter,
     ) -> Result<Option<FilterResult<DocumentId>>> {
+        // Force an estimated size to avoid hash collisions in Bloom filters
+        let expected_items = self.document_count.max(100_000);
+
         // Only return None if there's no filter AND no deleted documents
         if where_filter.is_empty() {
             if self.uncommitted_deleted_documents.is_empty() {
@@ -501,7 +504,7 @@ impl<'index> FilterContext<'index> {
             // No filter but we have deleted documents - return NOT(deleted_docs)
             return Ok(Some(FilterResult::Not(Box::new(FilterResult::Filter(
                 PlainFilterResult::from_iter(
-                    self.document_count,
+                    expected_items,
                     self.uncommitted_deleted_documents.iter().copied(),
                 ),
             )))));
@@ -510,7 +513,7 @@ impl<'index> FilterContext<'index> {
         trace!("Calculating filtered doc ids");
 
         let mut output = calculate_filter(
-            self.document_count,
+            expected_items,
             self.path_to_index_id_map,
             where_filter,
             self.uncommitted_fields,
@@ -523,7 +526,7 @@ impl<'index> FilterContext<'index> {
                 output,
                 FilterResult::Not(Box::new(FilterResult::Filter(
                     PlainFilterResult::from_iter(
-                        self.document_count,
+                        expected_items,
                         self.uncommitted_deleted_documents.iter().copied(),
                     ),
                 ))),
