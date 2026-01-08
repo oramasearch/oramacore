@@ -606,6 +606,67 @@ impl TestCollectionClient<'_> {
             .map_err(|e| e.into())
     }
 
+    pub async fn insert_shelf(&self, shelf: oramacore_lib::shelf::Shelf<String>) -> Result<()> {
+        let collection = self
+            .writer
+            .get_collection(self.collection_id, self.write_api_key)
+            .await?;
+
+        collection
+            .insert_shelf(shelf)
+            .await
+            .context("Failed to insert shelf")?;
+
+        Ok(())
+    }
+
+    pub async fn delete_shelf(&self, shelf_id: String) -> Result<()> {
+        let collection = self
+            .writer
+            .get_collection(self.collection_id, self.write_api_key)
+            .await?;
+
+        let shelf_id = oramacore_lib::shelf::ShelfId::try_new(shelf_id)
+            .map_err(|e| anyhow::anyhow!("Invalid shelf ID: {}", e))?;
+
+        collection
+            .delete_shelf(shelf_id)
+            .await
+            .context("Failed to delete shelf")?;
+
+        Ok(())
+    }
+
+    pub async fn get_shelf(
+        &self,
+        shelf_id: String,
+    ) -> Result<oramacore_lib::shelf::Shelf<String>> {
+        let collection = self
+            .writer
+            .get_collection(self.collection_id, self.write_api_key)
+            .await?;
+
+        let shelf_id = oramacore_lib::shelf::ShelfId::try_new(shelf_id)
+            .map_err(|e| anyhow::anyhow!("Invalid shelf ID: {}", e))?;
+
+        collection
+            .get_shelf(shelf_id)
+            .await
+            .context("Failed to get shelf")
+    }
+
+    pub async fn list_shelves(&self) -> Result<Vec<oramacore_lib::shelf::Shelf<String>>> {
+        let collection = self
+            .writer
+            .get_collection(self.collection_id, self.write_api_key)
+            .await?;
+
+        collection
+            .list_shelves()
+            .await
+            .context("Failed to list shelves")
+    }
+
     fn generate_index_id(prefix: &str) -> IndexId {
         let id: String = format!("{}_{}", prefix, Faker.fake::<String>());
         IndexId::try_new(id).unwrap()

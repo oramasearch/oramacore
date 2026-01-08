@@ -30,7 +30,7 @@ mod pin_rules;
 mod quick_fulltext_benchmark;
 mod replace_doc_on_insert;
 mod replace_index;
-mod shelf;
+mod shelves;
 mod shutdown;
 mod sort;
 mod suggestions;
