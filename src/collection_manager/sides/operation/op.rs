@@ -447,11 +447,11 @@ impl WriteOperation {
             WriteOperation::Collection(
                 _,
                 CollectionWriteOperation::Shelf(ShelfOperation::Insert(_)),
-            ) => "insert_shelf",
+            ) => "insert_merchandising_shelf",
             WriteOperation::Collection(
                 _,
                 CollectionWriteOperation::Shelf(ShelfOperation::Delete(_)),
-            ) => "delete__shelf",
+            ) => "delete_merchandising_shelf",
             WriteOperation::Collection(
                 _,
                 CollectionWriteOperation::DocumentStorage(
