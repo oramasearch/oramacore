@@ -1,7 +1,7 @@
 use include_dir::{include_dir, Dir};
 use pyo3::{prelude::*, types::PyDict};
 use std::{path::PathBuf, sync::Arc};
-use tracing::info;
+use tracing::{info, warn};
 
 use crate::ai::AIServiceConfig;
 
@@ -9,7 +9,7 @@ pub mod embeddings;
 pub mod mcp;
 
 // @todo: we should ensure that we're running in the correct venv and Python version.
-static VENV_DIR: &str = ".venv/lib/python3.11/site-packages";
+static DEFAULT_VENV_DIR: &str = ".venv/lib/python3.11/site-packages";
 static PYTHON_SCRIPTS: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/src/python/scripts");
 
 pub struct PythonService {
@@ -18,7 +18,11 @@ pub struct PythonService {
 
 impl PythonService {
     pub fn new(orama_config: AIServiceConfig) -> PyResult<Self> {
-        Python::initialize();
+        // This initialization could not be required because it is already called in main function
+        // `initialize` has to be called in the main thread.
+        // Don't call it here to avoid issues.
+        // Don't uncomment the next line even if you know what you're doing.
+        // Python::initialize();
 
         let python_scripts_dir = Self::extract_python_scripts().map_err(|e| {
             PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!(
@@ -44,12 +48,20 @@ impl PythonService {
         })
     }
 
-    pub fn initialize_python_env(py: Python<'_>, python_scripts_dir: &PathBuf) -> PyResult<()> {
+    fn initialize_python_env(py: Python<'_>, python_scripts_dir: &PathBuf) -> PyResult<()> {
         let sys = py.import("sys")?;
         let path = sys.getattr("path")?;
 
-        if std::path::Path::new(VENV_DIR).exists() {
-            path.call_method1("insert", (0, VENV_DIR))?;
+        let venv_dir = std::env::var("ORAMACORE_PYTHON_VENV_DIR")
+            .unwrap_or_else(|_| DEFAULT_VENV_DIR.to_string());
+
+        if std::path::Path::new(&venv_dir).exists() {
+            path.call_method1("insert", (0, &venv_dir))?;
+        } else {
+            warn!(
+                "Specified Python venv directory does not exist: {}. Continuing without it.",
+                venv_dir
+            );
         }
 
         info!("Using Python scripts from: {:?}", python_scripts_dir);
