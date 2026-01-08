@@ -358,8 +358,8 @@ impl CollectionReader {
             ),
             shelf_reader: OramaAsyncLock::new(
                 "shelf_reader",
-                ShelfReader::try_new(data_dir.join("pin_rules"))
-                    .context("Cannot create pin rules reader")?,
+                ShelfReader::try_new(data_dir.join("shelves"))
+                    .context("Cannot create shelves reader")?,
             ),
 
             data_dir,
