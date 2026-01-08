@@ -17,7 +17,7 @@ use orama_js_pool::OutputChannel;
 use oramacore_lib::{
     hook_storage::{HookReader, HookType},
     pin_rules::PinRulesReader,
-    shelf::ShelfReader,
+    shelf::ShelvesReader,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
@@ -148,7 +148,7 @@ pub struct CollectionReader {
     last_commit_time: OramaSyncLock<Instant>,
 
     pin_rules_reader: OramaAsyncLock<PinRulesReader<DocumentId>>,
-    shelf_reader: OramaAsyncLock<ShelfReader<DocumentId>>,
+    shelves_reader: OramaAsyncLock<ShelvesReader<DocumentId>>,
 
     document_storage: Arc<CollectionDocumentStorage>,
 }
@@ -213,7 +213,7 @@ impl CollectionReader {
             ),
 
             pin_rules_reader: OramaAsyncLock::new("pin_rules_reader", PinRulesReader::empty()),
-            shelf_reader: OramaAsyncLock::new("shelf_reader", ShelfReader::empty()),
+            shelves_reader: OramaAsyncLock::new("shelves_reader", ShelvesReader::empty()),
 
             data_dir,
 
@@ -356,9 +356,9 @@ impl CollectionReader {
                 PinRulesReader::try_new(data_dir.join("pin_rules"))
                     .context("Cannot create pin rules reader")?,
             ),
-            shelf_reader: OramaAsyncLock::new(
-                "shelf_reader",
-                ShelfReader::try_new(data_dir.join("shelves"))
+            shelves_reader: OramaAsyncLock::new(
+                "shelves_reader",
+                ShelvesReader::try_new(data_dir.join("shelves"))
                     .context("Cannot create shelves reader")?,
             ),
 
@@ -988,11 +988,11 @@ impl CollectionReader {
             }
             CollectionWriteOperation::Shelf(op) => {
                 println!("Applying shelf operation: {op:?}");
-                let mut shelf_lock = self.shelf_reader.write("update_shelf").await;
-                shelf_lock
+                let mut shelves_lock = self.shelves_reader.write("update_shelf").await;
+                shelves_lock
                     .update(op)
                     .context("Cannot apply shelf operation")?;
-                drop(shelf_lock);
+                drop(shelves_lock);
             }
             CollectionWriteOperation::DocumentStorage(op) => {
                 self.document_storage

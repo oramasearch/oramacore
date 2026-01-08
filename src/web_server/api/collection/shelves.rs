@@ -44,7 +44,7 @@ pub fn write_apis(write_side: Arc<WriteSide>) -> Router {
         )
         .route(
             "/v1/collections/{collection_id}/merchandising/shelves/{shelf_id}",
-            get(get_merchandising_shelf_writer).delete(delete_merchandising_shelf_writer),
+            get(get_merchandising_shelves_writer).delete(delete_merchandising_shelves_writer),
         )
         .with_state(write_side)
 }
@@ -64,7 +64,7 @@ async fn insert_merchandising_shelf(
     Result::<Json<serde_json::Value>, WriteError>::Ok(Json(json!({ "success": true })))
 }
 
-async fn get_merchandising_shelf_writer(
+async fn get_merchandising_shelves_writer(
     Path((collection_id, shelf_id)): Path<(CollectionId, ShelfId)>,
     write_side: State<Arc<WriteSide>>,
     write_api_key: WriteApiKey,
@@ -92,7 +92,7 @@ async fn list_merchandising_shelves_writer(
     Result::<Json<serde_json::Value>, WriteError>::Ok(Json(json!({ "data": shelf_list })))
 }
 
-async fn delete_merchandising_shelf_writer(
+async fn delete_merchandising_shelves_writer(
     Path((collection_id, shelf_id)): Path<(CollectionId, ShelfId)>,
     write_side: State<Arc<WriteSide>>,
     write_api_key: WriteApiKey,

@@ -11,7 +11,7 @@ use futures::{future::join_all, FutureExt};
 use oramacore_lib::{
     hook_storage::HookWriter,
     pin_rules::PinRulesWriter,
-    shelf::{Shelf, ShelfId, ShelfOperation, ShelfWriter},
+    shelf::{Shelf, ShelfId, ShelfOperation, ShelvesWriter},
 };
 use serde::{Deserialize, Serialize};
 use tracing::{info, warn};
@@ -63,7 +63,7 @@ pub struct CollectionWriter {
     hook: HookWriter,
 
     pin_rules_writer: OramaAsyncLock<PinRulesWriter>,
-    shelf_writer: OramaAsyncLock<ShelfWriter>,
+    shelves_writer: OramaAsyncLock<ShelvesWriter>,
 
     is_new: bool,
 
@@ -122,7 +122,7 @@ impl CollectionWriter {
                 .context("Cannot create hook writer")?,
 
             pin_rules_writer: OramaAsyncLock::new("pin_rules_writer", PinRulesWriter::empty()?),
-            shelf_writer: OramaAsyncLock::new("shelf_writer", ShelfWriter::empty()?),
+            shelves_writer: OramaAsyncLock::new("shelves_writer", ShelvesWriter::empty()?),
 
             is_new: true,
         })
@@ -216,9 +216,9 @@ impl CollectionWriter {
                 PinRulesWriter::try_new(data_dir.join("pin_rules"))
                     .context("Cannot create pin rules writer")?,
             ),
-            shelf_writer: OramaAsyncLock::new(
-                "shelf_writer",
-                ShelfWriter::try_new(data_dir.join("shelves"))
+            shelves_writer: OramaAsyncLock::new(
+                "shelves_writer",
+                ShelvesWriter::try_new(data_dir.join("shelves"))
                     .context("Cannot create shelf writer")?,
             ),
 
@@ -234,12 +234,12 @@ impl CollectionWriter {
         let indexes_lock = self.indexes.get_mut();
         let temp_indexes_lock = self.temp_indexes.get_mut();
         let pin_rules_lock = self.pin_rules_writer.get_mut();
-        let shelf_lock = self.shelf_writer.get_mut();
+        let shelves_lock = self.shelves_writer.get_mut();
 
         let is_dirty = indexes_lock.values().any(|i| i.is_dirty())
             || temp_indexes_lock.values().any(|i| i.is_dirty())
             || pin_rules_lock.has_pending_changes()
-            || shelf_lock.has_pending_changes();
+            || shelves_lock.has_pending_changes();
 
         if !self.is_new && !is_dirty {
             info!("Collection is not dirty, skipping commit");
@@ -269,7 +269,7 @@ impl CollectionWriter {
             .commit(data_dir.join("pin_rules"))
             .context("Cannot commit pin rules")?;
 
-        shelf_lock
+        shelves_lock
             .commit(data_dir.join("shelves"))
             .context("Cannot commit shelves")?;
 
@@ -916,8 +916,8 @@ impl CollectionWriter {
             ));
         }
 
-        let mut shelf_writer = self.shelf_writer.write("insert_shelf").await;
-        shelf_writer.insert_shelf(shelf.clone())?;
+        let mut shelves_writer = self.shelves_writer.write("insert_shelf").await;
+        shelves_writer.insert_shelf(shelf.clone())?;
 
         let indexes_lock = self.indexes.read("insert_shelf").await;
         let mut storages = Vec::with_capacity(indexes_lock.len());
@@ -939,7 +939,7 @@ impl CollectionWriter {
             })
             .await;
 
-        drop(shelf_writer);
+        drop(shelves_writer);
 
         self.context
             .op_sender
@@ -954,14 +954,14 @@ impl CollectionWriter {
     }
 
     pub async fn delete_shelf(&self, id: ShelfId) -> Result<(), WriteError> {
-        let mut shelf_writer = self.shelf_writer.write("delete_shelf").await;
-        shelf_writer.delete_shelf(id)?;
+        let mut shelves_writer = self.shelves_writer.write("delete_shelf").await;
+        shelves_writer.delete_shelf(id)?;
         Ok(())
     }
 
     pub async fn get_shelf(&self, id: ShelfId) -> Result<Shelf<String>, WriteError> {
-        let shelf_writer = self.shelf_writer.read("get_shelf").await;
-        shelf_writer
+        let shelves_writer = self.shelves_writer.read("get_shelf").await;
+        shelves_writer
             .list_shelves()
             .iter()
             .find(|shelf| shelf.id == id)
@@ -970,8 +970,8 @@ impl CollectionWriter {
     }
 
     pub async fn list_shelves(&self) -> Result<Vec<Shelf<String>>, WriteError> {
-        let shelf_writer = self.shelf_writer.read("list_shelves").await;
-        Ok(shelf_writer.list_shelves().to_vec())
+        let shelves_writer = self.shelves_writer.read("list_shelves").await;
+        Ok(shelves_writer.list_shelves().to_vec())
     }
 }
 
