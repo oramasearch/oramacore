@@ -17,6 +17,7 @@ use orama_js_pool::OutputChannel;
 use oramacore_lib::{
     hook_storage::{HookReader, HookType},
     pin_rules::PinRulesReader,
+    shelf::ShelfReader,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
@@ -147,6 +148,7 @@ pub struct CollectionReader {
     last_commit_time: OramaSyncLock<Instant>,
 
     pin_rules_reader: OramaAsyncLock<PinRulesReader<DocumentId>>,
+    shelf_reader: OramaAsyncLock<ShelfReader<DocumentId>>,
 
     document_storage: Arc<CollectionDocumentStorage>,
 }
@@ -211,6 +213,7 @@ impl CollectionReader {
             ),
 
             pin_rules_reader: OramaAsyncLock::new("pin_rules_reader", PinRulesReader::empty()),
+            shelf_reader: OramaAsyncLock::new("shelf_reader", ShelfReader::empty()),
 
             data_dir,
 
@@ -351,6 +354,11 @@ impl CollectionReader {
             pin_rules_reader: OramaAsyncLock::new(
                 "pin_rules_reader",
                 PinRulesReader::try_new(data_dir.join("pin_rules"))
+                    .context("Cannot create pin rules reader")?,
+            ),
+            shelf_reader: OramaAsyncLock::new(
+                "shelf_reader",
+                ShelfReader::try_new(data_dir.join("pin_rules"))
                     .context("Cannot create pin rules reader")?,
             ),
 
@@ -977,6 +985,14 @@ impl CollectionReader {
                     .update(op)
                     .context("Cannot apply pin rule operation")?;
                 drop(pin_rules_lock);
+            }
+            CollectionWriteOperation::Shelf(op) => {
+                println!("Applying shelf operation: {op:?}");
+                let mut shelf_lock = self.shelf_reader.write("update_shelf").await;
+                shelf_lock
+                    .update(op)
+                    .context("Cannot apply shelf operation")?;
+                drop(shelf_lock);
             }
             CollectionWriteOperation::DocumentStorage(op) => {
                 self.document_storage

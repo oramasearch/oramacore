@@ -8,7 +8,11 @@ use std::{
 use anyhow::{bail, Context, Result};
 use chrono::{DateTime, Utc};
 use futures::{future::join_all, FutureExt};
-use oramacore_lib::{hook_storage::HookWriter, pin_rules::PinRulesWriter};
+use oramacore_lib::{
+    hook_storage::HookWriter,
+    pin_rules::PinRulesWriter,
+    shelf::{Shelf, ShelfId, ShelfOperation, ShelfWriter},
+};
 use serde::{Deserialize, Serialize};
 use tracing::{info, warn};
 
@@ -59,6 +63,7 @@ pub struct CollectionWriter {
     hook: HookWriter,
 
     pin_rules_writer: OramaAsyncLock<PinRulesWriter>,
+    shelf_writer: OramaAsyncLock<ShelfWriter>,
 
     is_new: bool,
 
@@ -117,6 +122,7 @@ impl CollectionWriter {
                 .context("Cannot create hook writer")?,
 
             pin_rules_writer: OramaAsyncLock::new("pin_rules_writer", PinRulesWriter::empty()?),
+            shelf_writer: OramaAsyncLock::new("shelf_writer", ShelfWriter::empty()?),
 
             is_new: true,
         })
@@ -209,6 +215,11 @@ impl CollectionWriter {
                 "pin_rules_writer",
                 PinRulesWriter::try_new(data_dir.join("pin_rules"))
                     .context("Cannot create pin rules writer")?,
+            ),
+            shelf_writer: OramaAsyncLock::new(
+                "shelf_writer",
+                ShelfWriter::try_new(data_dir.join("shelf"))
+                    .context("Cannot create shelf writer")?,
             ),
 
             is_new: false,
@@ -784,7 +795,7 @@ impl CollectionWriter {
         rule: PinRule<String>,
     ) -> Result<(), WriteError> {
         let mut pin_rule_writer = self.pin_rules_writer.write("insert_pin_rule").await;
-        pin_rule_writer.insert_pin_rule(rule.clone()).await?;
+        pin_rule_writer.insert_pin_rule(rule.clone())?;
 
         let indexes_lock = self.indexes.read("insert_merchandising_pin_rule").await;
         let mut storages = Vec::with_capacity(indexes_lock.len());
@@ -821,7 +832,7 @@ impl CollectionWriter {
 
     pub async fn delete_merchandising_pin_rule(&self, rule_id: String) -> Result<(), WriteError> {
         let mut pin_rule_writer = self.pin_rules_writer.write("delete_pin_rule").await;
-        pin_rule_writer.delete_pin_rule(&rule_id).await?;
+        pin_rule_writer.delete_pin_rule(&rule_id)?;
         drop(pin_rule_writer);
 
         self.context
@@ -887,6 +898,74 @@ impl CollectionWriter {
                 CollectionWriteOperation::PinRule(PinRuleOperation::Insert(new_rule)),
             ));
         }
+    }
+
+    pub async fn insert_shelf(&self, shelf: Shelf<String>) -> Result<(), WriteError> {
+        const MAX_NUMBER_OF_ITEMS_SHELF: usize = 1_000;
+
+        if shelf.documents.len() > MAX_NUMBER_OF_ITEMS_SHELF {
+            return Err(WriteError::ShelfDocumentLimitExceeded(
+                shelf.documents.len(),
+                MAX_NUMBER_OF_ITEMS_SHELF,
+            ));
+        }
+
+        let mut shelf_writer = self.shelf_writer.write("insert_shelf").await;
+        shelf_writer.insert_shelf(shelf.clone())?;
+
+        let indexes_lock = self.indexes.read("insert_shelf").await;
+        let mut storages = Vec::with_capacity(indexes_lock.len());
+        for index in indexes_lock.values() {
+            let storage = index.get_document_id_storage().await;
+            storages.push(storage);
+        }
+
+        let new_shelf = shelf
+            .convert_ids(|id| {
+                for storage in &storages {
+                    if let Some(doc_id) = storage.get(&id) {
+                        return doc_id;
+                    }
+                }
+                // DocumentId(u64::MAX) is never used, so this is equal to say
+                // "ignore this rules"
+                DocumentId(u64::MAX)
+            })
+            .await;
+
+        drop(shelf_writer);
+
+        self.context
+            .op_sender
+            .send(WriteOperation::Collection(
+                self.id,
+                CollectionWriteOperation::Shelf(ShelfOperation::Insert(new_shelf)),
+            ))
+            .await
+            .context("Cannot send shelf create operation")?;
+
+        Ok(())
+    }
+
+    pub async fn delete_shelf(&self, id: ShelfId) -> Result<(), WriteError> {
+        let mut shelf_writer = self.shelf_writer.write("delete_shelf").await;
+        shelf_writer.delete_shelf(id)?;
+        Ok(())
+    }
+
+    pub async fn get_shelf(&self, id: ShelfId) -> Result<Shelf<String>, WriteError> {
+        let shelf_writer = self.shelf_writer.read("get_shelf").await;
+        shelf_writer
+            .list_shelves()
+            .iter()
+            .find(|shelf| shelf.id == id)
+            .cloned()
+            .ok_or_else(|| WriteError::ShelfNotFound(id))
+    }
+
+    pub async fn list_shelves(&self) -> Result<Vec<Shelf<String>>, WriteError> {
+        let shelf_writer = self.shelf_writer.read("list_shelves").await;
+        Ok(shelf_writer.list_shelves().to_vec())
     }
 }
 

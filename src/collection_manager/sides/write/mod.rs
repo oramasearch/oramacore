@@ -6,6 +6,7 @@ mod embedding;
 pub mod index;
 use oramacore_lib::hook_storage::{HookWriter, HookWriterError};
 use oramacore_lib::nlp::NLPService;
+use oramacore_lib::shelf::{ShelfId, ShelfWriterError};
 use thiserror::Error;
 mod context;
 pub mod jwt_manager;
@@ -99,6 +100,12 @@ pub enum WriteError {
     HookWriterError(#[from] HookWriterError),
     #[error("Error in pin rule")]
     PinRulesError(#[from] PinRulesWriterError),
+    #[error("Error in shelf")]
+    ShelfError(#[from] ShelfWriterError),
+    #[error("Shelf not found: {0:?}")]
+    ShelfNotFound(ShelfId),
+    #[error("Shelf size exceeded got: {0:?}, maximum: {1:?}")]
+    ShelfDocumentLimitExceeded(usize, usize),
     #[error("Document limit exceeded for collection {0}. Limit: {1}")]
     DocumentLimitExceeded(CollectionId, usize),
 }
@@ -600,7 +607,7 @@ impl WriteSide {
                 return Err(WriteError::TempIndexNotFound(
                     collection_id,
                     req.temp_index_id,
-                ))
+                ));
             }
         };
 
@@ -610,7 +617,7 @@ impl WriteSide {
                 return Err(WriteError::IndexNotFound(
                     collection_id,
                     req.runtime_index_id,
-                ))
+                ));
             }
         };
 
