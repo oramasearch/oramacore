@@ -350,7 +350,8 @@ impl CollectionReader {
 
             pin_rules_reader: OramaAsyncLock::new(
                 "pin_rules_reader",
-                PinRulesReader::try_new(data_dir.join("pin_rules"))?,
+                PinRulesReader::try_new(data_dir.join("pin_rules"))
+                    .context("Cannot create pin rules reader")?,
             ),
 
             data_dir,

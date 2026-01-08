@@ -205,7 +205,11 @@ impl CollectionWriter {
             )
             .context("Cannot create hook writer")?,
 
-            pin_rules_writer: OramaAsyncLock::new("pin_rules_writer", PinRulesWriter::empty()?),
+            pin_rules_writer: OramaAsyncLock::new(
+                "pin_rules_writer",
+                PinRulesWriter::try_new(data_dir.join("pin_rules"))
+                    .context("Cannot create pin rules writer")?,
+            ),
 
             is_new: false,
         })
@@ -218,9 +222,12 @@ impl CollectionWriter {
 
         let indexes_lock = self.indexes.get_mut();
         let temp_indexes_lock = self.temp_indexes.get_mut();
+        let pin_rules_lock = self.pin_rules_writer.get_mut();
 
         let is_dirty = indexes_lock.values().any(|i| i.is_dirty())
-            || temp_indexes_lock.values().any(|i| i.is_dirty());
+            || temp_indexes_lock.values().any(|i| i.is_dirty())
+            || pin_rules_lock.has_pending_changes();
+
         if !self.is_new && !is_dirty {
             info!("Collection is not dirty, skipping commit");
             return Ok(());
@@ -244,6 +251,10 @@ impl CollectionWriter {
         self.document_storage
             .commit()
             .context("Cannot commit collection document storage")?;
+
+        pin_rules_lock
+            .commit(data_dir.join("pin_rules"))
+            .context("Cannot commit pin rules")?;
 
         let temporary_indexes = temp_indexes_lock.keys().copied().collect::<Vec<_>>();
         let indexes_path = data_dir.join("temp_indexes");
@@ -772,7 +783,7 @@ impl CollectionWriter {
         &self,
         rule: PinRule<String>,
     ) -> Result<(), WriteError> {
-        let mut pin_rule_writer = self.pin_rules_writer.write("iinsert_pin_rule").await;
+        let mut pin_rule_writer = self.pin_rules_writer.write("insert_pin_rule").await;
         pin_rule_writer.insert_pin_rule(rule.clone()).await?;
 
         let indexes_lock = self.indexes.read("insert_merchandising_pin_rule").await;
