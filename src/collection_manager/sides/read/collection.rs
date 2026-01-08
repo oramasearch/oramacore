@@ -17,7 +17,7 @@ use orama_js_pool::OutputChannel;
 use oramacore_lib::{
     hook_storage::{HookReader, HookType},
     pin_rules::PinRulesReader,
-    shelf::ShelvesReader,
+    shelf::{Shelf, ShelfId, ShelvesReader},
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
@@ -1366,6 +1366,21 @@ impl CollectionReader {
         reason: &'static str,
     ) -> OramaAsyncLockReadGuard<'_, PinRulesReader<DocumentId>> {
         self.pin_rules_reader.read(reason).await
+    }
+
+    pub async fn list_shelves(&self) -> Result<Vec<Shelf<DocumentId>>, ReadError> {
+        let shelves_writer = self.shelves_reader.read("list_shelves").await;
+        Ok(shelves_writer.list_shelves().to_vec())
+    }
+
+    pub async fn get_shelf(&self, id: ShelfId) -> Result<Shelf<DocumentId>, ReadError> {
+        let shelves_writer = self.shelves_reader.read("get_shelf").await;
+        shelves_writer
+            .list_shelves()
+            .iter()
+            .find(|shelf| shelf.id == id)
+            .cloned()
+            .ok_or_else(|| ReadError::ShelfNotFound(id))
     }
 
     fn should_commit(&self, force: bool) -> bool {

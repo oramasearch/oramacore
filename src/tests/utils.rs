@@ -16,6 +16,7 @@ use tracing::warn;
 
 use crate::ai::AIServiceEmbeddingsConfig;
 use crate::ai::PythonLoggingLevel;
+use crate::types::DocumentId;
 use crate::{
     ai::{AIServiceConfig, AIServiceLLMConfig},
     build_orama,
@@ -627,7 +628,7 @@ impl TestCollectionClient<'_> {
             .await?;
 
         let shelf_id = oramacore_lib::shelf::ShelfId::try_new(shelf_id)
-            .map_err(|e| anyhow::anyhow!("Invalid shelf ID: {}", e))?;
+            .map_err(|e| anyhow::anyhow!("Invalid shelf ID: {e}"))?;
 
         collection
             .delete_shelf(shelf_id)
@@ -637,17 +638,14 @@ impl TestCollectionClient<'_> {
         Ok(())
     }
 
-    pub async fn get_shelf(
-        &self,
-        shelf_id: String,
-    ) -> Result<oramacore_lib::shelf::Shelf<String>> {
+    pub async fn get_shelf(&self, shelf_id: String) -> Result<oramacore_lib::shelf::Shelf<String>> {
         let collection = self
             .writer
             .get_collection(self.collection_id, self.write_api_key)
             .await?;
 
         let shelf_id = oramacore_lib::shelf::ShelfId::try_new(shelf_id)
-            .map_err(|e| anyhow::anyhow!("Invalid shelf ID: {}", e))?;
+            .map_err(|e| anyhow::anyhow!("Invalid shelf ID: {e}"))?;
 
         collection
             .get_shelf(shelf_id)
@@ -655,7 +653,9 @@ impl TestCollectionClient<'_> {
             .context("Failed to get shelf")
     }
 
-    pub async fn list_shelves(&self) -> Result<Vec<oramacore_lib::shelf::Shelf<String>>> {
+    pub async fn list_shelves_from_writer(
+        &self,
+    ) -> Result<Vec<oramacore_lib::shelf::Shelf<String>>> {
         let collection = self
             .writer
             .get_collection(self.collection_id, self.write_api_key)
@@ -665,6 +665,42 @@ impl TestCollectionClient<'_> {
             .list_shelves()
             .await
             .context("Failed to list shelves")
+    }
+
+    pub async fn get_shelf_from_reader(
+        &self,
+        shelf_id: String,
+    ) -> Result<oramacore_lib::shelf::Shelf<DocumentId>> {
+        let collection = self
+            .reader
+            .get_collection(self.collection_id, self.read_api_key)
+            .await?;
+
+        let shelf_id_typed = oramacore_lib::shelf::ShelfId::try_new(shelf_id)
+            .map_err(|e| anyhow::anyhow!("Invalid shelf ID: {e}"))?;
+
+        let shelf = collection
+            .get_shelf(shelf_id_typed)
+            .await
+            .context("Failed to get shelf from reader")?;
+
+        Ok(shelf)
+    }
+
+    pub async fn list_shelves_from_reader(
+        &self,
+    ) -> Result<Vec<oramacore_lib::shelf::Shelf<DocumentId>>> {
+        let collection = self
+            .reader
+            .get_collection(self.collection_id, self.read_api_key)
+            .await?;
+
+        let shelves = collection
+            .list_shelves()
+            .await
+            .context("Failed to list shelves from reader")?;
+
+        Ok(shelves)
     }
 
     fn generate_index_id(prefix: &str) -> IndexId {

@@ -344,7 +344,7 @@ impl IntoResponse for WriteError {
             }
             Self::ShelfNotFound(shelf_id) => {
                 let body = format!("Shelf '{shelf_id}' not found");
-                (StatusCode::NOT_FOUND, body).into_response()
+                (StatusCode::BAD_REQUEST, body).into_response()
             }
             Self::ShelfDocumentLimitExceeded(actual, max) => {
                 let body = format!("Too many documents in shelf: {actual} (max: {max})");
@@ -466,6 +466,10 @@ impl IntoResponse for ReadError {
                 ),
             )
                 .into_response(),
+            Self::ShelfNotFound(shelf_id) => (
+                StatusCode::BAD_REQUEST,
+                format!("Shelf '{shelf_id}' not found")
+            ).into_response(),
         }
     }
 }

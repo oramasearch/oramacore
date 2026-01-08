@@ -12,7 +12,7 @@ use serde_json::json;
 
 use crate::{
     collection_manager::sides::{
-        read::ReadSide,
+        read::{ReadError, ReadSide},
         write::{WriteError, WriteSide},
     },
     types::{ApiKey, CollectionId, WriteApiKey},
@@ -111,11 +111,13 @@ async fn get_merchandising_shelf_reader(
     read_side: State<Arc<ReadSide>>,
     read_api_key: ApiKey,
 ) -> impl IntoResponse {
-    todo!();
-    // read_side
-    //     .get_shelf(collection_id, shelf_id, read_api_key)
-    //     .await
-    //     .map(Json)
+    let collection = read_side
+        .get_collection(collection_id, read_api_key)
+        .await?;
+
+    let shelf = collection.get_shelf(shelf_id).await?;
+
+    Result::<Json<serde_json::Value>, ReadError>::Ok(Json(json!({ "data": shelf })))
 }
 
 async fn list_merchandising_shelves_reader(
@@ -123,9 +125,11 @@ async fn list_merchandising_shelves_reader(
     read_side: State<Arc<ReadSide>>,
     read_api_key: ApiKey,
 ) -> impl IntoResponse {
-    todo!();
-    // read_side
-    //     .list_shelves(collection_id, read_api_key)
-    //     .await
-    //     .map(Json)
+    let collection = read_side
+        .get_collection(collection_id, read_api_key)
+        .await?;
+
+    let shelf_list = collection.list_shelves().await?;
+
+    Result::<Json<serde_json::Value>, ReadError>::Ok(Json(json!({ "data": shelf_list })))
 }

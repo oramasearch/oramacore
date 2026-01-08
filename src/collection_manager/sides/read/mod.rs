@@ -20,6 +20,7 @@ pub use collection::CollectionStats;
 use duration_str::deserialize_duration;
 use notify::NotifierConfig;
 use orama_js_pool::OutputChannel;
+use oramacore_lib::shelf::ShelfId;
 use std::ops::Deref;
 use std::sync::Arc;
 use std::time::Duration;
@@ -143,6 +144,8 @@ pub enum ReadError {
     InvalidSortField(String, String),
     #[error("Unknown index ids: {0:?}. Available indexes: {1:?}")]
     UnknownIndex(Vec<IndexId>, Vec<IndexId>),
+    #[error("Shelf not found: {0:?}")]
+    ShelfNotFound(ShelfId),
 }
 
 pub struct ReadSide {
