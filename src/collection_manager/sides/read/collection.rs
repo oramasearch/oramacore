@@ -486,6 +486,12 @@ impl CollectionReader {
             .context("Cannot commit pin rules")?;
         drop(pin_rules_reader);
 
+        let mut shelves_reader = self.shelves_reader.write("commit").await;
+        shelves_reader
+            .commit(self.data_dir.join("shelves"))
+            .context("Cannot commit shelves")?;
+        drop(shelves_reader);
+
         // Save DumpV2 with single offset
         let dump = Dump::V2(DumpV2 {
             id: self.id,
