@@ -3,7 +3,7 @@ use std::sync::Arc;
 use axum::{
     extract::{Path, State},
     response::IntoResponse,
-    routing::{delete, get, post},
+    routing::{delete, get},
     Json, Router,
 };
 use oramacore_lib::shelves::{Shelf, ShelfId};
@@ -26,10 +26,6 @@ pub struct ShelfListResponse {
 pub fn read_apis(read_side: Arc<ReadSide>) -> Router {
     Router::new()
         .route(
-            "/v1/collections/{collection_id}/merchandising/shelves",
-            get(list_merchandising_shelves),
-        )
-        .route(
             "/v1/collections/{collection_id}/merchandising/shelves/{shelf_id}",
             get(get_merchandising_shelf),
         )
@@ -40,7 +36,7 @@ pub fn write_apis(write_side: Arc<WriteSide>) -> Router {
     Router::new()
         .route(
             "/v1/collections/{collection_id}/merchandising/shelves",
-            post(insert_merchandising_shelf),
+            get(list_merchandising_shelves).post(insert_merchandising_shelf),
         )
         .route(
             "/v1/collections/{collection_id}/merchandising/shelves/{shelf_id}",
@@ -78,6 +74,20 @@ async fn delete_merchandising_shelves(
     Result::<Json<serde_json::Value>, WriteError>::Ok(Json(json!({ "success": true })))
 }
 
+async fn list_merchandising_shelves(
+    Path(collection_id): Path<CollectionId>,
+    write_side: State<Arc<WriteSide>>,
+    write_api_key: WriteApiKey,
+) -> impl IntoResponse {
+    let collection = write_side
+        .get_collection(collection_id, write_api_key)
+        .await?;
+
+    let shelf_list = collection.list_shelves().await?;
+
+    Result::<Json<serde_json::Value>, WriteError>::Ok(Json(json!({ "data": shelf_list })))
+}
+
 async fn get_merchandising_shelf(
     Path((collection_id, shelf_id)): Path<(CollectionId, ShelfId)>,
     read_side: State<Arc<ReadSide>>,
@@ -89,21 +99,5 @@ async fn get_merchandising_shelf(
 
     let shelf_with_documents = collection.get_shelf_documents(shelf_id.clone()).await?;
 
-    Result::<Json<serde_json::Value>, ReadError>::Ok(Json(
-        json!({ "data": shelf_with_documents }),
-    ))
-}
-
-async fn list_merchandising_shelves(
-    Path(collection_id): Path<CollectionId>,
-    read_side: State<Arc<ReadSide>>,
-    read_api_key: ApiKey,
-) -> impl IntoResponse {
-    let collection = read_side
-        .get_collection(collection_id, read_api_key)
-        .await?;
-
-    let shelf_list = collection.list_shelves().await?;
-
-    Result::<Json<serde_json::Value>, ReadError>::Ok(Json(json!({ "data": shelf_list })))
+    Result::<Json<serde_json::Value>, ReadError>::Ok(Json(json!({ "data": shelf_with_documents })))
 }

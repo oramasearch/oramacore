@@ -1374,11 +1374,6 @@ impl CollectionReader {
         self.pin_rules_reader.read(reason).await
     }
 
-    pub async fn list_shelves(&self) -> Result<Vec<Shelf<DocumentId>>, ReadError> {
-        let shelves_writer = self.shelves_reader.read("list_shelves").await;
-        Ok(shelves_writer.list_shelves().to_vec())
-    }
-
     pub async fn get_shelf(&self, id: ShelfId) -> Result<Shelf<DocumentId>, ReadError> {
         let shelves_writer = self.shelves_reader.read("get_shelf").await;
         shelves_writer

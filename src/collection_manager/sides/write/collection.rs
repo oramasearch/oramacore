@@ -1024,6 +1024,11 @@ impl CollectionWriter {
 
         Ok(())
     }
+
+    pub async fn list_shelves(&self) -> Result<Vec<Shelf<String>>, WriteError> {
+        let shelves_writer = self.shelves_writer.read("list_shelves").await;
+        Ok(shelves_writer.list_shelves().to_vec())
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize)]

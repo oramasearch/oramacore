@@ -16,7 +16,6 @@ use tracing::warn;
 
 use crate::ai::AIServiceEmbeddingsConfig;
 use crate::ai::PythonLoggingLevel;
-use crate::types::DocumentId;
 use crate::{
     ai::{AIServiceConfig, AIServiceLLMConfig},
     build_orama,
@@ -639,16 +638,16 @@ impl TestCollectionClient<'_> {
         Ok(())
     }
 
-    pub async fn list_shelves(&self) -> Result<Vec<Shelf<DocumentId>>> {
+    pub async fn list_shelves(&self) -> Result<Vec<Shelf<String>>> {
         let collection = self
-            .reader
-            .get_collection(self.collection_id, self.read_api_key)
+            .writer
+            .get_collection(self.collection_id, self.write_api_key)
             .await?;
 
         let shelves = collection
             .list_shelves()
             .await
-            .context("Failed to list shelves from reader")?;
+            .context("Failed to list shelves from writer")?;
 
         Ok(shelves)
     }
