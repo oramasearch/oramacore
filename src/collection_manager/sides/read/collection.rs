@@ -39,7 +39,7 @@ use crate::{
     lock::{OramaAsyncLock, OramaAsyncLockReadGuard, OramaAsyncLockWriteGuard, OramaSyncLock},
     types::{
         ApiKey, CollectionId, CollectionStatsRequest, Document, DocumentId, FieldId, IndexId,
-        InteractionMessage, Number, OramaDate, Role,
+        InteractionMessage, Number, OramaDate, RawJSONDocument, Role,
     },
 };
 
@@ -108,6 +108,12 @@ pub enum FilterableField {
 pub struct FilterableFieldsStats {
     pub index_id: IndexId,
     pub fields: Vec<FilterableField>,
+}
+
+#[derive(Serialize)]
+pub struct ShelfWithDocuments {
+    pub id: ShelfId,
+    pub docs: Vec<Document>,
 }
 
 pub struct CollectionReader {
@@ -1381,6 +1387,38 @@ impl CollectionReader {
             .find(|shelf| shelf.id == id)
             .cloned()
             .ok_or_else(|| ReadError::ShelfNotFound(id))
+    }
+
+    /// Retrieves the documents for a given shelf in the order specified by the shelf.
+    /// Returns a ShelfWithDocuments containing the shelf ID and a vector of documents.
+    /// If a document is not found, it will not be included in the result.
+    pub async fn get_shelf_documents(&self, id: ShelfId) -> Result<ShelfWithDocuments, ReadError> {
+        let shelf = self.get_shelf(id.clone()).await?;
+
+        let document_storage = self.get_document_storage();
+
+        let docs = document_storage
+            .get_documents_by_ids(shelf.doc_ids.clone())
+            .await?;
+
+        let doc_map: HashMap<DocumentId, Arc<RawJSONDocument>> = docs.into_iter().collect();
+
+        let documents: Result<Vec<Document>, ReadError> = shelf
+            .doc_ids
+            .iter()
+            .filter_map(|doc_id| doc_map.get(doc_id).cloned())
+            .map(|raw_doc| {
+                let inner: Map<String, Value> = serde_json::from_str(raw_doc.inner.get())
+                    .context("Cannot deserialize document")
+                    .map_err(ReadError::Generic)?;
+                Ok(Document { inner })
+            })
+            .collect();
+
+        Ok(ShelfWithDocuments {
+            id,
+            docs: documents?,
+        })
     }
 
     fn should_commit(&self, force: bool) -> bool {

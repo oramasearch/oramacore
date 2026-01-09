@@ -33,7 +33,7 @@ pub use analytics::{
 };
 
 use anyhow::{Context, Result};
-pub use collection::{IndexFieldStats, IndexFieldStatsType};
+pub use collection::{IndexFieldStats, IndexFieldStatsType, ShelfWithDocuments};
 use collections::CollectionsReader;
 use document_storage::{DocumentStorage, DocumentStorageConfig};
 use serde::{Deserialize, Serialize};

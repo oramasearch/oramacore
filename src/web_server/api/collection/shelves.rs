@@ -87,9 +87,11 @@ async fn get_merchandising_shelf(
         .get_collection(collection_id, read_api_key)
         .await?;
 
-    let shelf = collection.get_shelf(shelf_id).await?;
+    let shelf_with_documents = collection.get_shelf_documents(shelf_id.clone()).await?;
 
-    Result::<Json<serde_json::Value>, ReadError>::Ok(Json(json!({ "data": shelf })))
+    Result::<Json<serde_json::Value>, ReadError>::Ok(Json(
+        json!({ "data": shelf_with_documents }),
+    ))
 }
 
 async fn list_merchandising_shelves(

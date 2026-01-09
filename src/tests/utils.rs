@@ -23,7 +23,7 @@ use crate::{
     collection_manager::sides::{
         read::{
             CollectionCommitConfig, CollectionStats, IndexesConfig, OffloadFieldConfig, ReadSide,
-            ReadSideConfig, SearchRequest,
+            ReadSideConfig, SearchRequest, ShelfWithDocuments,
         },
         write::{
             CollectionsWriterConfig, TempIndexCleanupConfig, WriteError, WriteSide, WriteSideConfig,
@@ -639,23 +639,6 @@ impl TestCollectionClient<'_> {
         Ok(())
     }
 
-    pub async fn get_shelf(&self, shelf_id: String) -> Result<Shelf<DocumentId>> {
-        let collection = self
-            .reader
-            .get_collection(self.collection_id, self.read_api_key)
-            .await?;
-
-        let shelf_id_typed =
-            ShelfId::try_new(shelf_id).map_err(|e| anyhow::anyhow!("Invalid shelf ID: {e}"))?;
-
-        let shelf = collection
-            .get_shelf(shelf_id_typed)
-            .await
-            .context("Failed to get shelf from reader")?;
-
-        Ok(shelf)
-    }
-
     pub async fn list_shelves(&self) -> Result<Vec<Shelf<DocumentId>>> {
         let collection = self
             .reader
@@ -668,6 +651,23 @@ impl TestCollectionClient<'_> {
             .context("Failed to list shelves from reader")?;
 
         Ok(shelves)
+    }
+
+    pub async fn get_shelf_documents(&self, shelf_id: String) -> Result<ShelfWithDocuments> {
+        let collection = self
+            .reader
+            .get_collection(self.collection_id, self.read_api_key)
+            .await?;
+
+        let shelf_id_typed =
+            ShelfId::try_new(shelf_id).map_err(|e| anyhow::anyhow!("Invalid shelf ID: {e}"))?;
+
+        let shelf_with_documents = collection
+            .get_shelf_documents(shelf_id_typed)
+            .await
+            .context("Failed to get shelf documents from reader")?;
+
+        Ok(shelf_with_documents)
     }
 
     fn generate_index_id(prefix: &str) -> IndexId {

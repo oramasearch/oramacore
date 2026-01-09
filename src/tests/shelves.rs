@@ -1,5 +1,4 @@
 use crate::tests::utils::{init_log, wait_for, TestContext};
-use crate::types::DocumentId;
 use anyhow::bail;
 use futures::FutureExt;
 use serde_json::json;
@@ -64,16 +63,43 @@ async fn test_shelf_insert_simple() {
     .expect("Shelf should be available in reader with correct document IDs");
 
     // Verify the shelf from reader using the helper method
-    let shelf_reader = collection_client
-        .get_shelf("bestsellers".to_string())
+    let shelf_with_docs = collection_client
+        .get_shelf_documents("bestsellers".to_string())
         .await
         .unwrap();
 
-    // Test also the conversion to document id
-    assert_eq!(shelf_reader.id.as_str(), "bestsellers");
+    // Test the shelf ID and documents
+    assert_eq!(shelf_with_docs.id.as_str(), "bestsellers");
+    assert_eq!(shelf_with_docs.docs.len(), 4);
+
+    // Verify the documents are in the correct order
     assert_eq!(
-        shelf_reader.doc_ids,
-        vec![DocumentId(6), DocumentId(4), DocumentId(2), DocumentId(8)]
+        shelf_with_docs.docs[0]
+            .inner
+            .get("id")
+            .and_then(|v| v.as_str()),
+        Some("5")
+    );
+    assert_eq!(
+        shelf_with_docs.docs[1]
+            .inner
+            .get("id")
+            .and_then(|v| v.as_str()),
+        Some("3")
+    );
+    assert_eq!(
+        shelf_with_docs.docs[2]
+            .inner
+            .get("id")
+            .and_then(|v| v.as_str()),
+        Some("1")
+    );
+    assert_eq!(
+        shelf_with_docs.docs[3]
+            .inner
+            .get("id")
+            .and_then(|v| v.as_str()),
+        Some("7")
     );
 
     drop(test_context);
@@ -243,7 +269,7 @@ async fn test_shelf_delete() {
 
     // Verify getting the deleted shelf returns an error
     let result = collection_client
-        .get_shelf("shelf-to-delete".to_string())
+        .get_shelf_documents("shelf-to-delete".to_string())
         .await;
     assert!(result.is_err());
 
@@ -256,7 +282,20 @@ async fn test_shelf_commit() {
 
     let test_context = TestContext::new().await;
     let collection_client = test_context.create_collection().await.unwrap();
-    let _index_client = collection_client.create_index().await.unwrap();
+    let index_client = collection_client.create_index().await.unwrap();
+
+    let docs: Vec<_> = (0_u8..10_u8)
+        .map(|i| {
+            json!({
+                "id": format!("{}", i),
+                "name": format!("Product {}", i),
+            })
+        })
+        .collect();
+    index_client
+        .insert_documents(docs.try_into().unwrap())
+        .await
+        .unwrap();
 
     test_context.commit_all().await.unwrap();
 
@@ -333,12 +372,12 @@ async fn test_shelf_commit() {
     .expect("Shelves should be loaded from disk after reload in reader");
 
     let shelf_after_reload_reader = collection_client
-        .get_shelf(TEST_COMMIT_SHELF_ID.to_string())
+        .get_shelf_documents(TEST_COMMIT_SHELF_ID.to_string())
         .await
         .unwrap();
 
     assert_eq!(shelf_after_reload_reader.id.as_str(), TEST_COMMIT_SHELF_ID);
-    assert_eq!(shelf_after_reload_reader.doc_ids.len(), 5);
+    assert_eq!(shelf_after_reload_reader.docs.len(), 5);
 
     drop(test_context);
 }
@@ -407,7 +446,7 @@ async fn test_shelf_delete_removes_files() {
     );
 
     let result_reader = collection_client
-        .get_shelf(TEST_DELETE_SHELF_ID.to_string())
+        .get_shelf_documents(TEST_DELETE_SHELF_ID.to_string())
         .await;
     assert!(
         result_reader.is_err(),
@@ -423,7 +462,20 @@ async fn test_shelf_update() {
 
     let test_context = TestContext::new().await;
     let collection_client = test_context.create_collection().await.unwrap();
-    let _index_client = collection_client.create_index().await.unwrap();
+    let index_client = collection_client.create_index().await.unwrap();
+
+    let docs: Vec<_> = (0_u8..10_u8)
+        .map(|i| {
+            json!({
+                "id": format!("{}", i),
+                "name": format!("Product {}", i),
+            })
+        })
+        .collect();
+    index_client
+        .insert_documents(docs.try_into().unwrap())
+        .await
+        .unwrap();
 
     const TEST_UPDATE_SHELF_ID: &str = "test-update-shelf";
     collection_client
@@ -493,11 +545,11 @@ async fn test_shelf_update() {
 
     // Verify updated shelf from reader
     let shelf_reader_updated = collection_client
-        .get_shelf(TEST_UPDATE_SHELF_ID.to_string())
+        .get_shelf_documents(TEST_UPDATE_SHELF_ID.to_string())
         .await
         .unwrap();
     assert_eq!(shelf_reader_updated.id.as_str(), TEST_UPDATE_SHELF_ID);
-    assert_eq!(shelf_reader_updated.doc_ids.len(), 2);
+    assert_eq!(shelf_reader_updated.docs.len(), 2);
 
     drop(test_context);
 }
@@ -554,6 +606,194 @@ async fn test_shelf_empty_documents() {
     })
     .await
     .expect("Shelf should be available in reader");
+
+    drop(test_context);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_shelf_get_documents() {
+    init_log();
+
+    let test_context = TestContext::new().await;
+    let collection_client = test_context.create_collection().await.unwrap();
+    let index_client = collection_client.create_index().await.unwrap();
+
+    // Insert some documents
+    let docs: Vec<_> = (0_u8..10_u8)
+        .map(|i| {
+            json!({
+                "id": format!("{}", i),
+                "name": format!("Product {}", i),
+                "price": i as f64 * 10.0,
+            })
+        })
+        .collect();
+    index_client
+        .insert_documents(docs.try_into().unwrap())
+        .await
+        .unwrap();
+
+    // Create a shelf with specific documents
+    collection_client
+        .insert_shelf(
+            serde_json::from_value(json!({
+                "id": "featured-products",
+                "doc_ids": ["2", "5", "8"]
+            }))
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    // Wait for the reader to process
+    wait_for(&collection_client, |c| {
+        let reader = c.reader;
+        let read_api_key = c.read_api_key;
+        let collection_id = c.collection_id;
+        async move {
+            let collection = reader.get_collection(collection_id, read_api_key).await?;
+            let shelf_id = oramacore_lib::shelves::ShelfId::try_new("featured-products")?;
+            let _shelf = collection.get_shelf(shelf_id).await?;
+            Ok(())
+        }
+        .boxed()
+    })
+    .await
+    .expect("Shelf should be available in reader");
+
+    // Get the shelf documents
+    let shelf_with_docs = collection_client
+        .get_shelf_documents("featured-products".to_string())
+        .await
+        .unwrap();
+
+    // Verify we got the documents in the correct order
+    assert_eq!(shelf_with_docs.docs.len(), 3);
+    assert_eq!(
+        shelf_with_docs.docs[0]
+            .inner
+            .get("id")
+            .and_then(|v| v.as_str()),
+        Some("2")
+    );
+    assert_eq!(
+        shelf_with_docs.docs[0]
+            .inner
+            .get("name")
+            .and_then(|v| v.as_str()),
+        Some("Product 2")
+    );
+    assert_eq!(
+        shelf_with_docs.docs[1]
+            .inner
+            .get("id")
+            .and_then(|v| v.as_str()),
+        Some("5")
+    );
+    assert_eq!(
+        shelf_with_docs.docs[1]
+            .inner
+            .get("name")
+            .and_then(|v| v.as_str()),
+        Some("Product 5")
+    );
+    assert_eq!(
+        shelf_with_docs.docs[2]
+            .inner
+            .get("id")
+            .and_then(|v| v.as_str()),
+        Some("8")
+    );
+    assert_eq!(
+        shelf_with_docs.docs[2]
+            .inner
+            .get("name")
+            .and_then(|v| v.as_str()),
+        Some("Product 8")
+    );
+
+    drop(test_context);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_shelf_get_documents_with_missing_docs() {
+    init_log();
+
+    let test_context = TestContext::new().await;
+    let collection_client = test_context.create_collection().await.unwrap();
+    let index_client = collection_client.create_index().await.unwrap();
+
+    // Insert only some documents
+    let docs: Vec<_> = (0_u8..5_u8)
+        .map(|i| {
+            json!({
+                "id": format!("{}", i),
+                "name": format!("Product {}", i),
+            })
+        })
+        .collect();
+    index_client
+        .insert_documents(docs.try_into().unwrap())
+        .await
+        .unwrap();
+
+    // Create a shelf that references documents that don't exist
+    collection_client
+        .insert_shelf(
+            serde_json::from_value(json!({
+                "id": "mixed-shelf",
+                "doc_ids": ["1", "99", "3", "88", "4"]
+            }))
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    // Wait for the reader to process
+    wait_for(&collection_client, |c| {
+        let reader = c.reader;
+        let read_api_key = c.read_api_key;
+        let collection_id = c.collection_id;
+        async move {
+            let collection = reader.get_collection(collection_id, read_api_key).await?;
+            let shelf_id = oramacore_lib::shelves::ShelfId::try_new("mixed-shelf")?;
+            let _shelf = collection.get_shelf(shelf_id).await?;
+            Ok(())
+        }
+        .boxed()
+    })
+    .await
+    .expect("Shelf should be available in reader");
+
+    // Get the shelf documents - should only return documents that exist
+    let shelf_with_docs = collection_client
+        .get_shelf_documents("mixed-shelf".to_string())
+        .await
+        .unwrap();
+
+    // Should only have the 3 documents that exist (1, 3, 4), preserving order
+    assert_eq!(shelf_with_docs.docs.len(), 3);
+    assert_eq!(
+        shelf_with_docs.docs[0]
+            .inner
+            .get("id")
+            .and_then(|v| v.as_str()),
+        Some("1")
+    );
+    assert_eq!(
+        shelf_with_docs.docs[1]
+            .inner
+            .get("id")
+            .and_then(|v| v.as_str()),
+        Some("3")
+    );
+    assert_eq!(
+        shelf_with_docs.docs[2]
+            .inner
+            .get("id")
+            .and_then(|v| v.as_str()),
+        Some("4")
+    );
 
     drop(test_context);
 }
@@ -729,10 +969,17 @@ async fn test_shelf_updated_when_document_id_changes() {
     .await
     .expect("Shelf should be available in reader");
 
-    let shelf_before = collection_client
-        .get_shelf("featured".to_string())
+    // Get the shelf to track internal document IDs
+    let collection = collection_client
+        .reader
+        .get_collection(
+            collection_client.collection_id,
+            collection_client.read_api_key,
+        )
         .await
         .unwrap();
+    let shelf_id = oramacore_lib::shelves::ShelfId::try_new("featured").unwrap();
+    let shelf_before = collection.get_shelf(shelf_id).await.unwrap();
     let doc_ids_before = shelf_before.doc_ids.clone();
 
     // Now update one of the documents that's in the shelf, changing its ID
@@ -740,7 +987,7 @@ async fn test_shelf_updated_when_document_id_changes() {
         .update_documents(
             serde_json::from_value(json!({
                 "strategy": "merge",
-                "doc_ids": [
+                "documents": [
                     {
                         "id": "doc-3", // Update the document 3 with a new one
                         "name": "Updated Product 3",
@@ -795,5 +1042,6 @@ async fn test_shelf_updated_when_document_id_changes() {
     .await
     .expect("Shelf should be updated after document ID change");
 
+    drop(collection);
     drop(test_context);
 }
