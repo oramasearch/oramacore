@@ -965,9 +965,9 @@ impl CollectionWriter {
     pub async fn insert_shelf(&self, shelf: Shelf<String>) -> Result<(), WriteError> {
         const MAX_NUMBER_OF_ITEMS_SHELF: usize = 1_000;
 
-        if shelf.documents.len() > MAX_NUMBER_OF_ITEMS_SHELF {
+        if shelf.doc_ids.len() > MAX_NUMBER_OF_ITEMS_SHELF {
             return Err(WriteError::ShelfDocumentLimitExceeded(
-                shelf.documents.len(),
+                shelf.doc_ids.len(),
                 MAX_NUMBER_OF_ITEMS_SHELF,
             ));
         }

@@ -32,7 +32,7 @@ async fn test_shelf_insert_simple() {
         .insert_shelf(
             serde_json::from_value(json!({
                 "id": "bestsellers",
-                "documents": ["5", "3", "1", "7"]
+                "doc_ids": ["5", "3", "1", "7"]
             }))
             .unwrap(),
         )
@@ -72,7 +72,7 @@ async fn test_shelf_insert_simple() {
     // Test also the conversion to document id
     assert_eq!(shelf_reader.id.as_str(), "bestsellers");
     assert_eq!(
-        shelf_reader.documents,
+        shelf_reader.doc_ids,
         vec![DocumentId(6), DocumentId(4), DocumentId(2), DocumentId(8)]
     );
 
@@ -95,7 +95,7 @@ async fn test_shelf_list_multiple() {
         .insert_shelf(
             serde_json::from_value(json!({
                 "id": "shelf-1",
-                "documents": ["1", "2"]
+                "doc_ids": ["1", "2"]
             }))
             .unwrap(),
         )
@@ -106,7 +106,7 @@ async fn test_shelf_list_multiple() {
         .insert_shelf(
             serde_json::from_value(json!({
                 "id": "shelf-2",
-                "documents": ["3", "4", "5"]
+                "doc_ids": ["3", "4", "5"]
             }))
             .unwrap(),
         )
@@ -117,7 +117,7 @@ async fn test_shelf_list_multiple() {
         .insert_shelf(
             serde_json::from_value(json!({
                 "id": "shelf-3",
-                "documents": ["6"]
+                "doc_ids": ["6"]
             }))
             .unwrap(),
         )
@@ -170,7 +170,7 @@ async fn test_shelf_delete() {
         .insert_shelf(
             serde_json::from_value(json!({
                 "id": "shelf-to-keep",
-                "documents": ["1", "2"]
+                "doc_ids": ["1", "2"]
             }))
             .unwrap(),
         )
@@ -181,7 +181,7 @@ async fn test_shelf_delete() {
         .insert_shelf(
             serde_json::from_value(json!({
                 "id": "shelf-to-delete",
-                "documents": ["3", "4"]
+                "doc_ids": ["3", "4"]
             }))
             .unwrap(),
         )
@@ -265,7 +265,7 @@ async fn test_shelf_commit() {
         .insert_shelf(
             serde_json::from_value(json!({
                 "id": TEST_COMMIT_SHELF_ID,
-                "documents": ["1", "2", "3", "4", "5"]
+                "doc_ids": ["1", "2", "3", "4", "5"]
             }))
             .unwrap(),
         )
@@ -338,7 +338,7 @@ async fn test_shelf_commit() {
         .unwrap();
 
     assert_eq!(shelf_after_reload_reader.id.as_str(), TEST_COMMIT_SHELF_ID);
-    assert_eq!(shelf_after_reload_reader.documents.len(), 5);
+    assert_eq!(shelf_after_reload_reader.doc_ids.len(), 5);
 
     drop(test_context);
 }
@@ -357,7 +357,7 @@ async fn test_shelf_delete_removes_files() {
         .insert_shelf(
             serde_json::from_value(json!({
                 "id": TEST_DELETE_SHELF_ID,
-                "documents": ["1", "2", "3"]
+                "doc_ids": ["1", "2", "3"]
             }))
             .unwrap(),
         )
@@ -430,7 +430,7 @@ async fn test_shelf_update() {
         .insert_shelf(
             serde_json::from_value(json!({
                 "id": TEST_UPDATE_SHELF_ID,
-                "documents": ["1", "2", "3"]
+                "doc_ids": ["1", "2", "3"]
             }))
             .unwrap(),
         )
@@ -447,7 +447,7 @@ async fn test_shelf_update() {
             let shelf_id = oramacore_lib::shelves::ShelfId::try_new(TEST_UPDATE_SHELF_ID)?;
             let shelf = collection.get_shelf(shelf_id).await?;
 
-            if shelf.documents.len() != 3 {
+            if shelf.doc_ids.len() != 3 {
                 bail!("Shelf not updated in reader yet");
             }
 
@@ -463,7 +463,7 @@ async fn test_shelf_update() {
         .insert_shelf(
             serde_json::from_value(json!({
                 "id": TEST_UPDATE_SHELF_ID,
-                "documents": ["4", "5"]
+                "doc_ids": ["4", "5"]
             }))
             .unwrap(),
         )
@@ -480,7 +480,7 @@ async fn test_shelf_update() {
             let shelf_id = oramacore_lib::shelves::ShelfId::try_new(TEST_UPDATE_SHELF_ID)?;
             let shelf = collection.get_shelf(shelf_id).await?;
 
-            if shelf.documents.len() != 2 {
+            if shelf.doc_ids.len() != 2 {
                 bail!("Shelf not updated in reader yet");
             }
 
@@ -497,7 +497,7 @@ async fn test_shelf_update() {
         .await
         .unwrap();
     assert_eq!(shelf_reader_updated.id.as_str(), TEST_UPDATE_SHELF_ID);
-    assert_eq!(shelf_reader_updated.documents.len(), 2);
+    assert_eq!(shelf_reader_updated.doc_ids.len(), 2);
 
     drop(test_context);
 }
@@ -510,12 +510,12 @@ async fn test_shelf_empty_documents() {
     let collection_client = test_context.create_collection().await.unwrap();
     let _index_client = collection_client.create_index().await.unwrap();
 
-    // Create a shelf with no documents
+    // Create a shelf with no doc_ids
     collection_client
         .insert_shelf(
             serde_json::from_value(json!({
                 "id": "empty-shelf",
-                "documents": []
+                "doc_ids": []
             }))
             .unwrap(),
         )
@@ -541,10 +541,10 @@ async fn test_shelf_empty_documents() {
                 );
             }
 
-            if !shelves[0].documents.is_empty() {
+            if !shelves[0].doc_ids.is_empty() {
                 bail!(
                     "Expected shelf to be empty, got {}",
-                    shelves[0].documents.len()
+                    shelves[0].doc_ids.len()
                 );
             }
 
@@ -571,7 +571,7 @@ async fn test_shelf_multiple_collections() {
         .insert_shelf(
             serde_json::from_value(json!({
                 "id": "shelf-a",
-                "documents": ["1", "2"]
+                "doc_ids": ["1", "2"]
             }))
             .unwrap(),
         )
@@ -582,7 +582,7 @@ async fn test_shelf_multiple_collections() {
         .insert_shelf(
             serde_json::from_value(json!({
                 "id": "shelf-b",
-                "documents": ["3", "4"]
+                "doc_ids": ["3", "4"]
             }))
             .unwrap(),
         )
@@ -605,10 +605,10 @@ async fn test_shelf_multiple_collections() {
                 bail!("Expected shelf 'shelf-a', got {}", shelves[0].id.as_str());
             }
 
-            if shelves[0].documents.len() != 2 {
+            if shelves[0].doc_ids.len() != 2 {
                 bail!(
                     "Expected shelf to be of len 2, got {}",
-                    shelves[0].documents.len()
+                    shelves[0].doc_ids.len()
                 );
             }
 
@@ -634,10 +634,10 @@ async fn test_shelf_multiple_collections() {
             if shelves[0].id.as_str() != "shelf-b" {
                 bail!("Expected shelf 'shelf-b', got {}", shelves[0].id.as_str());
             }
-            if shelves[0].documents.len() != 2 {
+            if shelves[0].doc_ids.len() != 2 {
                 bail!(
                     "Expected shelf to be of len 2, got {}",
-                    shelves[0].documents.len()
+                    shelves[0].doc_ids.len()
                 );
             }
 
@@ -666,7 +666,7 @@ async fn test_shelf_large_document_list() {
         .insert_shelf(
             serde_json::from_value(json!({
                 "id": "large-shelf",
-                "documents": large_doc_list
+                "doc_ids": large_doc_list
             }))
             .unwrap(),
         )
@@ -701,7 +701,7 @@ async fn test_shelf_updated_when_document_id_changes() {
         .insert_shelf(
             serde_json::from_value(json!({
                 "id": "featured",
-                "documents": ["doc-1", "doc-3"]
+                "doc_ids": ["doc-1", "doc-3"]
             }))
             .unwrap(),
         )
@@ -718,11 +718,8 @@ async fn test_shelf_updated_when_document_id_changes() {
             let shelf_id = oramacore_lib::shelves::ShelfId::try_new("featured")?;
             let shelf = collection.get_shelf(shelf_id).await?;
 
-            if shelf.documents.len() != 2 {
-                bail!(
-                    "Expected 2 documents in shelf, got {}",
-                    shelf.documents.len()
-                );
+            if shelf.doc_ids.len() != 2 {
+                bail!("Expected 2 doc_ids in shelf, got {}", shelf.doc_ids.len());
             }
 
             Ok(())
@@ -736,14 +733,14 @@ async fn test_shelf_updated_when_document_id_changes() {
         .get_shelf("featured".to_string())
         .await
         .unwrap();
-    let doc_ids_before = shelf_before.documents.clone();
+    let doc_ids_before = shelf_before.doc_ids.clone();
 
     // Now update one of the documents that's in the shelf, changing its ID
     index_client
         .update_documents(
             serde_json::from_value(json!({
                 "strategy": "merge",
-                "documents": [
+                "doc_ids": [
                     {
                         "id": "doc-3", // Update the document 3 with a new one
                         "name": "Updated Product 3",
@@ -766,17 +763,17 @@ async fn test_shelf_updated_when_document_id_changes() {
             let shelf_id = oramacore_lib::shelves::ShelfId::try_new("featured")?;
             let shelf = collection.get_shelf(shelf_id).await?;
 
-            if shelf.documents.len() != 2 {
+            if shelf.doc_ids.len() != 2 {
                 bail!(
-                    "Expected 2 documents in shelf after update, got {}",
-                    shelf.documents.len()
+                    "Expected 2 doc_ids in shelf after update, got {}",
+                    shelf.doc_ids.len()
                 );
             }
 
-            if shelf.documents[0] != expected_doc_ids[0] {
+            if shelf.doc_ids[0] != expected_doc_ids[0] {
                 bail!(
                     "First document ID changed unexpectedly: {:?} != {:?}",
-                    shelf.documents[0],
+                    shelf.doc_ids[0],
                     expected_doc_ids[0]
                 );
             }
@@ -784,10 +781,10 @@ async fn test_shelf_updated_when_document_id_changes() {
             // Check if the document IDs have been updated
             // The second document should have changed its internal ID but still be referenced
             // because the document was replaced with a new one
-            if shelf.documents[1] == expected_doc_ids[1] {
+            if shelf.doc_ids[1] == expected_doc_ids[1] {
                 bail!(
                     "Second document ID should have changed after update: {:?}",
-                    shelf.documents[1]
+                    shelf.doc_ids[1]
                 );
             }
 
