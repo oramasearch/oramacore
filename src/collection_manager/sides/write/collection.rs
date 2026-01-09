@@ -859,6 +859,13 @@ impl CollectionWriter {
         self.pin_rules_writer.read(reason).await
     }
 
+    pub async fn get_shelves_writer(
+        &self,
+        reason: &'static str,
+    ) -> OramaAsyncLockReadGuard<'_, ShelvesWriter> {
+        self.shelves_writer.read(reason).await
+    }
+
     pub async fn update_pin_rules(
         &self,
         pin_rule_ids_touched: HashSet<String>,
@@ -898,10 +905,59 @@ impl CollectionWriter {
                     DocumentId(u64::MAX)
                 })
                 .await;
-            println!("Inserting updated pin rule: {new_rule:#?}");
+            info!("Inserting updated pin rule: {new_rule:#?}");
             index_operation_batch.push(WriteOperation::Collection(
                 self.id,
                 CollectionWriteOperation::PinRule(PinRuleOperation::Insert(new_rule)),
+            ));
+        }
+    }
+
+    /// Update shelves when document IDs change.
+    /// This method is called when documents are updated to keep shelf document references up-to-date.
+    pub async fn update_shelves(
+        &self,
+        shelf_ids_touched: HashSet<ShelfId>,
+        index_operation_batch: &mut Vec<WriteOperation>,
+    ) {
+        if shelf_ids_touched.is_empty() {
+            return;
+        }
+
+        let indexes_lock = self.indexes.read("update_shelves").await;
+        let mut storages = Vec::with_capacity(indexes_lock.len());
+        for index in indexes_lock.values() {
+            let storage = index.get_document_id_storage().await;
+            storages.push(storage);
+        }
+
+        let shelves_writer = self.shelves_writer.read("update_shelves").await;
+
+        for shelf_id in shelf_ids_touched {
+            let shelf = match shelves_writer.get_by_id(&shelf_id) {
+                Some(shelf) => shelf.clone(),
+                None => {
+                    // This shelf was deleted
+                    continue;
+                }
+            };
+
+            let new_shelf = shelf
+                .convert_ids(|id| {
+                    for storage in &storages {
+                        if let Some(doc_id) = storage.get(&id) {
+                            return doc_id;
+                        }
+                    }
+                    // DocumentId(u64::MAX) is never used, so this is equal to say
+                    // "ignore this shelf"
+                    DocumentId(u64::MAX)
+                })
+                .await;
+            info!("Inserting updated shelf: {new_shelf:#?}");
+            index_operation_batch.push(WriteOperation::Collection(
+                self.id,
+                CollectionWriteOperation::Shelf(ShelfOperation::Insert(new_shelf)),
             ));
         }
     }

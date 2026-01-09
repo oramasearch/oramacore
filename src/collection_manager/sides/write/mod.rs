@@ -903,6 +903,9 @@ impl WriteSide {
         let mut pin_rules_writer = collection.get_pin_rule_writer("update_documents").await;
         let mut pin_rules_touched = HashSet::new();
 
+        let mut shelves_writer = collection.get_shelves_writer("update_documents").await;
+        let mut shelves_touched = HashSet::new();
+
         let mut result = UpdateDocumentsResult {
             inserted: 0,
             updated: 0,
@@ -935,6 +938,7 @@ impl WriteSide {
 
             // Check for pending write operations and yield if needed
             if self.write_operation_counter.load(Ordering::Relaxed) > 0 {
+                drop(shelves_writer);
                 drop(pin_rules_writer);
                 let _ = collection_document_storage;
                 drop(index);
@@ -952,6 +956,7 @@ impl WriteSide {
                 };
                 collection_document_storage = collection.get_document_storage();
                 pin_rules_writer = collection.get_pin_rule_writer("update_documents").await;
+                shelves_writer = collection.get_shelves_writer("update_documents").await;
             }
 
             if let Some(doc_id_str) = document_ids_map.get(&doc_id) {
@@ -1032,11 +1037,16 @@ impl WriteSide {
                 }
 
                 pin_rules_touched.extend(pin_rules_writer.get_matching_rules_ids(doc_id_str));
+                shelves_touched.extend(shelves_writer.get_matching_shelves_ids(doc_id_str));
             }
         }
 
         collection
             .update_pin_rules(pin_rules_touched, &mut index_operation_batch)
+            .await;
+
+        collection
+            .update_shelves(shelves_touched, &mut index_operation_batch)
             .await;
 
         if !index_operation_batch.is_empty() {
@@ -1266,6 +1276,9 @@ impl WriteSide {
         let mut pin_rules_writer = collection.get_pin_rule_writer("process_documents").await;
         let mut pin_rules_touched = HashSet::new();
 
+        let mut shelves_writer = collection.get_shelves_writer("process_documents").await;
+        let mut shelves_touched = HashSet::new();
+
         let document_count = document_list.len();
 
         let mut index_operation_batch = Vec::with_capacity(document_count * 10);
@@ -1289,6 +1302,7 @@ impl WriteSide {
             // Check for pending write operations and yield if needed
             if self.write_operation_counter.load(Ordering::Relaxed) > 0 {
                 // We need to drop the index lock before waiting
+                drop(shelves_writer);
                 drop(pin_rules_writer);
                 drop(index);
                 drop(collection);
@@ -1305,6 +1319,7 @@ impl WriteSide {
                     None => return Err(WriteError::IndexNotFound(collection_id, index_id)),
                 };
                 pin_rules_writer = collection.get_pin_rule_writer("process_documents").await;
+                shelves_writer = collection.get_shelves_writer("process_documents").await;
             }
 
             let doc_id_str = doc
@@ -1344,11 +1359,16 @@ impl WriteSide {
             };
 
             pin_rules_touched.extend(pin_rules_writer.get_matching_rules_ids(&doc_id_str));
+            shelves_touched.extend(shelves_writer.get_matching_shelves_ids(&doc_id_str));
         }
         debug!("All documents processed {}", document_count);
 
         collection
             .update_pin_rules(pin_rules_touched, &mut index_operation_batch)
+            .await;
+
+        collection
+            .update_shelves(shelves_touched, &mut index_operation_batch)
             .await;
 
         if !index_operation_batch.is_empty() {

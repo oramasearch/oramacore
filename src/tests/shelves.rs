@@ -659,3 +659,128 @@ async fn test_shelf_large_document_list() {
 
     drop(test_context);
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_shelf_updated_when_document_id_changes() {
+    init_log();
+
+    let test_context = TestContext::new().await;
+    let collection_client = test_context.create_collection().await.unwrap();
+    let index_client = collection_client.create_index().await.unwrap();
+
+    let docs: Vec<_> = (0_u8..5_u8)
+        .map(|i| {
+            json!({
+                "id": format!("doc-{}", i),
+                "name": format!("Product {}", i),
+            })
+        })
+        .collect();
+    index_client
+        .insert_documents(docs.try_into().unwrap())
+        .await
+        .unwrap();
+
+    collection_client
+        .insert_shelf(
+            serde_json::from_value(json!({
+                "id": "featured",
+                "documents": ["doc-1", "doc-3"]
+            }))
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    // Verify initial shelf state in reader
+    wait_for(&collection_client, |c| {
+        let reader = c.reader;
+        let read_api_key = c.read_api_key;
+        let collection_id = c.collection_id;
+        async move {
+            let collection = reader.get_collection(collection_id, read_api_key).await?;
+            let shelf_id = oramacore_lib::shelf::ShelfId::try_new("featured")?;
+            let shelf = collection.get_shelf(shelf_id).await?;
+
+            if shelf.documents.len() != 2 {
+                bail!(
+                    "Expected 2 documents in shelf, got {}",
+                    shelf.documents.len()
+                );
+            }
+
+            Ok(())
+        }
+        .boxed()
+    })
+    .await
+    .expect("Shelf should be available in reader");
+
+    let shelf_before = collection_client
+        .get_shelf_from_reader("featured".to_string())
+        .await
+        .unwrap();
+    let doc_ids_before = shelf_before.documents.clone();
+
+    // Now update one of the documents that's in the shelf, changing its ID
+    index_client
+        .update_documents(
+            serde_json::from_value(json!({
+                "strategy": "merge",
+                "documents": [
+                    {
+                        "id": "doc-3", // Update the document 3 with a new one
+                        "name": "Updated Product 3",
+                    }
+                ]
+            }))
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    // Wait for the shelf to be updated in the reader
+    wait_for(&collection_client, |c| {
+        let reader = c.reader;
+        let read_api_key = c.read_api_key;
+        let collection_id = c.collection_id;
+        let expected_doc_ids = doc_ids_before.clone();
+        async move {
+            let collection = reader.get_collection(collection_id, read_api_key).await?;
+            let shelf_id = oramacore_lib::shelf::ShelfId::try_new("featured")?;
+            let shelf = collection.get_shelf(shelf_id).await?;
+
+            if shelf.documents.len() != 2 {
+                bail!(
+                    "Expected 2 documents in shelf after update, got {}",
+                    shelf.documents.len()
+                );
+            }
+
+            if shelf.documents[0] != expected_doc_ids[0] {
+                bail!(
+                    "First document ID changed unexpectedly: {:?} != {:?}",
+                    shelf.documents[0],
+                    expected_doc_ids[0]
+                );
+            }
+
+            // Check if the document IDs have been updated
+            // The second document should have changed its internal ID but still be referenced
+            // because the document was replaced with a new one
+            if shelf.documents[1] == expected_doc_ids[1] {
+                bail!(
+                    "Second document ID should have changed after update: {:?}",
+                    shelf.documents[1]
+                );
+            }
+
+            Ok(())
+        }
+        .boxed()
+    })
+    .await
+    .expect("Shelf should be updated after document ID change");
+
+    drop(test_context);
+}
