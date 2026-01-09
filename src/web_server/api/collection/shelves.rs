@@ -30,7 +30,7 @@ pub fn read_apis(read_side: Arc<ReadSide>) -> Router {
             get(list_merchandising_shelves_reader),
         )
         .route(
-            "/v1/collections/{collection_id}/merchandising/shelves/:shelf_id",
+            "/v1/collections/{collection_id}/merchandising/shelves/{shelf_id}",
             get(get_merchandising_shelf_reader),
         )
         .with_state(read_side)
