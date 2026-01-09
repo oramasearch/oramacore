@@ -39,15 +39,6 @@ async fn test_shelf_insert_simple() {
         .await
         .unwrap();
 
-    // Verify the shelf was created in writer
-    let shelf = collection_client
-        .get_shelf_from_writer("bestsellers".to_string())
-        .await
-        .unwrap();
-
-    assert_eq!(shelf.id.as_str(), "bestsellers");
-    assert_eq!(shelf.documents, vec!["5", "3", "1", "7"]);
-
     // Wait for the reader to receive the shelf message and verify it has the expected document IDs
     wait_for(&collection_client, |c| {
         let reader = c.reader;
@@ -74,7 +65,7 @@ async fn test_shelf_insert_simple() {
 
     // Verify the shelf from reader using the helper method
     let shelf_reader = collection_client
-        .get_shelf_from_reader("bestsellers".to_string())
+        .get_shelf("bestsellers".to_string())
         .await
         .unwrap();
 
@@ -96,11 +87,7 @@ async fn test_shelf_list_multiple() {
     let collection_client = test_context.create_collection().await.unwrap();
     let _index_client = collection_client.create_index().await.unwrap();
 
-    // Initially should have no shelves
-    let shelves = collection_client.list_shelves_from_writer().await.unwrap();
-    assert_eq!(shelves.len(), 0);
-
-    let shelves_reader = collection_client.list_shelves_from_reader().await.unwrap();
+    let shelves_reader = collection_client.list_shelves().await.unwrap();
     assert_eq!(shelves_reader.len(), 0);
 
     // Insert multiple shelves
@@ -139,34 +126,6 @@ async fn test_shelf_list_multiple() {
 
     let expected_shelves = vec!["shelf-1", "shelf-2", "shelf-3"];
 
-    // Verify all shelves are listed in writer
-    wait_for(&collection_client, |c| {
-        let writer = c.writer;
-        let write_api_key = c.write_api_key;
-        let collection_id = c.collection_id;
-        let expected_shelves = expected_shelves.clone();
-        async move {
-            let collection = writer.get_collection(collection_id, write_api_key).await?;
-            let shelves = collection.list_shelves().await?;
-
-            if shelves.len() != 3 {
-                bail!("Expected 3 shelves in writer, found {}", shelves.len());
-            }
-
-            let shelf_ids: Vec<&str> = shelves.iter().map(|s| s.id.as_str()).collect();
-            for expected in expected_shelves {
-                if !shelf_ids.contains(&expected) {
-                    bail!("{expected} not found in writer");
-                }
-            }
-
-            Ok(())
-        }
-        .boxed()
-    })
-    .await
-    .expect("All shelves should be listed in writer");
-
     // Verify all shelves are listed in reader
     wait_for(&collection_client, |c| {
         let reader = c.reader;
@@ -178,7 +137,7 @@ async fn test_shelf_list_multiple() {
             let shelves = collection.list_shelves().await?;
 
             if shelves.len() != 3 {
-                bail!("Expected 3 shelves in reader, found {}", shelves.len());
+                bail!("expected 3 shelves in reader, found {}", shelves.len());
             }
 
             let shelf_ids: Vec<&str> = shelves.iter().map(|s| s.id.as_str()).collect();
@@ -230,8 +189,24 @@ async fn test_shelf_delete() {
         .unwrap();
 
     // Verify both shelves exist
-    let shelves = collection_client.list_shelves_from_writer().await.unwrap();
-    assert_eq!(shelves.len(), 2);
+    wait_for(&collection_client, |c| {
+        let reader = c.reader;
+        let read_api_key = c.read_api_key;
+        let collection_id = c.collection_id;
+        async move {
+            let collection = reader.get_collection(collection_id, read_api_key).await?;
+            let shelves = collection.list_shelves().await?;
+
+            if shelves.len() != 2 {
+                bail!("expected 2 shelves in reader, found {}", shelves.len());
+            }
+
+            Ok(())
+        }
+        .boxed()
+    })
+    .await
+    .expect("All shelves should be listed in reader");
 
     // Delete one shelf
     collection_client
@@ -240,13 +215,35 @@ async fn test_shelf_delete() {
         .unwrap();
 
     // Verify only one shelf remains
-    let shelves = collection_client.list_shelves_from_writer().await.unwrap();
-    assert_eq!(shelves.len(), 1);
-    assert_eq!(shelves[0].id.as_str(), "shelf-to-keep");
+    wait_for(&collection_client, |c| {
+        let reader = c.reader;
+        let read_api_key = c.read_api_key;
+        let collection_id = c.collection_id;
+        async move {
+            let collection = reader.get_collection(collection_id, read_api_key).await?;
+            let shelves = collection.list_shelves().await?;
+
+            if shelves.len() != 1 {
+                bail!("expected 1 shelves in reader, found {}", shelves.len());
+            }
+
+            if shelves.first().unwrap().id.as_str() != "shelf-to-keep" {
+                bail!(
+                    "expected 'shelf-to-keep' to be in reader, found {}",
+                    shelves.first().unwrap().id.as_str()
+                );
+            }
+
+            Ok(())
+        }
+        .boxed()
+    })
+    .await
+    .expect("All shelves should be listed in reader");
 
     // Verify getting the deleted shelf returns an error
     let result = collection_client
-        .get_shelf_from_writer("shelf-to-delete".to_string())
+        .get_shelf("shelf-to-delete".to_string())
         .await;
     assert!(result.is_err());
 
@@ -312,29 +309,6 @@ async fn test_shelf_commit() {
         .get_test_collection_client(collection_id, write_api_key, read_api_key)
         .unwrap();
 
-    // Wait for the writer to fully load the collection and shelves
-    wait_for(&collection_client, |c| {
-        let writer = c.writer;
-        let write_api_key = c.write_api_key;
-        let collection_id = c.collection_id;
-        async move {
-            let collection = writer.get_collection(collection_id, write_api_key).await?;
-            let shelves = collection.list_shelves().await?;
-
-            if !shelves
-                .iter()
-                .any(|s| s.id.as_str() == TEST_COMMIT_SHELF_ID)
-            {
-                bail!("{TEST_COMMIT_SHELF_ID} not found after reload in writer");
-            }
-
-            Ok(())
-        }
-        .boxed()
-    })
-    .await
-    .expect("Shelves should be loaded from disk after reload in writer");
-
     // Wait for the reader to fully load the collection and shelves
     wait_for(&collection_client, |c| {
         let reader = c.reader;
@@ -358,17 +332,8 @@ async fn test_shelf_commit() {
     .await
     .expect("Shelves should be loaded from disk after reload in reader");
 
-    // Verify the shelf still exists and has correct data after reload
-    let shelf_after_reload_writer = collection_client
-        .get_shelf_from_writer(TEST_COMMIT_SHELF_ID.to_string())
-        .await
-        .unwrap();
-
-    assert_eq!(shelf_after_reload_writer.id.as_str(), TEST_COMMIT_SHELF_ID);
-    assert_eq!(shelf_after_reload_writer.documents.len(), 5);
-
     let shelf_after_reload_reader = collection_client
-        .get_shelf_from_reader(TEST_COMMIT_SHELF_ID.to_string())
+        .get_shelf(TEST_COMMIT_SHELF_ID.to_string())
         .await
         .unwrap();
 
@@ -441,17 +406,8 @@ async fn test_shelf_delete_removes_files() {
         "Shelf file should be removed from reader side: {reader_shelf_file:?}"
     );
 
-    // Verify the shelf no longer exists
-    let result = collection_client
-        .get_shelf_from_writer(TEST_DELETE_SHELF_ID.to_string())
-        .await;
-    assert!(
-        result.is_err(),
-        "Shelf should not exist after deletion in writer"
-    );
-
     let result_reader = collection_client
-        .get_shelf_from_reader(TEST_DELETE_SHELF_ID.to_string())
+        .get_shelf(TEST_DELETE_SHELF_ID.to_string())
         .await;
     assert!(
         result_reader.is_err(),
@@ -480,14 +436,6 @@ async fn test_shelf_update() {
         )
         .await
         .unwrap();
-
-    // Verify shelf from writer
-    let shelf_writer = collection_client
-        .get_shelf_from_writer(TEST_UPDATE_SHELF_ID.to_string())
-        .await
-        .unwrap();
-    assert_eq!(shelf_writer.id.as_str(), TEST_UPDATE_SHELF_ID);
-    assert_eq!(shelf_writer.documents, vec!["1", "2", "3"]);
 
     // Wait for reader to update
     wait_for(&collection_client, |c| {
@@ -545,7 +493,7 @@ async fn test_shelf_update() {
 
     // Verify updated shelf from reader
     let shelf_reader_updated = collection_client
-        .get_shelf_from_reader(TEST_UPDATE_SHELF_ID.to_string())
+        .get_shelf(TEST_UPDATE_SHELF_ID.to_string())
         .await
         .unwrap();
     assert_eq!(shelf_reader_updated.id.as_str(), TEST_UPDATE_SHELF_ID);
@@ -574,14 +522,38 @@ async fn test_shelf_empty_documents() {
         .await
         .unwrap();
 
-    // Verify the shelf was created
-    let shelf = collection_client
-        .get_shelf_from_writer("empty-shelf".to_string())
-        .await
-        .unwrap();
+    wait_for(&collection_client, |c| {
+        let reader = c.reader;
+        let read_api_key = c.read_api_key;
+        let collection_id = c.collection_id;
+        async move {
+            let collection = reader.get_collection(collection_id, read_api_key).await?;
+            let shelves = collection.list_shelves().await.unwrap();
 
-    assert_eq!(shelf.id.as_str(), "empty-shelf");
-    assert_eq!(shelf.documents.len(), 0);
+            if shelves.len() != 1 {
+                bail!("Expected 1 shelf, got {}", shelves.len());
+            }
+
+            if shelves[0].id.as_str() != "empty-shelf" {
+                bail!(
+                    "Expected shelf 'empty-shelf', got {}",
+                    shelves[0].id.as_str()
+                );
+            }
+
+            if !shelves[0].documents.is_empty() {
+                bail!(
+                    "Expected shelf to be empty, got {}",
+                    shelves[0].documents.len()
+                );
+            }
+
+            Ok(())
+        }
+        .boxed()
+    })
+    .await
+    .expect("Shelf should be available in reader");
 
     drop(test_context);
 }
@@ -617,20 +589,64 @@ async fn test_shelf_multiple_collections() {
         .await
         .unwrap();
 
-    // Verify each collection has only its own shelf
-    let shelves_1 = collection_client_1
-        .list_shelves_from_writer()
-        .await
-        .unwrap();
-    assert_eq!(shelves_1.len(), 1);
-    assert_eq!(shelves_1[0].id.as_str(), "shelf-a");
+    wait_for(&collection_client_1, |c| {
+        let reader = c.reader;
+        let read_api_key = c.read_api_key;
+        let collection_id = c.collection_id;
+        async move {
+            let collection = reader.get_collection(collection_id, read_api_key).await?;
+            let shelves = collection.list_shelves().await.unwrap();
 
-    let shelves_2 = collection_client_2
-        .list_shelves_from_writer()
-        .await
-        .unwrap();
-    assert_eq!(shelves_2.len(), 1);
-    assert_eq!(shelves_2[0].id.as_str(), "shelf-b");
+            if shelves.len() != 1 {
+                bail!("Expected 1 shelf, got {}", shelves.len());
+            }
+
+            if shelves[0].id.as_str() != "shelf-a" {
+                bail!("Expected shelf 'shelf-a', got {}", shelves[0].id.as_str());
+            }
+
+            if shelves[0].documents.len() != 2 {
+                bail!(
+                    "Expected shelf to be of len 2, got {}",
+                    shelves[0].documents.len()
+                );
+            }
+
+            Ok(())
+        }
+        .boxed()
+    })
+    .await
+    .expect("Shelf-a should be available in reader");
+
+    wait_for(&collection_client_2, |c| {
+        let reader = c.reader;
+        let read_api_key = c.read_api_key;
+        let collection_id = c.collection_id;
+        async move {
+            let collection = reader.get_collection(collection_id, read_api_key).await?;
+            let shelves = collection.list_shelves().await.unwrap();
+
+            if shelves.len() != 1 {
+                bail!("Expected 1 shelf, got {}", shelves.len());
+            }
+
+            if shelves[0].id.as_str() != "shelf-b" {
+                bail!("Expected shelf 'shelf-b', got {}", shelves[0].id.as_str());
+            }
+            if shelves[0].documents.len() != 2 {
+                bail!(
+                    "Expected shelf to be of len 2, got {}",
+                    shelves[0].documents.len()
+                );
+            }
+
+            Ok(())
+        }
+        .boxed()
+    })
+    .await
+    .expect("Shelf-b should be available in reader");
 
     drop(test_context);
 }
@@ -717,7 +733,7 @@ async fn test_shelf_updated_when_document_id_changes() {
     .expect("Shelf should be available in reader");
 
     let shelf_before = collection_client
-        .get_shelf_from_reader("featured".to_string())
+        .get_shelf("featured".to_string())
         .await
         .unwrap();
     let doc_ids_before = shelf_before.documents.clone();

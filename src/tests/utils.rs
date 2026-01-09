@@ -639,34 +639,7 @@ impl TestCollectionClient<'_> {
         Ok(())
     }
 
-    pub async fn get_shelf_from_writer(&self, shelf_id: String) -> Result<Shelf<String>> {
-        let collection = self
-            .writer
-            .get_collection(self.collection_id, self.write_api_key)
-            .await?;
-
-        let shelf_id =
-            ShelfId::try_new(shelf_id).map_err(|e| anyhow::anyhow!("Invalid shelf ID: {e}"))?;
-
-        collection
-            .get_shelf(shelf_id)
-            .await
-            .context("Failed to get shelf")
-    }
-
-    pub async fn list_shelves_from_writer(&self) -> Result<Vec<Shelf<String>>> {
-        let collection = self
-            .writer
-            .get_collection(self.collection_id, self.write_api_key)
-            .await?;
-
-        collection
-            .list_shelves()
-            .await
-            .context("Failed to list shelves")
-    }
-
-    pub async fn get_shelf_from_reader(&self, shelf_id: String) -> Result<Shelf<DocumentId>> {
+    pub async fn get_shelf(&self, shelf_id: String) -> Result<Shelf<DocumentId>> {
         let collection = self
             .reader
             .get_collection(self.collection_id, self.read_api_key)
@@ -683,7 +656,7 @@ impl TestCollectionClient<'_> {
         Ok(shelf)
     }
 
-    pub async fn list_shelves_from_reader(&self) -> Result<Vec<Shelf<DocumentId>>> {
+    pub async fn list_shelves(&self) -> Result<Vec<Shelf<DocumentId>>> {
         let collection = self
             .reader
             .get_collection(self.collection_id, self.read_api_key)
