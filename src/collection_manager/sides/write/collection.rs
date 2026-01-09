@@ -955,7 +955,17 @@ impl CollectionWriter {
 
     pub async fn delete_shelf(&self, id: ShelfId) -> Result<(), WriteError> {
         let mut shelves_writer = self.shelves_writer.write("delete_shelf").await;
-        shelves_writer.delete_shelf(id)?;
+        shelves_writer.delete_shelf(id.clone())?;
+        drop(shelves_writer);
+
+        self.context
+            .op_sender
+            .send(WriteOperation::Collection(
+                self.id,
+                CollectionWriteOperation::Shelf(ShelfOperation::Delete(id)),
+            ))
+            .await?;
+
         Ok(())
     }
 
