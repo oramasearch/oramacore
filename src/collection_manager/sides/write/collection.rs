@@ -11,7 +11,7 @@ use futures::{future::join_all, FutureExt};
 use oramacore_lib::{
     hook_storage::HookWriter,
     pin_rules::PinRulesWriter,
-    shelf::{Shelf, ShelfId, ShelfOperation, ShelvesWriter},
+    shelves::{Shelf, ShelfId, ShelfOperation, ShelvesWriter},
 };
 use serde::{Deserialize, Serialize};
 use tracing::{info, warn};

@@ -6,7 +6,7 @@ use axum::{
     routing::{get, post},
     Json, Router,
 };
-use oramacore_lib::shelf::{Shelf, ShelfId};
+use oramacore_lib::shelves::{Shelf, ShelfId};
 use serde::Serialize;
 use serde_json::json;
 

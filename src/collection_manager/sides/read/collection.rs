@@ -17,7 +17,7 @@ use orama_js_pool::OutputChannel;
 use oramacore_lib::{
     hook_storage::{HookReader, HookType},
     pin_rules::PinRulesReader,
-    shelf::{Shelf, ShelfId, ShelvesReader},
+    shelves::{Shelf, ShelfId, ShelvesReader},
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};

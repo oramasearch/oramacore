@@ -6,7 +6,7 @@ mod embedding;
 pub mod index;
 use oramacore_lib::hook_storage::{HookWriter, HookWriterError};
 use oramacore_lib::nlp::NLPService;
-use oramacore_lib::shelf::{ShelfId, ShelvesWriterError};
+use oramacore_lib::shelves::{ShelfId, ShelvesWriterError};
 use thiserror::Error;
 mod context;
 pub mod jwt_manager;

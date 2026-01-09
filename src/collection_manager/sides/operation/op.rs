@@ -9,7 +9,7 @@ use oramacore_lib::generic_kv::KVWriteOperation;
 use oramacore_lib::hook_storage::HookOperation;
 use oramacore_lib::nlp::locales::Locale;
 use oramacore_lib::pin_rules::PinRuleOperation;
-use oramacore_lib::shelf::ShelfOperation;
+use oramacore_lib::shelves::ShelfOperation;
 use serde::{ser::SerializeTuple, Deserialize, Serialize};
 use serde_json::value::RawValue;
 use std::collections::HashMap;

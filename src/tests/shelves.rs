@@ -55,7 +55,7 @@ async fn test_shelf_insert_simple() {
         let collection_id = c.collection_id;
         async move {
             let collection = reader.get_collection(collection_id, read_api_key).await?;
-            let shelf_id = oramacore_lib::shelf::ShelfId::try_new("bestsellers")?;
+            let shelf_id = oramacore_lib::shelves::ShelfId::try_new("bestsellers")?;
             let shelf = collection.get_shelf(shelf_id).await?;
 
             if shelf.id.as_str() != "bestsellers" {
@@ -496,7 +496,7 @@ async fn test_shelf_update() {
         let collection_id = c.collection_id;
         async move {
             let collection = reader.get_collection(collection_id, read_api_key).await?;
-            let shelf_id = oramacore_lib::shelf::ShelfId::try_new(TEST_UPDATE_SHELF_ID)?;
+            let shelf_id = oramacore_lib::shelves::ShelfId::try_new(TEST_UPDATE_SHELF_ID)?;
             let shelf = collection.get_shelf(shelf_id).await?;
 
             if shelf.documents.len() != 3 {
@@ -529,7 +529,7 @@ async fn test_shelf_update() {
         let collection_id = c.collection_id;
         async move {
             let collection = reader.get_collection(collection_id, read_api_key).await?;
-            let shelf_id = oramacore_lib::shelf::ShelfId::try_new(TEST_UPDATE_SHELF_ID)?;
+            let shelf_id = oramacore_lib::shelves::ShelfId::try_new(TEST_UPDATE_SHELF_ID)?;
             let shelf = collection.get_shelf(shelf_id).await?;
 
             if shelf.documents.len() != 2 {
@@ -699,7 +699,7 @@ async fn test_shelf_updated_when_document_id_changes() {
         let collection_id = c.collection_id;
         async move {
             let collection = reader.get_collection(collection_id, read_api_key).await?;
-            let shelf_id = oramacore_lib::shelf::ShelfId::try_new("featured")?;
+            let shelf_id = oramacore_lib::shelves::ShelfId::try_new("featured")?;
             let shelf = collection.get_shelf(shelf_id).await?;
 
             if shelf.documents.len() != 2 {
@@ -747,7 +747,7 @@ async fn test_shelf_updated_when_document_id_changes() {
         let expected_doc_ids = doc_ids_before.clone();
         async move {
             let collection = reader.get_collection(collection_id, read_api_key).await?;
-            let shelf_id = oramacore_lib::shelf::ShelfId::try_new("featured")?;
+            let shelf_id = oramacore_lib::shelves::ShelfId::try_new("featured")?;
             let shelf = collection.get_shelf(shelf_id).await?;
 
             if shelf.documents.len() != 2 {
