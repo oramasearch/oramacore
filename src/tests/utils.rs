@@ -638,7 +638,10 @@ impl TestCollectionClient<'_> {
         Ok(())
     }
 
-    pub async fn get_shelf(&self, shelf_id: String) -> Result<oramacore_lib::shelf::Shelf<String>> {
+    pub async fn get_shelf_from_writer(
+        &self,
+        shelf_id: String,
+    ) -> Result<oramacore_lib::shelf::Shelf<String>> {
         let collection = self
             .writer
             .get_collection(self.collection_id, self.write_api_key)

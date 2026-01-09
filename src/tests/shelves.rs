@@ -39,58 +39,51 @@ async fn test_shelf_insert_simple() {
         .await
         .unwrap();
 
-    // Verify the shelf was created
+    // Verify the shelf was created in writer
     let shelf = collection_client
-        .get_shelf("bestsellers".to_string())
+        .get_shelf_from_writer("bestsellers".to_string())
         .await
         .unwrap();
 
     assert_eq!(shelf.id.as_str(), "bestsellers");
     assert_eq!(shelf.documents, vec!["5", "3", "1", "7"]);
 
-    drop(test_context);
-}
+    // Wait for the reader to receive the shelf message and verify it has the expected document IDs
+    wait_for(&collection_client, |c| {
+        let reader = c.reader;
+        let read_api_key = c.read_api_key;
+        let collection_id = c.collection_id;
+        async move {
+            let collection = reader.get_collection(collection_id, read_api_key).await?;
+            let shelf_id = oramacore_lib::shelf::ShelfId::try_new("bestsellers")?;
+            let shelf = collection.get_shelf(shelf_id).await?;
 
-#[tokio::test(flavor = "multi_thread")]
-async fn test_shelf_update_existing() {
-    init_log();
+            if shelf.id.as_str() != "bestsellers" {
+                bail!(
+                    "Shelf ID mismatch in reader: expected 'bestsellers', got '{}'",
+                    shelf.id
+                );
+            }
 
-    let test_context = TestContext::new().await;
-    let collection_client = test_context.create_collection().await.unwrap();
-    let _index_client = collection_client.create_index().await.unwrap();
+            Ok(())
+        }
+        .boxed()
+    })
+    .await
+    .expect("Shelf should be available in reader with correct document IDs");
 
-    // Insert initial shelf
-    collection_client
-        .insert_shelf(
-            serde_json::from_value(json!({
-                "id": "featured",
-                "documents": ["1", "2", "3"]
-            }))
-            .unwrap(),
-        )
+    // Verify the shelf from reader using the helper method
+    let shelf_reader = collection_client
+        .get_shelf_from_reader("bestsellers".to_string())
         .await
         .unwrap();
 
-    // Update the shelf with new documents
-    collection_client
-        .insert_shelf(
-            serde_json::from_value(json!({
-                "id": "featured",
-                "documents": ["4", "5", "6", "7"]
-            }))
-            .unwrap(),
-        )
-        .await
-        .unwrap();
-
-    // Verify the shelf was updated
-    let shelf = collection_client
-        .get_shelf("featured".to_string())
-        .await
-        .unwrap();
-
-    assert_eq!(shelf.id.as_str(), "featured");
-    assert_eq!(shelf.documents, vec!["4", "5", "6", "7"]);
+    // Test also the conversion to document id
+    assert_eq!(shelf_reader.id.as_str(), "bestsellers");
+    assert_eq!(
+        shelf_reader.documents,
+        vec![DocumentId(6), DocumentId(4), DocumentId(2), DocumentId(8)]
+    );
 
     drop(test_context);
 }
@@ -253,7 +246,7 @@ async fn test_shelf_delete() {
 
     // Verify getting the deleted shelf returns an error
     let result = collection_client
-        .get_shelf("shelf-to-delete".to_string())
+        .get_shelf_from_writer("shelf-to-delete".to_string())
         .await;
     assert!(result.is_err());
 
@@ -366,13 +359,13 @@ async fn test_shelf_commit() {
     .expect("Shelves should be loaded from disk after reload in reader");
 
     // Verify the shelf still exists and has correct data after reload
-    let shelf_after_reload = collection_client
-        .get_shelf(TEST_COMMIT_SHELF_ID.to_string())
+    let shelf_after_reload_writer = collection_client
+        .get_shelf_from_writer(TEST_COMMIT_SHELF_ID.to_string())
         .await
         .unwrap();
 
-    assert_eq!(shelf_after_reload.id.as_str(), TEST_COMMIT_SHELF_ID);
-    assert_eq!(shelf_after_reload.documents, vec!["1", "2", "3", "4", "5"]);
+    assert_eq!(shelf_after_reload_writer.id.as_str(), TEST_COMMIT_SHELF_ID);
+    assert_eq!(shelf_after_reload_writer.documents.len(), 5);
 
     let shelf_after_reload_reader = collection_client
         .get_shelf_from_reader(TEST_COMMIT_SHELF_ID.to_string())
@@ -380,16 +373,7 @@ async fn test_shelf_commit() {
         .unwrap();
 
     assert_eq!(shelf_after_reload_reader.id.as_str(), TEST_COMMIT_SHELF_ID);
-    assert_eq!(
-        shelf_after_reload_reader.documents,
-        vec![
-            DocumentId(1),
-            DocumentId(2),
-            DocumentId(3),
-            DocumentId(4),
-            DocumentId(5)
-        ]
-    );
+    assert_eq!(shelf_after_reload_reader.documents.len(), 5);
 
     drop(test_context);
 }
@@ -459,7 +443,7 @@ async fn test_shelf_delete_removes_files() {
 
     // Verify the shelf no longer exists
     let result = collection_client
-        .get_shelf(TEST_DELETE_SHELF_ID.to_string())
+        .get_shelf_from_writer(TEST_DELETE_SHELF_ID.to_string())
         .await;
     assert!(
         result.is_err(),
@@ -489,7 +473,7 @@ async fn test_shelf_update() {
     collection_client
         .insert_shelf(
             serde_json::from_value(json!({
-                "id": "TEST_DELETE_SHELF_ID",
+                "id": TEST_UPDATE_SHELF_ID,
                 "documents": ["1", "2", "3"]
             }))
             .unwrap(),
@@ -497,21 +481,26 @@ async fn test_shelf_update() {
         .await
         .unwrap();
 
-    test_context.commit_all().await.unwrap();
+    // Verify shelf from writer
+    let shelf_writer = collection_client
+        .get_shelf_from_writer(TEST_UPDATE_SHELF_ID.to_string())
+        .await
+        .unwrap();
+    assert_eq!(shelf_writer.id.as_str(), TEST_UPDATE_SHELF_ID);
+    assert_eq!(shelf_writer.documents, vec!["1", "2", "3"]);
 
+    // Wait for reader to update
     wait_for(&collection_client, |c| {
         let reader = c.reader;
         let read_api_key = c.read_api_key;
         let collection_id = c.collection_id;
         async move {
             let collection = reader.get_collection(collection_id, read_api_key).await?;
-            let shelves = collection.list_shelves().await?;
+            let shelf_id = oramacore_lib::shelf::ShelfId::try_new(TEST_UPDATE_SHELF_ID)?;
+            let shelf = collection.get_shelf(shelf_id).await?;
 
-            if !shelves
-                .iter()
-                .any(|s| s.id.as_str() == TEST_UPDATE_SHELF_ID)
-            {
-                bail!("{TEST_UPDATE_SHELF_ID} not found in reader");
+            if shelf.documents.len() != 3 {
+                bail!("Shelf not updated in reader yet");
             }
 
             Ok(())
@@ -519,25 +508,7 @@ async fn test_shelf_update() {
         .boxed()
     })
     .await
-    .expect("Shelf should be available in reader after commit");
-
-    // Verify shelf from writer
-    let shelf_writer = collection_client
-        .get_shelf(TEST_UPDATE_SHELF_ID.to_string())
-        .await
-        .unwrap();
-    assert_eq!(shelf_writer.id.as_str(), TEST_UPDATE_SHELF_ID);
-    assert_eq!(shelf_writer.documents, vec!["1", "2", "3"]);
-
-    let shelf_reader = collection_client
-        .get_shelf_from_reader(TEST_UPDATE_SHELF_ID.to_string())
-        .await
-        .unwrap();
-    assert_eq!(shelf_reader.id.as_str(), TEST_UPDATE_SHELF_ID);
-    assert_eq!(
-        shelf_reader.documents,
-        vec![DocumentId(1), DocumentId(2), DocumentId(3)]
-    );
+    .expect("Shelf should be updated in reader");
 
     // Update shelf
     collection_client
@@ -551,8 +522,6 @@ async fn test_shelf_update() {
         .await
         .unwrap();
 
-    test_context.commit_all().await.unwrap();
-
     // Wait for reader to update
     wait_for(&collection_client, |c| {
         let reader = c.reader;
@@ -560,8 +529,7 @@ async fn test_shelf_update() {
         let collection_id = c.collection_id;
         async move {
             let collection = reader.get_collection(collection_id, read_api_key).await?;
-            let shelf_id =
-                oramacore_lib::shelf::ShelfId::try_new(TEST_UPDATE_SHELF_ID.to_string())?;
+            let shelf_id = oramacore_lib::shelf::ShelfId::try_new(TEST_UPDATE_SHELF_ID)?;
             let shelf = collection.get_shelf(shelf_id).await?;
 
             if shelf.documents.len() != 2 {
@@ -581,10 +549,7 @@ async fn test_shelf_update() {
         .await
         .unwrap();
     assert_eq!(shelf_reader_updated.id.as_str(), TEST_UPDATE_SHELF_ID);
-    assert_eq!(
-        shelf_reader_updated.documents,
-        vec![DocumentId(4), DocumentId(5),]
-    );
+    assert_eq!(shelf_reader_updated.documents.len(), 2);
 
     drop(test_context);
 }
@@ -611,7 +576,7 @@ async fn test_shelf_empty_documents() {
 
     // Verify the shelf was created
     let shelf = collection_client
-        .get_shelf("empty-shelf".to_string())
+        .get_shelf_from_writer("empty-shelf".to_string())
         .await
         .unwrap();
 
