@@ -8,7 +8,11 @@ use std::{
 use anyhow::{bail, Context, Result};
 use chrono::{DateTime, Utc};
 use futures::{future::join_all, FutureExt};
-use oramacore_lib::{hook_storage::HookWriter, pin_rules::PinRulesWriter};
+use oramacore_lib::{
+    hook_storage::HookWriter,
+    pin_rules::PinRulesWriter,
+    shelves::{Shelf, ShelfId, ShelfOperation, ShelvesWriter},
+};
 use serde::{Deserialize, Serialize};
 use tracing::{info, warn};
 
@@ -59,6 +63,7 @@ pub struct CollectionWriter {
     hook: HookWriter,
 
     pin_rules_writer: OramaAsyncLock<PinRulesWriter>,
+    shelves_writer: OramaAsyncLock<ShelvesWriter>,
 
     is_new: bool,
 
@@ -117,6 +122,7 @@ impl CollectionWriter {
                 .context("Cannot create hook writer")?,
 
             pin_rules_writer: OramaAsyncLock::new("pin_rules_writer", PinRulesWriter::empty()?),
+            shelves_writer: OramaAsyncLock::new("shelves_writer", ShelvesWriter::empty()?),
 
             is_new: true,
         })
@@ -210,6 +216,11 @@ impl CollectionWriter {
                 PinRulesWriter::try_new(data_dir.join("pin_rules"))
                     .context("Cannot create pin rules writer")?,
             ),
+            shelves_writer: OramaAsyncLock::new(
+                "shelves_writer",
+                ShelvesWriter::try_new(data_dir.join("shelves"))
+                    .context("Cannot create shelf writer")?,
+            ),
 
             is_new: false,
         })
@@ -223,10 +234,12 @@ impl CollectionWriter {
         let indexes_lock = self.indexes.get_mut();
         let temp_indexes_lock = self.temp_indexes.get_mut();
         let pin_rules_lock = self.pin_rules_writer.get_mut();
+        let shelves_lock = self.shelves_writer.get_mut();
 
         let is_dirty = indexes_lock.values().any(|i| i.is_dirty())
             || temp_indexes_lock.values().any(|i| i.is_dirty())
-            || pin_rules_lock.has_pending_changes();
+            || pin_rules_lock.has_pending_changes()
+            || shelves_lock.has_pending_changes();
 
         if !self.is_new && !is_dirty {
             info!("Collection is not dirty, skipping commit");
@@ -255,6 +268,10 @@ impl CollectionWriter {
         pin_rules_lock
             .commit(data_dir.join("pin_rules"))
             .context("Cannot commit pin rules")?;
+
+        shelves_lock
+            .commit(data_dir.join("shelves"))
+            .context("Cannot commit shelves")?;
 
         let temporary_indexes = temp_indexes_lock.keys().copied().collect::<Vec<_>>();
         let indexes_path = data_dir.join("temp_indexes");
@@ -784,7 +801,7 @@ impl CollectionWriter {
         rule: PinRule<String>,
     ) -> Result<(), WriteError> {
         let mut pin_rule_writer = self.pin_rules_writer.write("insert_pin_rule").await;
-        pin_rule_writer.insert_pin_rule(rule.clone()).await?;
+        pin_rule_writer.insert_pin_rule(rule.clone())?;
 
         let indexes_lock = self.indexes.read("insert_merchandising_pin_rule").await;
         let mut storages = Vec::with_capacity(indexes_lock.len());
@@ -821,7 +838,7 @@ impl CollectionWriter {
 
     pub async fn delete_merchandising_pin_rule(&self, rule_id: String) -> Result<(), WriteError> {
         let mut pin_rule_writer = self.pin_rules_writer.write("delete_pin_rule").await;
-        pin_rule_writer.delete_pin_rule(&rule_id).await?;
+        pin_rule_writer.delete_pin_rule(&rule_id)?;
         drop(pin_rule_writer);
 
         self.context
@@ -840,6 +857,13 @@ impl CollectionWriter {
         reason: &'static str,
     ) -> OramaAsyncLockReadGuard<'_, PinRulesWriter> {
         self.pin_rules_writer.read(reason).await
+    }
+
+    pub async fn get_shelves_writer(
+        &self,
+        reason: &'static str,
+    ) -> OramaAsyncLockReadGuard<'_, ShelvesWriter> {
+        self.shelves_writer.read(reason).await
     }
 
     pub async fn update_pin_rules(
@@ -881,12 +905,129 @@ impl CollectionWriter {
                     DocumentId(u64::MAX)
                 })
                 .await;
-            println!("Inserting updated pin rule: {new_rule:#?}");
+            info!("Inserting updated pin rule: {new_rule:#?}");
             index_operation_batch.push(WriteOperation::Collection(
                 self.id,
                 CollectionWriteOperation::PinRule(PinRuleOperation::Insert(new_rule)),
             ));
         }
+    }
+
+    /// Update shelves when document IDs change.
+    /// This method is called when documents are updated to keep shelf document references up-to-date.
+    pub async fn update_shelves(
+        &self,
+        shelf_ids_touched: HashSet<ShelfId>,
+        index_operation_batch: &mut Vec<WriteOperation>,
+    ) {
+        if shelf_ids_touched.is_empty() {
+            return;
+        }
+
+        let indexes_lock = self.indexes.read("update_shelves").await;
+        let mut storages = Vec::with_capacity(indexes_lock.len());
+        for index in indexes_lock.values() {
+            let storage = index.get_document_id_storage().await;
+            storages.push(storage);
+        }
+
+        let shelves_writer = self.shelves_writer.read("update_shelves").await;
+
+        for shelf_id in shelf_ids_touched {
+            let shelf = match shelves_writer.get_by_id(&shelf_id) {
+                Some(shelf) => shelf.clone(),
+                None => {
+                    // This shelf was deleted
+                    continue;
+                }
+            };
+
+            let new_shelf = shelf
+                .convert_ids(|id| {
+                    for storage in &storages {
+                        if let Some(doc_id) = storage.get(&id) {
+                            return doc_id;
+                        }
+                    }
+                    // DocumentId(u64::MAX) is never used, so this is equal to say
+                    // "ignore this shelf"
+                    DocumentId(u64::MAX)
+                })
+                .await;
+            info!("Inserting updated shelf: {new_shelf:#?}");
+            index_operation_batch.push(WriteOperation::Collection(
+                self.id,
+                CollectionWriteOperation::Shelf(ShelfOperation::Insert(new_shelf)),
+            ));
+        }
+    }
+
+    pub async fn insert_shelf(&self, shelf: Shelf<String>) -> Result<(), WriteError> {
+        const MAX_NUMBER_OF_ITEMS_SHELF: usize = 1_000;
+
+        if shelf.doc_ids.len() > MAX_NUMBER_OF_ITEMS_SHELF {
+            return Err(WriteError::ShelfDocumentLimitExceeded(
+                shelf.doc_ids.len(),
+                MAX_NUMBER_OF_ITEMS_SHELF,
+            ));
+        }
+
+        let mut shelves_writer = self.shelves_writer.write("insert_shelf").await;
+        shelves_writer.insert_shelf(shelf.clone())?;
+
+        let indexes_lock = self.indexes.read("insert_shelf").await;
+        let mut storages = Vec::with_capacity(indexes_lock.len());
+        for index in indexes_lock.values() {
+            let storage = index.get_document_id_storage().await;
+            storages.push(storage);
+        }
+
+        let new_shelf = shelf
+            .convert_ids(|id| {
+                for storage in &storages {
+                    if let Some(doc_id) = storage.get(&id) {
+                        return doc_id;
+                    }
+                }
+                // DocumentId(u64::MAX) is never used, so this is equal to say
+                // "ignore this rules"
+                DocumentId(u64::MAX)
+            })
+            .await;
+
+        drop(shelves_writer);
+
+        self.context
+            .op_sender
+            .send(WriteOperation::Collection(
+                self.id,
+                CollectionWriteOperation::Shelf(ShelfOperation::Insert(new_shelf)),
+            ))
+            .await
+            .context("Cannot send shelf create operation")?;
+
+        Ok(())
+    }
+
+    pub async fn delete_shelf(&self, id: ShelfId) -> Result<(), WriteError> {
+        let mut shelves_writer = self.shelves_writer.write("delete_shelf").await;
+        shelves_writer.delete_shelf(id.clone())?;
+        drop(shelves_writer);
+
+        self.context
+            .op_sender
+            .send(WriteOperation::Collection(
+                self.id,
+                CollectionWriteOperation::Shelf(ShelfOperation::Delete(id)),
+            ))
+            .await?;
+
+        Ok(())
+    }
+
+    pub async fn list_shelves(&self) -> Result<Vec<Shelf<String>>, WriteError> {
+        let shelves_writer = self.shelves_writer.read("list_shelves").await;
+        Ok(shelves_writer.list_shelves().to_vec())
     }
 }
 

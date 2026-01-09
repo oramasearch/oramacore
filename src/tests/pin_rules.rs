@@ -1,5 +1,6 @@
 use crate::tests::utils::{extrapolate_ids_from_result, init_log};
 use crate::tests::utils::{wait_for, TestContext};
+use anyhow::bail;
 use futures::FutureExt;
 use serde_json::json;
 use std::convert::TryInto;
@@ -1002,6 +1003,135 @@ async fn test_pin_rule_delete_removes_files() {
         &ids[1], "5",
         "Document 5 should not be promoted after rule deletion"
     );
+
+    drop(test_context);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_pin_rule_updated_when_document_id_changes() {
+    init_log();
+
+    let test_context = TestContext::new().await;
+    let collection_client = test_context.create_collection().await.unwrap();
+    let index_client = collection_client.create_index().await.unwrap();
+
+    let docs: Vec<_> = (0_u8..5_u8)
+        .map(|i| {
+            json!({
+                "id": format!("doc-{}", i),
+                "name": format!("Product {}", i),
+            })
+        })
+        .collect();
+    index_client
+        .insert_documents(docs.try_into().unwrap())
+        .await
+        .unwrap();
+
+    const TEST_UPDATE_RULE_ID: &str = "test-update-doc-rule";
+    index_client
+        .insert_pin_rules(
+            json!({
+                "id": TEST_UPDATE_RULE_ID,
+                "conditions": [
+                    {
+                        "pattern": "product",
+                        "anchoring": "contains"
+                    }
+                ],
+                "consequence": {
+                    "promote": [
+                        {
+                            "doc_id": "doc-1",
+                            "position": 0
+                        },
+                        {
+                            "doc_id": "doc-3",
+                            "position": 1
+                        }
+                    ]
+                }
+            })
+            .try_into()
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    let doc_ids_before = {
+        let collection = collection_client
+            .reader
+            .get_collection(
+                collection_client.collection_id,
+                collection_client.read_api_key,
+            )
+            .await
+            .unwrap();
+        let pin_rules_reader = collection.get_pin_rules_reader("test").await;
+        let rule = pin_rules_reader.get_by_id(TEST_UPDATE_RULE_ID).unwrap();
+
+        rule.consequence.promote.clone()
+    };
+
+    // Now update one of the documents that's in the rule, changing its ID
+    index_client
+        .update_documents(
+            serde_json::from_value(json!({
+                "strategy": "merge",
+                "documents": [
+                    {
+                        "id": "doc-3", // Update the document 3 with a new one
+                        "name": "Updated Product 3",
+                    }
+                ]
+            }))
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    // Wait for the pin rule to be updated in the reader
+    wait_for(&collection_client, |c| {
+        let reader = c.reader;
+        let read_api_key = c.read_api_key;
+        let collection_id = c.collection_id;
+        let expected_doc_ids = doc_ids_before.clone();
+        async move {
+            let collection = reader.get_collection(collection_id, read_api_key).await?;
+            let pin_rules_reader = collection.get_pin_rules_reader("test").await;
+            let rule = pin_rules_reader.get_by_id(TEST_UPDATE_RULE_ID).unwrap();
+
+            if rule.consequence.promote.len() != 2 {
+                bail!(
+                    "Expected 2 promotions in pin rule after update, got {}",
+                    rule.consequence.promote.len()
+                );
+            }
+
+            if rule.consequence.promote[0].doc_id != expected_doc_ids[0].doc_id {
+                bail!(
+                    "First document ID changed unexpectedly: {:?} != {:?}",
+                    rule.consequence.promote[0].doc_id,
+                    expected_doc_ids[0].doc_id
+                );
+            }
+
+            // Check if the document IDs have been updated
+            // The second document should have changed its internal ID but still be referenced
+            // because the document was replaced with a new one
+            if rule.consequence.promote[1].doc_id == expected_doc_ids[1].doc_id {
+                bail!(
+                    "Second document ID should have changed after update: {:?}",
+                    rule.consequence.promote[1].doc_id,
+                );
+            }
+
+            Ok(())
+        }
+        .boxed()
+    })
+    .await
+    .expect("Pin rule should be updated after document ID change");
 
     drop(test_context);
 }

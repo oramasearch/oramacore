@@ -157,7 +157,6 @@ fn get_message_content(msg: &ChatCompletionRequestMessage) -> Option<String> {
                         ChatCompletionRequestSystemMessageContentPart::Text(t) => {
                             Some(t.text.clone())
                         }
-                        _ => None,
                     })
                     .collect();
                 if text.is_empty() {
@@ -215,7 +214,6 @@ fn get_message_content(msg: &ChatCompletionRequestMessage) -> Option<String> {
                         ChatCompletionRequestToolMessageContentPart::Text(t) => {
                             Some(t.text.clone())
                         }
-                        _ => None,
                     })
                     .collect();
                 if text.is_empty() {
@@ -229,7 +227,7 @@ fn get_message_content(msg: &ChatCompletionRequestMessage) -> Option<String> {
         ChatCompletionRequestMessage::Developer(m) => match &m.content {
             ChatCompletionRequestDeveloperMessageContent::Text(text) => Some(text.clone()),
             ChatCompletionRequestDeveloperMessageContent::Array(parts) => {
-                let text: Vec<String> = parts.iter().filter_map(|part| None).collect();
+                let text: Vec<String> = parts.iter().filter_map(|_part| None).collect();
                 if text.is_empty() {
                     Some(String::new())
                 } else {

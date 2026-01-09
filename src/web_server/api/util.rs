@@ -329,7 +329,7 @@ impl IntoResponse for WriteError {
                 (StatusCode::BAD_REQUEST, body).into_response()
             }
             Self::PinRulesError(e) => {
-                let body = format!("Invalid hook: {e:?}");
+                let body = format!("Invalid pin rule: {e:?}");
                 (StatusCode::BAD_REQUEST, body).into_response()
             }
             Self::DocumentLimitExceeded(collection_id, limit) => {
@@ -337,6 +337,14 @@ impl IntoResponse for WriteError {
                     "Document limit exceeded for collection {collection_id}. Limit: {limit}"
                 );
                 (StatusCode::PAYMENT_REQUIRED, body).into_response()
+            }
+            Self::ShelfError(e) => {
+                let body = format!("Invalid shelf: {e:?}");
+                (StatusCode::BAD_REQUEST, body).into_response()
+            }
+            Self::ShelfDocumentLimitExceeded(actual, max) => {
+                let body = format!("Too many documents in shelf: {actual} (max: {max})");
+                (StatusCode::PAYLOAD_TOO_LARGE, body).into_response()
             }
         }
     }
@@ -454,6 +462,10 @@ impl IntoResponse for ReadError {
                 ),
             )
                 .into_response(),
+            Self::ShelfNotFound(shelf_id) => (
+                StatusCode::BAD_REQUEST,
+                format!("Shelf '{shelf_id}' not found")
+            ).into_response(),
         }
     }
 }

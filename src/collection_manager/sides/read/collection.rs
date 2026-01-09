@@ -17,6 +17,7 @@ use orama_js_pool::OutputChannel;
 use oramacore_lib::{
     hook_storage::{HookReader, HookType},
     pin_rules::PinRulesReader,
+    shelves::{Shelf, ShelfId, ShelvesReader},
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
@@ -38,7 +39,7 @@ use crate::{
     lock::{OramaAsyncLock, OramaAsyncLockReadGuard, OramaAsyncLockWriteGuard, OramaSyncLock},
     types::{
         ApiKey, CollectionId, CollectionStatsRequest, Document, DocumentId, FieldId, IndexId,
-        InteractionMessage, Number, OramaDate, Role,
+        InteractionMessage, Number, OramaDate, RawJSONDocument, Role,
     },
 };
 
@@ -109,6 +110,12 @@ pub struct FilterableFieldsStats {
     pub fields: Vec<FilterableField>,
 }
 
+#[derive(Serialize)]
+pub struct ShelfWithDocuments {
+    pub id: ShelfId,
+    pub docs: Vec<Document>,
+}
+
 pub struct CollectionReader {
     data_dir: PathBuf,
     id: CollectionId,
@@ -147,6 +154,7 @@ pub struct CollectionReader {
     last_commit_time: OramaSyncLock<Instant>,
 
     pin_rules_reader: OramaAsyncLock<PinRulesReader<DocumentId>>,
+    shelves_reader: OramaAsyncLock<ShelvesReader<DocumentId>>,
 
     document_storage: Arc<CollectionDocumentStorage>,
 }
@@ -211,6 +219,7 @@ impl CollectionReader {
             ),
 
             pin_rules_reader: OramaAsyncLock::new("pin_rules_reader", PinRulesReader::empty()),
+            shelves_reader: OramaAsyncLock::new("shelves_reader", ShelvesReader::empty()),
 
             data_dir,
 
@@ -353,6 +362,11 @@ impl CollectionReader {
                 PinRulesReader::try_new(data_dir.join("pin_rules"))
                     .context("Cannot create pin rules reader")?,
             ),
+            shelves_reader: OramaAsyncLock::new(
+                "shelves_reader",
+                ShelvesReader::try_new(data_dir.join("shelves"))
+                    .context("Cannot create shelves reader")?,
+            ),
 
             data_dir,
 
@@ -477,6 +491,12 @@ impl CollectionReader {
             .commit(self.data_dir.join("pin_rules"))
             .context("Cannot commit pin rules")?;
         drop(pin_rules_reader);
+
+        let mut shelves_reader = self.shelves_reader.write("commit").await;
+        shelves_reader
+            .commit(self.data_dir.join("shelves"))
+            .context("Cannot commit shelves")?;
+        drop(shelves_reader);
 
         // Save DumpV2 with single offset
         let dump = Dump::V2(DumpV2 {
@@ -978,6 +998,14 @@ impl CollectionReader {
                     .context("Cannot apply pin rule operation")?;
                 drop(pin_rules_lock);
             }
+            CollectionWriteOperation::Shelf(op) => {
+                println!("Applying shelf operation: {op:?}");
+                let mut shelves_lock = self.shelves_reader.write("update_shelf").await;
+                shelves_lock
+                    .update(op)
+                    .context("Cannot apply shelf operation")?;
+                drop(shelves_lock);
+            }
             CollectionWriteOperation::DocumentStorage(op) => {
                 self.document_storage
                     .update(op)
@@ -1344,6 +1372,48 @@ impl CollectionReader {
         reason: &'static str,
     ) -> OramaAsyncLockReadGuard<'_, PinRulesReader<DocumentId>> {
         self.pin_rules_reader.read(reason).await
+    }
+
+    pub async fn get_shelf(&self, id: ShelfId) -> Result<Shelf<DocumentId>, ReadError> {
+        let shelves_writer = self.shelves_reader.read("get_shelf").await;
+        shelves_writer
+            .list_shelves()
+            .iter()
+            .find(|shelf| shelf.id == id)
+            .cloned()
+            .ok_or_else(|| ReadError::ShelfNotFound(id))
+    }
+
+    /// Retrieves the documents for a given shelf in the order specified by the shelf.
+    /// Returns a ShelfWithDocuments containing the shelf ID and a vector of documents.
+    /// If a document is not found, it will not be included in the result.
+    pub async fn get_shelf_documents(&self, id: ShelfId) -> Result<ShelfWithDocuments, ReadError> {
+        let shelf = self.get_shelf(id.clone()).await?;
+
+        let document_storage = self.get_document_storage();
+
+        let docs = document_storage
+            .get_documents_by_ids(shelf.doc_ids.clone())
+            .await?;
+
+        let doc_map: HashMap<DocumentId, Arc<RawJSONDocument>> = docs.into_iter().collect();
+
+        let documents: Result<Vec<Document>, ReadError> = shelf
+            .doc_ids
+            .iter()
+            .filter_map(|doc_id| doc_map.get(doc_id).cloned())
+            .map(|raw_doc| {
+                let inner: Map<String, Value> = serde_json::from_str(raw_doc.inner.get())
+                    .context("Cannot deserialize document")
+                    .map_err(ReadError::Generic)?;
+                Ok(Document { inner })
+            })
+            .collect();
+
+        Ok(ShelfWithDocuments {
+            id,
+            docs: documents?,
+        })
     }
 
     fn should_commit(&self, force: bool) -> bool {

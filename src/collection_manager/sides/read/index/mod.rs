@@ -1215,8 +1215,8 @@ fn overwrite_committed<
     CFM: CommittedFieldMetadata,
     CF: CommittedField<Uncommitted = UF, FieldMetadata = CFM>,
 >(
-    index_id: IndexId,
-    offset: Offset,
+    #[cfg_attr(not(debug_assertions), allow(unused_variables))] index_id: IndexId,
+    #[cfg_attr(not(debug_assertions), allow(unused_variables))] offset: Offset,
     merged_bools_result: HashMap<FieldId, MergeResult<CF>>,
     committed_fields: &mut HashMap<FieldId, CF>,
     uncommitted_fields: &mut HashMap<FieldId, UF>,
