@@ -3,7 +3,7 @@ use std::sync::Arc;
 use axum::{
     extract::{Path, State},
     response::IntoResponse,
-    routing::{delete, get},
+    routing::{get, post},
     Json, Router,
 };
 use oramacore_lib::shelves::{Shelf, ShelfId};
@@ -26,7 +26,7 @@ pub struct ShelfListResponse {
 pub fn read_apis(read_side: Arc<ReadSide>) -> Router {
     Router::new()
         .route(
-            "/v1/collections/{collection_id}/merchandising/shelves/{shelf_id}",
+            "/v1/collections/{collection_id}/merchandising/shelves/{shelf_id}/get",
             get(get_merchandising_shelf),
         )
         .with_state(read_side)
@@ -35,12 +35,16 @@ pub fn read_apis(read_side: Arc<ReadSide>) -> Router {
 pub fn write_apis(write_side: Arc<WriteSide>) -> Router {
     Router::new()
         .route(
-            "/v1/collections/{collection_id}/merchandising/shelves",
-            get(list_merchandising_shelves).post(insert_merchandising_shelf),
+            "/v1/collections/{collection_id}/merchandising/shelves/insert",
+            post(insert_merchandising_shelf),
         )
         .route(
-            "/v1/collections/{collection_id}/merchandising/shelves/{shelf_id}",
-            delete(delete_merchandising_shelves),
+            "/v1/collections/{collection_id}/merchandising/shelves/list",
+            get(list_merchandising_shelves),
+        )
+        .route(
+            "/v1/collections/{collection_id}/merchandising/shelves/{shelf_id}/delete",
+            post(delete_merchandising_shelves),
         )
         .with_state(write_side)
 }
