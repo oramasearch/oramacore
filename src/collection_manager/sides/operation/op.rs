@@ -9,6 +9,7 @@ use oramacore_lib::generic_kv::KVWriteOperation;
 use oramacore_lib::hook_storage::HookOperation;
 use oramacore_lib::nlp::locales::Locale;
 use oramacore_lib::pin_rules::PinRuleOperation;
+use oramacore_lib::shelves::ShelfOperation;
 use serde::{ser::SerializeTuple, Deserialize, Serialize};
 use serde_json::value::RawValue;
 use std::collections::HashMap;
@@ -232,6 +233,7 @@ pub enum CollectionWriteOperation {
         mcp_description: Option<String>,
     },
     PinRule(PinRuleOperation<DocumentId>),
+    Shelf(ShelfOperation<DocumentId>),
     DocumentStorage(DocumentStorageWriteOperation),
 }
 
@@ -442,6 +444,14 @@ impl WriteOperation {
                 _,
                 CollectionWriteOperation::PinRule(PinRuleOperation::Delete(_)),
             ) => "delete_merchandising_pin_rule",
+            WriteOperation::Collection(
+                _,
+                CollectionWriteOperation::Shelf(ShelfOperation::Insert(_)),
+            ) => "insert_merchandising_shelf",
+            WriteOperation::Collection(
+                _,
+                CollectionWriteOperation::Shelf(ShelfOperation::Delete(_)),
+            ) => "delete_merchandising_shelf",
             WriteOperation::Collection(
                 _,
                 CollectionWriteOperation::DocumentStorage(
