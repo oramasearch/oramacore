@@ -22,7 +22,7 @@ use crate::{
     collection_manager::sides::{
         read::{
             CollectionCommitConfig, CollectionStats, IndexesConfig, OffloadFieldConfig, ReadSide,
-            ReadSideConfig, SearchRequest,
+            ReadSideConfig, SearchRequest, ShelfWithDocuments,
         },
         write::{
             CollectionsWriterConfig, TempIndexCleanupConfig, WriteError, WriteSide, WriteSideConfig,
@@ -42,6 +42,7 @@ use crate::{
 use crate::{collection_manager::sides::read::ReadError, types::SearchResultHit};
 use anyhow::Context;
 use oramacore_lib::pin_rules::PinRule;
+use oramacore_lib::shelves::{Shelf, ShelfId};
 
 pub fn init_log() {
     if let Ok(a) = std::env::var("LOG") {
@@ -604,6 +605,68 @@ impl TestCollectionClient<'_> {
             .batch_get_documents(self.read_api_key, self.collection_id, doc_ids)
             .await
             .map_err(|e| e.into())
+    }
+
+    pub async fn insert_shelf(&self, shelf: Shelf<String>) -> Result<()> {
+        let collection = self
+            .writer
+            .get_collection(self.collection_id, self.write_api_key)
+            .await?;
+
+        collection
+            .insert_shelf(shelf)
+            .await
+            .context("Failed to insert shelf")?;
+
+        Ok(())
+    }
+
+    pub async fn delete_shelf(&self, shelf_id: String) -> Result<()> {
+        let collection = self
+            .writer
+            .get_collection(self.collection_id, self.write_api_key)
+            .await?;
+
+        let shelf_id =
+            ShelfId::try_new(shelf_id).map_err(|e| anyhow::anyhow!("Invalid shelf ID: {e}"))?;
+
+        collection
+            .delete_shelf(shelf_id)
+            .await
+            .context("Failed to delete shelf")?;
+
+        Ok(())
+    }
+
+    pub async fn list_shelves(&self) -> Result<Vec<Shelf<String>>> {
+        let collection = self
+            .writer
+            .get_collection(self.collection_id, self.write_api_key)
+            .await?;
+
+        let shelves = collection
+            .list_shelves()
+            .await
+            .context("Failed to list shelves from writer")?;
+
+        Ok(shelves)
+    }
+
+    pub async fn get_shelf_documents(&self, shelf_id: String) -> Result<ShelfWithDocuments> {
+        let collection = self
+            .reader
+            .get_collection(self.collection_id, self.read_api_key)
+            .await?;
+
+        let shelf_id_typed =
+            ShelfId::try_new(shelf_id).map_err(|e| anyhow::anyhow!("Invalid shelf ID: {e}"))?;
+
+        let shelf_with_documents = collection
+            .get_shelf_documents(shelf_id_typed)
+            .await
+            .context("Failed to get shelf documents from reader")?;
+
+        Ok(shelf_with_documents)
     }
 
     fn generate_index_id(prefix: &str) -> IndexId {
