@@ -36,15 +36,7 @@ pub fn apis(read_side: Arc<ReadSide>) -> Router {
 }
 
 #[derive(Deserialize)]
-struct SearchQueryParams {
-    #[serde(rename = "api-key")]
-    api_key: ApiKey,
-}
-
-#[derive(Deserialize)]
 struct FilterableFieldsSearchQueryParams {
-    #[serde(rename = "api-key")]
-    api_key: ApiKey,
     #[serde(rename = "with-keys")]
     with_keys: Option<bool>,
 }
@@ -53,11 +45,9 @@ async fn search(
     Path(collection_id): Path<CollectionId>,
     read_side: State<Arc<ReadSide>>,
     analytics_metadata: AnalyticsMetadataFromRequest,
-    Query(query): Query<SearchQueryParams>,
+    read_api_key: ApiKey,
     Json(search_params): Json<SearchParams>,
 ) -> impl IntoResponse {
-    let read_api_key = query.api_key;
-
     read_side
         .search(
             read_api_key,
@@ -76,10 +66,8 @@ async fn search(
 async fn stats(
     Path(collection_id): Path<CollectionId>,
     read_side: State<Arc<ReadSide>>,
-    Query(query): Query<SearchQueryParams>,
+    read_api_key: ApiKey,
 ) -> impl IntoResponse {
-    let read_api_key = query.api_key;
-
     read_side
         .collection_stats(
             read_api_key,
@@ -93,9 +81,9 @@ async fn stats(
 async fn filterable_fields(
     Path(collection_id): Path<CollectionId>,
     read_side: State<Arc<ReadSide>>,
+    read_api_key: ApiKey,
     Query(query): Query<FilterableFieldsSearchQueryParams>,
 ) -> impl IntoResponse {
-    let read_api_key = query.api_key;
     let with_keys = query.with_keys.unwrap_or(false);
 
     read_side
@@ -107,15 +95,13 @@ async fn filterable_fields(
 async fn batch_get_documents(
     Path(collection_id): Path<CollectionId>,
     read_side: State<Arc<ReadSide>>,
-    Query(query): Query<SearchQueryParams>,
+    read_api_key: ApiKey,
     Json(request): Json<BatchGetDocumentsRequest>,
 ) -> impl IntoResponse {
     // Validate request size
     if let Err(e) = request.validate() {
         return (StatusCode::BAD_REQUEST, e).into_response();
     }
-
-    let read_api_key = query.api_key;
 
     match read_side
         .batch_get_documents(read_api_key, collection_id, request.ids)

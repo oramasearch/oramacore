@@ -20,15 +20,7 @@ use crate::{
 };
 
 #[derive(Deserialize)]
-struct ApiKeyQueryParams {
-    #[serde(rename = "api-key")]
-    api_key: ApiKey,
-}
-
-#[derive(Deserialize)]
 struct GetToolQueryParams {
-    #[serde(rename = "api-key")]
-    api_key: ApiKey,
     #[serde(rename = "tool_id")]
     tool_id: String,
 }
@@ -69,11 +61,11 @@ pub fn write_apis(write_side: Arc<WriteSide>) -> Router {
 
 async fn get_tool_v1(
     Path(collection_id): Path<CollectionId>,
-    Query(query): Query<GetToolQueryParams>,
     read_side: State<Arc<ReadSide>>,
+    read_api_key: ApiKey,
+    Query(query): Query<GetToolQueryParams>,
 ) -> Result<impl IntoResponse, ToolError> {
     let tool_id = query.tool_id;
-    let read_api_key = query.api_key;
 
     let tool_interface = read_side
         .get_tools_interface(read_api_key, collection_id)
@@ -89,11 +81,9 @@ async fn get_tool_v1(
 
 async fn get_all_tools_v1(
     Path(collection_id): Path<CollectionId>,
-    Query(query): Query<ApiKeyQueryParams>,
     read_side: State<Arc<ReadSide>>,
+    read_api_key: ApiKey,
 ) -> Result<impl IntoResponse, ToolError> {
-    let read_api_key = query.api_key;
-
     let tool_interface = read_side
         .get_tools_interface(read_api_key, collection_id)
         .await?;

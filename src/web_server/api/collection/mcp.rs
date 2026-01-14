@@ -2,14 +2,12 @@ use std::sync::Arc;
 
 use axum::{
     body::Body,
-    extract::{Path, Query, State},
+    extract::{Path, State},
     http::{HeaderMap, StatusCode},
     response::IntoResponse,
     routing::{post, put},
     Json, Router,
 };
-
-use serde::Deserialize;
 
 use crate::{
     collection_manager::sides::{
@@ -37,22 +35,17 @@ pub fn write_apis(write_side: Arc<WriteSide>) -> Router {
         .with_state(write_side)
 }
 
-#[derive(Deserialize)]
-struct McpQueryParams {
-    #[serde(rename = "api-key")]
-    api_key: ApiKey,
-}
-
 async fn mcp_endpoint(
     Path(collection_id): Path<CollectionId>,
-    Query(query): Query<McpQueryParams>,
     State(read_side): State<Arc<ReadSide>>,
+    read_api_key: ApiKey,
     _headers: HeaderMap,
     body: Body,
 ) -> impl IntoResponse {
-    let api_key = query.api_key;
-
-    if let Err(_err) = read_side.check_read_api_key(collection_id, api_key).await {
+    if let Err(_err) = read_side
+        .check_read_api_key(collection_id, read_api_key)
+        .await
+    {
         let error_response = serde_json::json!({
             "jsonrpc": "2.0",
             "id": null,
@@ -96,7 +89,7 @@ async fn mcp_endpoint(
 
     let collection_info = read_side
         .collection_stats(
-            api_key,
+            read_api_key,
             collection_id,
             CollectionStatsRequest { with_keys: false },
         )
@@ -113,7 +106,7 @@ async fn mcp_endpoint(
     let mcp_service = match McpService::new(
         read_side.clone(),
         collection_id,
-        api_key,
+        read_api_key,
         collection_description,
     ) {
         Ok(service) => service,

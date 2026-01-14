@@ -1605,15 +1605,7 @@ pub struct Interaction {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GetSystemPromptQueryParams {
-    #[serde(rename = "api-key")]
-    pub api_key: ApiKey,
     pub system_prompt_id: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TrainingSetsQueryOptimizerParams {
-    #[serde(rename = "api-key")]
-    pub api_key: ApiKey,
 }
 
 #[derive(Deserialize, Clone, Serialize)]

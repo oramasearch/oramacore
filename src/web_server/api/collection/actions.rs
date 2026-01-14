@@ -1,12 +1,11 @@
 use std::sync::Arc;
 
 use axum::{
-    extract::{Path, Query, State},
+    extract::{Path, State},
     response::IntoResponse,
     routing::post,
     Json, Router,
 };
-use serde::Deserialize;
 
 use crate::{
     collection_manager::sides::read::{ReadSide, SearchRequest},
@@ -22,22 +21,14 @@ pub fn apis(read_side: Arc<ReadSide>) -> Router {
         .with_state(read_side)
 }
 
-#[derive(Deserialize)]
-struct ActionQueryParams {
-    #[serde(rename = "api-key")]
-    api_key: ApiKey,
-}
-
 #[axum::debug_handler]
 async fn execute_action_v0(
     Path(collection_id): Path<CollectionId>,
     read_side: State<Arc<ReadSide>>,
-    Query(query): Query<ActionQueryParams>,
+    read_api_key: ApiKey,
     Json(params): Json<ExecuteActionPayload>,
 ) -> impl IntoResponse {
     let ExecuteActionPayload { name, context } = params;
-
-    let read_api_key = query.api_key;
 
     match name {
         ExecuteActionPayloadName::Search => {
