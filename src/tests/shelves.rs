@@ -209,28 +209,49 @@ async fn test_shelf_delete() {
         .unwrap();
 
     // Verify only one shelf remains
-    let collection = collection_client
-        .writer
-        .get_collection(
-            collection_client.collection_id,
-            collection_client.write_api_key,
-        )
-        .await
-        .unwrap();
-    let shelves = collection.list_shelves().await.unwrap();
-    assert_eq!(shelves.len(), 1, "expected 1 shelf in writer");
-    assert_eq!(
-        shelves.first().unwrap().id.as_str(),
-        "shelf-to-keep",
-        "expected 'shelf-to-keep' to be in writer"
-    );
-    drop(collection);
+    wait_for(&collection_client, |collection_client| {
+        async move {
+            let collection = collection_client
+                .writer
+                .get_collection(
+                    collection_client.collection_id,
+                    collection_client.write_api_key,
+                )
+                .await
+                .unwrap();
+            let shelves = collection.list_shelves().await.unwrap();
+            if shelves.len() != 1 {
+                bail!("Shelf not deleted in writer yet");
+            }
+
+            assert_eq!(shelves.len(), 1, "expected 1 shelf in writer");
+            assert_eq!(
+                shelves.first().unwrap().id.as_str(),
+                "shelf-to-keep",
+                "expected 'shelf-to-keep' to be in writer"
+            );
+            Ok(())
+        }
+        .boxed()
+    })
+    .await
+    .unwrap();
 
     // Verify getting the deleted shelf returns an error
-    let result = collection_client
-        .get_shelf_documents("shelf-to-delete".to_string())
-        .await;
-    assert!(result.is_err());
+    wait_for(&collection_client, |collection_client| {
+        async {
+            let result = collection_client
+                .get_shelf_documents("shelf-to-delete".to_string())
+                .await;
+            if result.is_ok() {
+                bail!("Expected error when getting deleted shelf");
+            }
+            Ok(())
+        }
+        .boxed()
+    })
+    .await
+    .unwrap();
 
     drop(test_context);
 }
