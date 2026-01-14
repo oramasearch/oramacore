@@ -114,3 +114,53 @@ async fn test_delete_search_unexisting_id() {
 
     drop(test_context);
 }
+
+/// Test to verify that WriteSide correctly decrements the document count in stats
+/// after document deletion. This test specifically checks the WriteSide behavior
+/// to confirm that document counts are updated immediately after deletion.
+#[tokio::test(flavor = "multi_thread")]
+async fn test_writeside_stats_decrements_after_delete() {
+    init_log();
+
+    let test_context = TestContext::new().await;
+    let collection_client = test_context.create_collection().await.unwrap();
+    let index_client = collection_client.create_index().await.unwrap();
+
+    // 1. Insert 3 documents
+    index_client
+        .insert_documents(
+            json!([
+                { "id": "1", "text": "First document" },
+                { "id": "2", "text": "Second document" },
+                { "id": "3", "text": "Third document" }
+            ])
+            .try_into()
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    // 2. Check WriteSide stats shows 3 documents
+    let stats = test_context.get_writer_collections().await;
+    assert_eq!(stats[0].document_count, 3);
+    assert_eq!(stats[0].indexes[0].document_count, 3);
+
+    // 3. Delete one document (use uncheck_delete_documents to test WriteSide directly)
+    index_client
+        .uncheck_delete_documents(vec!["2".to_string()])
+        .await
+        .unwrap();
+
+    // 4. Check WriteSide stats shows 2 documents
+    let stats = test_context.get_writer_collections().await;
+    assert_eq!(
+        stats[0].document_count, 2,
+        "WriteSide collection stats should show 2 documents after deletion"
+    );
+    assert_eq!(
+        stats[0].indexes[0].document_count, 2,
+        "WriteSide index stats should show 2 documents after deletion"
+    );
+
+    drop(test_context);
+}
