@@ -7,6 +7,7 @@ use fake::Fake;
 use fake::Faker;
 use futures::{future::BoxFuture, FutureExt};
 use oramacore_lib::hook_storage::HookType;
+use pyo3::Python;
 use tokio::{
     sync::{mpsc, RwLock},
     time::sleep,
@@ -45,6 +46,8 @@ use oramacore_lib::pin_rules::PinRule;
 use oramacore_lib::shelves::{Shelf, ShelfId};
 
 pub fn init_log() {
+    Python::initialize();
+
     if let Ok(a) = std::env::var("LOG") {
         if a == "info" {
             unsafe { std::env::set_var("RUST_LOG", "oramacore=info,warn") };
