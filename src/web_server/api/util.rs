@@ -1,7 +1,7 @@
 use std::{collections::HashMap, sync::Arc};
 
 use axum::{
-    extract::{FromRef, FromRequestParts, Path},
+    extract::{FromRef, FromRequestParts, Path, Query},
     response::{IntoResponse, Response},
     Json,
 };
@@ -10,8 +10,15 @@ use axum_extra::{
     TypedHeader,
 };
 use http::{request::Parts, StatusCode};
+use serde::Deserialize;
 use serde_json::json;
 use tracing::error;
+
+#[derive(Deserialize)]
+struct ReaderAPIKeyParams {
+    #[serde(rename = "api-key")]
+    api_key: ApiKey,
+}
 
 use crate::{
     ai::{
@@ -132,6 +139,13 @@ where
     type Rejection = (StatusCode, Json<serde_json::Value>);
 
     async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
+        // Try to extract API key from api-key query parameter first
+        let raw_query = Query::<ReaderAPIKeyParams>::from_request_parts(parts, state).await;
+        if let Ok(query) = raw_query {
+            return Ok(query.api_key);
+        }
+
+        // Query parameter not found, fall back to Authorization header
         let bearer_token = TypedHeader::<Authorization<Bearer>>::from_request_parts(parts, state)
             .await
             .map_err(|e| {
