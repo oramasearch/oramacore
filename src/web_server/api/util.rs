@@ -139,30 +139,36 @@ where
     type Rejection = (StatusCode, Json<serde_json::Value>);
 
     async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
-        // Try to extract API key from api-key query parameter first
-        let raw_query = Query::<ReaderAPIKeyParams>::from_request_parts(parts, state).await;
-        if let Ok(query) = raw_query {
-            return Ok(query.api_key);
+        let query_api_key = Query::<ReaderAPIKeyParams>::from_request_parts(parts, state)
+            .await
+            .ok()
+            .map(|q| q.api_key);
+
+        // Return the API key from query if present (query takes precedence)
+        if let Some(api_key) = query_api_key {
+            return Ok(api_key);
         }
 
-        // Query parameter not found, fall back to Authorization header
-        let bearer_token = TypedHeader::<Authorization<Bearer>>::from_request_parts(parts, state)
+        let header_api_key = TypedHeader::<Authorization<Bearer>>::from_request_parts(parts, state)
             .await
-            .map_err(|e| {
-                (
-                    StatusCode::UNAUTHORIZED,
-                    Json(json!({
-                        "message": format!("missing api key: {:?}", e)
-                    })),
-                )
-            })?;
-        let bearer_token = bearer_token.0 .0;
+            .ok()
+            .map(|bearer| bearer.0 .0.token().to_string());
 
-        let api_key = ApiKey::try_new(bearer_token.token()).map_err(|e| {
+        let Some(raw_api_key) = header_api_key else {
+            return Err((
+                StatusCode::UNAUTHORIZED,
+                Json(json!({
+                    "message": "Missing API key. Please provide it either as a query parameter '?api-key=...' or in the Authorization header 'Bearer <api-key>'"
+                })),
+            ));
+        };
+
+        // Check the API key from the header
+        let api_key = ApiKey::try_new(&raw_api_key).map_err(|e| {
             (
                 StatusCode::UNAUTHORIZED,
                 Json(json!({
-                    "message": format!("Bad API key: {:?}", e)
+                    "message": format!("Invalid API key: {:?}", e)
                 })),
             )
         })?;

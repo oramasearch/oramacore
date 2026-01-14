@@ -97,10 +97,10 @@ async fn test_api_key_extraction_missing_auth() {
 
     let json_body = body.0;
     assert!(json_body.get("message").is_some());
-    assert!(json_body["message"]
-        .as_str()
-        .unwrap()
-        .contains("missing api key"));
+    let message = json_body["message"].as_str().unwrap();
+    assert!(message.contains("Missing API key"));
+    assert!(message.contains("api-key"));
+    assert!(message.contains("Authorization"));
 }
 
 #[tokio::test]
@@ -123,10 +123,10 @@ async fn test_api_key_extraction_too_long_query() {
     // Verify the error message mentions the API key issue
     let json_body = body.0;
     assert!(json_body.get("message").is_some());
-    assert!(json_body["message"]
-        .as_str()
-        .unwrap()
-        .contains("missing api key"));
+    let message = json_body["message"].as_str().unwrap();
+    assert!(message.contains("Missing API key"));
+    assert!(message.contains("api-key"));
+    assert!(message.contains("Authorization"));
 }
 
 #[tokio::test]
