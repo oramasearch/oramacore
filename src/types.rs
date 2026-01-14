@@ -2283,7 +2283,9 @@ impl<'de, const N: usize> Deserialize<'de> for StackString<N> {
         D: serde::de::Deserializer<'de>,
     {
         let s = String::deserialize(deserializer)?;
-        Ok(StackString(ArrayString::<N>::try_from(s.as_str()).unwrap()))
+        ArrayString::<N>::try_from(s.as_str())
+            .map(StackString)
+            .map_err(|e| serde::de::Error::custom(format!("String too long (max {N} chars): {e}")))
     }
 }
 impl<const N: usize> StackString<N> {

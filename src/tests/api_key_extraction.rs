@@ -104,22 +104,29 @@ async fn test_api_key_extraction_missing_auth() {
 }
 
 #[tokio::test]
-#[should_panic(expected = "insufficient capacity")]
 async fn test_api_key_extraction_too_long_query() {
     // Test that validation also works for query parameters
-    // NOTE: Currently this panics due to .unwrap() in StackString::deserialize at types.rs:2286
-    // This is a BUG - it should return a proper deserialization error instead of panicking
-    // TODO: Fix StackString::deserialize to use .map_err() instead of .unwrap()
+    // The deserialization should fail gracefully when API key is too long
     let too_long_key = "a".repeat(65);
     let mut parts = create_parts_with_query(&too_long_key);
     let state = DummyState;
 
-    let _result = ApiKey::from_request_parts(&mut parts, &state).await;
+    let result = ApiKey::from_request_parts(&mut parts, &state).await;
 
-    // This test currently expects a panic, but SHOULD expect an error instead:
-    // assert!(result.is_err(), "API key longer than 64 chars in query should fail");
-    // let (status, _body) = result.unwrap_err();
-    // assert_eq!(status, StatusCode::UNAUTHORIZED);
+    assert!(
+        result.is_err(),
+        "API key longer than 64 chars in query should fail"
+    );
+    let (status, body) = result.unwrap_err();
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+
+    // Verify the error message mentions the API key issue
+    let json_body = body.0;
+    assert!(json_body.get("message").is_some());
+    assert!(json_body["message"]
+        .as_str()
+        .unwrap()
+        .contains("missing api key"));
 }
 
 #[tokio::test]
