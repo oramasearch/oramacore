@@ -9,7 +9,9 @@ use axum::{
 
 use crate::{
     collection_manager::sides::read::{ReadSide, SearchRequest},
-    types::{ApiKey, CollectionId, ExecuteActionPayload, ExecuteActionPayloadName, SearchParams},
+    types::{
+        CollectionId, ExecuteActionPayload, ExecuteActionPayloadName, ReadApiKey, SearchParams,
+    },
 };
 
 pub fn apis(read_side: Arc<ReadSide>) -> Router {
@@ -25,7 +27,7 @@ pub fn apis(read_side: Arc<ReadSide>) -> Router {
 async fn execute_action_v0(
     Path(collection_id): Path<CollectionId>,
     read_side: State<Arc<ReadSide>>,
-    read_api_key: ApiKey,
+    read_api_key: ReadApiKey,
     Json(params): Json<ExecuteActionPayload>,
 ) -> impl IntoResponse {
     let ExecuteActionPayload { name, context } = params;

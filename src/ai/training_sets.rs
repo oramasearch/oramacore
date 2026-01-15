@@ -15,8 +15,8 @@ use crate::{
     ai::llms::LLMService,
     collection_manager::sides::read::ReadSide,
     types::{
-        ApiKey, CollectionId, CollectionStatsRequest, FulltextMode, Limit, Properties, SearchMode,
-        SearchOffset, SearchParams, WhereFilter,
+        CollectionId, CollectionStatsRequest, FulltextMode, Limit, Properties, ReadApiKey,
+        SearchMode, SearchOffset, SearchParams, WhereFilter,
     },
 };
 
@@ -130,7 +130,7 @@ impl TrainingSetInterface {
 pub struct TrainingSet {
     pub collection_id: CollectionId,
     pub read_side: Arc<ReadSide>,
-    pub read_api_key: ApiKey,
+    pub read_api_key: ReadApiKey,
     pub llm_service: Arc<LLMService>,
     pub llm_config: Option<InteractionLLMConfig>,
 }
@@ -139,7 +139,7 @@ impl TrainingSet {
     pub fn new(
         collection_id: CollectionId,
         read_side: Arc<ReadSide>,
-        read_api_key: ApiKey,
+        read_api_key: ReadApiKey,
         llm_service: Arc<LLMService>,
         llm_config: Option<InteractionLLMConfig>,
     ) -> Self {

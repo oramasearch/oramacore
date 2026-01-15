@@ -5,12 +5,12 @@ use serde_json::Value;
 use std::sync::Arc;
 
 use crate::collection_manager::sides::read::{ReadSide, SearchAnalyticEventOrigin, SearchRequest};
-use crate::types::{ApiKey, CollectionId, NLPSearchRequest, SearchParams};
+use crate::types::{CollectionId, NLPSearchRequest, ReadApiKey, SearchParams};
 
 #[pyclass]
 pub struct SearchService {
     read_side: Arc<ReadSide>,
-    api_key: ApiKey,
+    api_key: ReadApiKey,
     collection_id: CollectionId,
 }
 
@@ -175,7 +175,7 @@ impl McpService {
     pub fn new(
         read_side: Arc<ReadSide>,
         collection_id: CollectionId,
-        api_key: ApiKey,
+        api_key: ReadApiKey,
         collection_description: String,
     ) -> PyResult<Self> {
         Python::attach(|py| {

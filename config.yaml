@@ -58,13 +58,23 @@ writer_side:
             max_age: 12h
             # Enable/disable cleanup (default: true)
             enabled: true
-    # Uncomment to allow JWT validation
+    # Uncomment to allow JWT validation with multiple providers
     # jwt:
-    #     jwks_url: http://localhost:3000/api/.well-known/jwks.json
-    #     issuers:
-    #         - http://localhost:3000
-    #     audiences:
-    #         - http://localhost:8080
+    #     providers:
+    #         - name: "internal-dashboard"
+    #           jwks_url: http://localhost:3000/api/.well-known/jwks.json
+    #           issuers:
+    #               - http://localhost:3000
+    #           audiences:
+    #               - http://localhost:8080
+    #           refresh_interval: 1h
+    #         # Add more providers as needed:
+    #         # - name: "auth0-production"
+    #         #   jwks_url: https://your-tenant.auth0.com/.well-known/jwks.json
+    #         #   issuers:
+    #         #       - https://your-tenant.auth0.com/
+    #         #   audiences:
+    #         #       - https://api.yourservice.com
 
 
 reader_side:

@@ -8,6 +8,7 @@ use crate::tests::utils::create_oramacore_config;
 use crate::tests::utils::init_log;
 use crate::tests::utils::TestContext;
 use crate::types::DocumentList;
+use crate::types::ReadApiKey;
 use crate::types::WriteApiKey;
 use crate::OramacoreConfig;
 
@@ -71,7 +72,7 @@ async fn test_write_api_key_to_search() {
     let output = collection_client
         .reader
         .search(
-            write_api_key,
+            ReadApiKey::from_api_key(write_api_key),
             collection_client.collection_id,
             SearchRequest {
                 search_params: json!({
@@ -123,7 +124,7 @@ async fn test_master_api_key_to_search() {
     let output = collection_client
         .reader
         .search(
-            test_context.master_api_key,
+            ReadApiKey::from_api_key(test_context.master_api_key),
             collection_client.collection_id,
             SearchRequest {
                 search_params: json!({

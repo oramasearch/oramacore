@@ -26,7 +26,7 @@ use oramacore::{
     },
     types::{
         ApiKey, CollectionId, CollectionStatsRequest, CreateCollection, CreateIndexRequest,
-        DocumentList, IndexId, InsertDocumentsResult, SearchParams, SearchResult, WriteApiKey,
+        DocumentList, IndexId, InsertDocumentsResult, ReadApiKey, SearchParams, SearchResult, WriteApiKey,
     },
     web_server::HttpConfig,
     OramacoreConfig,
@@ -97,6 +97,7 @@ pub fn create_oramacore_config() -> OramacoreConfig {
                 collection_commit: CollectionCommitConfig::default(),
             },
             analytics: None,
+            jwt: None,
         },
     }
 }
@@ -174,6 +175,7 @@ impl TestContext {
             )
             .await?;
 
+        let read_api_key = ReadApiKey::ApiKey(read_api_key);
         wait_for(self, |s| {
             let reader = s.reader.clone();
             async move {
@@ -197,7 +199,7 @@ impl TestContext {
         &self,
         collection_id: CollectionId,
         write_api_key: WriteApiKey,
-        read_api_key: ApiKey,
+        read_api_key: ReadApiKey,
     ) -> Result<TestCollectionClient> {
         Ok(TestCollectionClient {
             collection_id,
@@ -229,7 +231,7 @@ impl TestContext {
 pub struct TestCollectionClient {
     pub collection_id: CollectionId,
     pub write_api_key: WriteApiKey,
-    pub read_api_key: ApiKey,
+    pub read_api_key: ReadApiKey,
     pub reader: Arc<ReadSide>,
     pub writer: Arc<WriteSide>,
 }
@@ -311,7 +313,7 @@ pub struct TestIndexClient {
     pub collection_id: CollectionId,
     pub index_id: IndexId,
     pub write_api_key: WriteApiKey,
-    pub read_api_key: ApiKey,
+    pub read_api_key: ReadApiKey,
     pub reader: Arc<ReadSide>,
     pub writer: Arc<WriteSide>,
 }

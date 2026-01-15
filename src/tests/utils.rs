@@ -40,8 +40,8 @@ use crate::{
     types::{
         ApiKey, CollectionId, CollectionStatsRequest, CreateCollection, CreateIndexRequest,
         DescribeCollectionResponse, Document, DocumentList, IndexId, InsertDocumentsResult,
-        LanguageDTO, ReplaceIndexRequest, SearchParams, SearchResult, TypeParsingStrategies,
-        UpdateDocumentRequest, UpdateDocumentsResult, WriteApiKey,
+        LanguageDTO, ReadApiKey, ReplaceIndexRequest, SearchParams, SearchResult,
+        TypeParsingStrategies, UpdateDocumentRequest, UpdateDocumentsResult, WriteApiKey,
     },
     web_server::HttpConfig,
     OramacoreConfig,
@@ -162,6 +162,7 @@ pub fn create_oramacore_config() -> OramacoreConfig {
                 force_commit: u32::MAX,
             },
             analytics: None,
+            jwt: None,
         },
     }
 }
@@ -318,7 +319,8 @@ impl TestContext {
     pub async fn create_collection(&self) -> Result<TestCollectionClient> {
         let id = Self::generate_collection_id();
         let write_api_key = Self::generate_api_key();
-        let read_api_key = Self::generate_api_key();
+        let read_api_key_raw = Self::generate_api_key();
+        let read_api_key = ReadApiKey::from_api_key(read_api_key_raw);
 
         self.writer
             .create_collection(
@@ -327,7 +329,7 @@ impl TestContext {
                     id,
                     description: None,
                     mcp_description: None,
-                    read_api_key,
+                    read_api_key: read_api_key_raw,
                     write_api_key,
                     language: None,
                     embeddings_model: Some(Model::BGESmall),
@@ -358,7 +360,7 @@ impl TestContext {
         &self,
         collection_id: CollectionId,
         write_api_key: WriteApiKey,
-        read_api_key: ApiKey,
+        read_api_key: ReadApiKey,
     ) -> Result<TestCollectionClient> {
         Ok(TestCollectionClient {
             collection_id,
@@ -413,7 +415,7 @@ impl Drop for TestContext {
 pub struct TestCollectionClient<'test> {
     pub collection_id: CollectionId,
     pub write_api_key: WriteApiKey,
-    pub read_api_key: ApiKey,
+    pub read_api_key: ReadApiKey,
     master_api_key: ApiKey,
     pub reader: &'test ReadSide,
     pub writer: &'test WriteSide,
@@ -713,7 +715,7 @@ pub struct TestIndexClient<'test> {
     pub collection_id: CollectionId,
     pub index_id: IndexId,
     pub write_api_key: WriteApiKey,
-    pub read_api_key: ApiKey,
+    pub read_api_key: ReadApiKey,
     pub reader: &'test ReadSide,
     pub writer: &'test WriteSide,
 }

@@ -16,7 +16,7 @@ use crate::{
     },
     python::mcp::McpService,
     types::{
-        ApiKey, CollectionId, CollectionStatsRequest, UpdateCollectionMcpRequest, WriteApiKey,
+        CollectionId, CollectionStatsRequest, ReadApiKey, UpdateCollectionMcpRequest, WriteApiKey,
     },
 };
 
@@ -38,7 +38,7 @@ pub fn write_apis(write_side: Arc<WriteSide>) -> Router {
 async fn mcp_endpoint(
     Path(collection_id): Path<CollectionId>,
     State(read_side): State<Arc<ReadSide>>,
-    read_api_key: ApiKey,
+    read_api_key: ReadApiKey,
     _headers: HeaderMap,
     body: Body,
 ) -> impl IntoResponse {

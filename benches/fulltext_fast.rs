@@ -26,7 +26,7 @@ use oramacore::{
     python::embeddings::Model,
     types::{
         ApiKey, CollectionId, CollectionStatsRequest, CreateCollection, CreateIndexRequest,
-        IndexId, WriteApiKey,
+        IndexId, ReadApiKey, WriteApiKey,
     },
     web_server::HttpConfig,
     OramacoreConfig,
@@ -97,6 +97,7 @@ pub fn create_minimal_config() -> OramacoreConfig {
                 collection_commit: CollectionCommitConfig::default(),
             },
             analytics: None,
+            jwt: None,
         },
     }
 }
@@ -160,6 +161,7 @@ fn bench_fulltext_fast(c: &mut Criterion) {
             .await
             .expect("Failed to create collection");
 
+        let read_api_key = ReadApiKey::ApiKey(read_api_key);
         wait_quick(&reader, |r| {
             async move {
                 r.collection_stats(

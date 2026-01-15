@@ -39,7 +39,7 @@ use crate::{
     lock::{OramaAsyncLock, OramaAsyncLockReadGuard, OramaAsyncLockWriteGuard, OramaSyncLock},
     types::{
         ApiKey, CollectionId, CollectionStatsRequest, Document, DocumentId, FieldId, IndexId,
-        InteractionMessage, Number, OramaDate, RawJSONDocument, Role,
+        InteractionMessage, Number, OramaDate, RawJSONDocument, ReadApiKey, Role,
     },
 };
 
@@ -634,20 +634,30 @@ impl CollectionReader {
     #[allow(clippy::result_large_err)]
     pub fn check_read_api_key(
         &self,
-        api_key: ApiKey,
+        api_key: ReadApiKey,
         master_api_key: Option<ApiKey>,
     ) -> Result<(), ReadError> {
-        if api_key == self.read_api_key {
-            return Ok(());
-        }
-        if let Some(write_api_key) = self.write_api_key {
-            if write_api_key == api_key {
-                return Ok(());
+        match api_key {
+            ReadApiKey::ApiKey(api_key) => {
+                if api_key == self.read_api_key {
+                    return Ok(());
+                }
+                if let Some(write_api_key) = self.write_api_key {
+                    if write_api_key == api_key {
+                        return Ok(());
+                    }
+                }
+                if let Some(master_api_key) = master_api_key {
+                    if master_api_key == api_key {
+                        return Ok(());
+                    }
+                }
             }
-        }
-        if let Some(master_api_key) = master_api_key {
-            if master_api_key == api_key {
-                return Ok(());
+            ReadApiKey::Claims(claims) => {
+                // For JWT claims, verify the subject matches this collection's ID
+                if claims.sub == self.id {
+                    return Ok(());
+                }
             }
         }
 
@@ -674,7 +684,7 @@ impl CollectionReader {
     pub async fn nlp_search(
         &self,
         read_side: State<Arc<ReadSide>>,
-        read_api_key: ApiKey,
+        read_api_key: ReadApiKey,
         collection_id: CollectionId,
         search_params: &NLPSearchRequest,
         collection_stats: CollectionStats,
@@ -708,7 +718,7 @@ impl CollectionReader {
     pub async fn nlp_search_stream(
         &self,
         read_side: State<Arc<ReadSide>>,
-        read_api_key: ApiKey,
+        read_api_key: ReadApiKey,
         collection_id: CollectionId,
         search_params: &NLPSearchRequest,
         collection_stats: CollectionStats,

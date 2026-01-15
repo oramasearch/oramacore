@@ -17,7 +17,7 @@ use tokio::time::sleep;
 
 async fn setup_test_collection(
     test_context: &TestContext,
-) -> Result<(crate::types::CollectionId, crate::types::ApiKey)> {
+) -> Result<(crate::types::CollectionId, crate::types::ReadApiKey)> {
     let collection_client = test_context.create_collection().await?;
     let collection_id = collection_client.collection_id;
     let read_api_key = collection_client.read_api_key;

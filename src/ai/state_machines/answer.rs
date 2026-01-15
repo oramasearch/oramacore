@@ -23,7 +23,7 @@ use crate::collection_manager::sides::read::{
 };
 use crate::collection_manager::sides::{read::ReadSide, system_prompts::SystemPrompt};
 use crate::types::{
-    ApiKey, CollectionId, IndexId, Interaction, InteractionLLMConfig, Limit, Properties,
+    CollectionId, IndexId, Interaction, InteractionLLMConfig, Limit, Properties, ReadApiKey,
     SearchMode, SearchOffset, SearchParams, SearchResultHit, Similarity, VectorMode,
 };
 use futures::TryFutureExt;
@@ -131,37 +131,37 @@ pub enum AnswerFlow {
     Initialize {
         interaction: Interaction,
         collection_id: CollectionId,
-        read_api_key: ApiKey,
+        read_api_key: ReadApiKey,
     },
     HandleGPUOverload {
         interaction: Interaction,
         collection_id: CollectionId,
-        read_api_key: ApiKey,
+        read_api_key: ReadApiKey,
     },
     GetLLMConfig {
         interaction: Interaction,
         llm_config: InteractionLLMConfig,
         collection_id: CollectionId,
-        read_api_key: ApiKey,
+        read_api_key: ReadApiKey,
     },
     DetermineQueryStrategy {
         interaction: Interaction,
         llm_config: InteractionLLMConfig,
         collection_id: CollectionId,
-        read_api_key: ApiKey,
+        read_api_key: ReadApiKey,
     },
     ExecuteBeforeRetrievalHook {
         interaction: Interaction,
         llm_config: InteractionLLMConfig,
         collection_id: CollectionId,
-        read_api_key: ApiKey,
+        read_api_key: ReadApiKey,
     },
     OptimizeQuery {
         interaction: Interaction,
         llm_config: InteractionLLMConfig,
         system_prompt: Option<SystemPrompt>,
         collection_id: CollectionId,
-        read_api_key: ApiKey,
+        read_api_key: ReadApiKey,
         optimized_query: String,
     },
     ExecuteSearch {
@@ -169,7 +169,7 @@ pub enum AnswerFlow {
         llm_config: InteractionLLMConfig,
         optimized_query: String,
         collection_id: CollectionId,
-        read_api_key: ApiKey,
+        read_api_key: ReadApiKey,
         log_sender: Option<Arc<tokio::sync::broadcast::Sender<(OutputChannel, String)>>>,
     },
     HandleSystemPrompt {
@@ -177,14 +177,14 @@ pub enum AnswerFlow {
         llm_config: InteractionLLMConfig,
         search_results: Vec<SearchResultHit>,
         collection_id: CollectionId,
-        read_api_key: ApiKey,
+        read_api_key: ReadApiKey,
     },
     ExecuteAfterRetrievalHook {
         interaction: Interaction,
         llm_config: InteractionLLMConfig,
         search_results: Vec<SearchResultHit>,
         collection_id: CollectionId,
-        read_api_key: ApiKey,
+        read_api_key: ReadApiKey,
     },
     ExecuteBeforeAnswerHook {
         interaction: Interaction,
@@ -192,7 +192,7 @@ pub enum AnswerFlow {
         system_prompt: Option<SystemPrompt>,
         search_results: Vec<SearchResultHit>,
         collection_id: CollectionId,
-        read_api_key: ApiKey,
+        read_api_key: ReadApiKey,
     },
     GenerateAnswer {
         interaction: Interaction,
@@ -201,7 +201,7 @@ pub enum AnswerFlow {
         search_results: Vec<SearchResultHit>,
         variables: Vec<(String, String)>,
         collection_id: CollectionId,
-        read_api_key: ApiKey,
+        read_api_key: ReadApiKey,
     },
     Completed {
         answer: String,
@@ -246,7 +246,7 @@ pub struct AnswerStateMachine {
     llm_service: Arc<LLMService>,
     read_side: Arc<ReadSide>,
     collection_id: CollectionId,
-    read_api_key: ApiKey,
+    read_api_key: ReadApiKey,
     event_sender: Option<mpsc::UnboundedSender<AnswerEvent>>,
     analytics_holder: Option<Arc<Mutex<AnalyticsHolder>>>,
 }
@@ -257,7 +257,7 @@ impl AnswerStateMachine {
         llm_service: Arc<LLMService>,
         read_side: Arc<ReadSide>,
         collection_id: CollectionId,
-        read_api_key: ApiKey,
+        read_api_key: ReadApiKey,
         analytics_holder: Option<Arc<Mutex<AnalyticsHolder>>>,
     ) -> Self {
         Self {
@@ -418,7 +418,7 @@ impl AnswerStateMachine {
         &self,
         interaction: Interaction,
         collection_id: CollectionId,
-        read_api_key: ApiKey,
+        read_api_key: ReadApiKey,
         _log_sender: Option<Arc<tokio::sync::broadcast::Sender<(OutputChannel, String)>>>,
     ) -> Result<GeneratedAnswer, AnswerError> {
         info!(
@@ -796,7 +796,7 @@ impl AnswerStateMachine {
         mut self,
         interaction: Interaction,
         collection_id: CollectionId,
-        read_api_key: ApiKey,
+        read_api_key: ReadApiKey,
         log_sender: Option<Arc<tokio::sync::broadcast::Sender<(OutputChannel, String)>>>,
     ) -> Result<UnboundedReceiverStream<AnswerEvent>, AnswerError> {
         let (event_sender, event_receiver) = mpsc::unbounded_channel();
@@ -835,7 +835,7 @@ impl AnswerStateMachine {
         &self,
         mut interaction: Interaction,
         collection_id: CollectionId,
-        read_api_key: ApiKey,
+        read_api_key: ReadApiKey,
     ) -> Result<(), AnswerError> {
         self.handle_gpu_overload(&mut interaction).await;
 
@@ -852,7 +852,7 @@ impl AnswerStateMachine {
         &self,
         interaction: Interaction,
         collection_id: CollectionId,
-        read_api_key: ApiKey,
+        read_api_key: ReadApiKey,
     ) -> Result<InteractionLLMConfig, AnswerError> {
         let llm_config = self.get_llm_config(&interaction);
 
@@ -1007,7 +1007,7 @@ impl AnswerStateMachine {
         interaction: Interaction,
         llm_config: InteractionLLMConfig,
         collection_id: CollectionId,
-        read_api_key: ApiKey,
+        read_api_key: ReadApiKey,
     ) -> Result<String, AnswerError> {
         let optimized_query = self
             .transition_with_retry("optimize_query", || {
@@ -1041,7 +1041,7 @@ impl AnswerStateMachine {
         llm_config: InteractionLLMConfig,
         optimized_query: String,
         collection_id: CollectionId,
-        read_api_key: ApiKey,
+        read_api_key: ReadApiKey,
     ) -> Result<(), AnswerError> {
         // Execute before retrieval hook - this could process the query before search
         // For now, we'll just pass through the optimized query
@@ -1065,7 +1065,7 @@ impl AnswerStateMachine {
         llm_config: InteractionLLMConfig,
         search_results: Vec<SearchResultHit>,
         collection_id: CollectionId,
-        read_api_key: ApiKey,
+        read_api_key: ReadApiKey,
     ) -> Result<(), AnswerError> {
         // Execute after retrieval hook logic would go here
         // For now, we'll just pass through the search results
@@ -1090,7 +1090,7 @@ impl AnswerStateMachine {
         system_prompt: Option<SystemPrompt>,
         search_results: Vec<SearchResultHit>,
         collection_id: CollectionId,
-        read_api_key: ApiKey,
+        read_api_key: ReadApiKey,
         log_sender: Option<Arc<tokio::sync::broadcast::Sender<(OutputChannel, String)>>>,
     ) -> Result<(Vec<(String, String)>, Option<SystemPrompt>), AnswerError> {
         let (variables, processed_system_prompt) = self
@@ -1123,7 +1123,7 @@ impl AnswerStateMachine {
         llm_config: InteractionLLMConfig,
         search_results: Vec<SearchResultHit>,
         collection_id: CollectionId,
-        read_api_key: ApiKey,
+        read_api_key: ReadApiKey,
     ) -> Result<(), AnswerError> {
         let mut state = self.state.lock().await;
         *state = AnswerFlow::HandleSystemPrompt {
@@ -1143,7 +1143,7 @@ impl AnswerStateMachine {
         system_prompt: Option<SystemPrompt>,
         search_results: Vec<SearchResultHit>,
         collection_id: CollectionId,
-        read_api_key: ApiKey,
+        read_api_key: ReadApiKey,
     ) -> Result<String, AnswerError> {
         let answer = self
             .transition_with_retry("generate_answer", || {
@@ -1368,7 +1368,7 @@ impl AnswerStateMachine {
         interaction: Interaction,
         _llm_config: InteractionLLMConfig,
         collection_id: CollectionId,
-        read_api_key: ApiKey,
+        read_api_key: ReadApiKey,
         optimized_query: String,
     ) -> Result<Vec<SearchResultHit>, AnswerError> {
         let search_results = if let Some(ref notation) = interaction.ragat_notation {
@@ -1456,7 +1456,7 @@ impl AnswerStateMachine {
         interaction: Interaction,
         system_prompt: Option<SystemPrompt>,
         collection_id: CollectionId,
-        read_api_key: ApiKey,
+        read_api_key: ReadApiKey,
         log_sender: Option<Arc<tokio::sync::broadcast::Sender<(OutputChannel, String)>>>,
     ) -> Result<(Vec<(String, String)>, Option<SystemPrompt>), AnswerError> {
         let search_result_str = serde_json::to_string(&vec![] as &Vec<SearchResultHit>)
@@ -1496,7 +1496,7 @@ impl AnswerStateMachine {
         system_prompt: Option<SystemPrompt>,
         search_results: Vec<SearchResultHit>,
         _collection_id: CollectionId,
-        _read_api_key: ApiKey,
+        _read_api_key: ReadApiKey,
     ) -> Result<String, AnswerError> {
         let search_result_str = serde_json::to_string(&search_results)
             .map_err(|e| AnswerError::JsonParsingError(e.to_string()))?;

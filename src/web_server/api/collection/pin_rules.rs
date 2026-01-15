@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use crate::types::ApiKey;
+use crate::types::ReadApiKey;
 use axum::{
     extract::State,
     response::IntoResponse,
@@ -93,7 +93,7 @@ async fn delete_merchandising_pin_rules_v1(
 async fn list_merchandising_pin_rules_ids_v1(
     collection_id: CollectionId,
     read_side: State<Arc<ReadSide>>,
-    read_api_key: ApiKey,
+    read_api_key: ReadApiKey,
 ) -> Result<impl IntoResponse, impl IntoResponse> {
     let collection = read_side
         .get_collection(collection_id, read_api_key)

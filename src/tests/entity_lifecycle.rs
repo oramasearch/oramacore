@@ -9,6 +9,7 @@ use crate::tests::utils::init_log;
 use crate::tests::utils::TestContext;
 use crate::types::CreateCollection;
 use crate::types::DocumentList;
+use crate::types::ReadApiKey;
 use crate::types::WriteApiKey;
 
 #[tokio::test(flavor = "multi_thread")]
@@ -25,7 +26,10 @@ async fn test_collection_id_already_exists() {
             test_context.master_api_key,
             CreateCollection {
                 id: collection_client.collection_id,
-                read_api_key: collection_client.read_api_key,
+                read_api_key: match collection_client.read_api_key {
+                    ReadApiKey::ApiKey(k) => k,
+                    _ => panic!(),
+                },
                 write_api_key: match collection_client.write_api_key {
                     WriteApiKey::ApiKey(k) => k,
                     _ => panic!(),

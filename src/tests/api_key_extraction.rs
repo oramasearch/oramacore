@@ -106,7 +106,7 @@ async fn test_api_key_extraction_missing_auth() {
 #[tokio::test]
 async fn test_api_key_extraction_too_long_query() {
     // Test that validation also works for query parameters
-    // The deserialization should fail gracefully when API key is too long
+    // The query param is deserialized as String, then validated via ApiKey::try_new()
     let too_long_key = "a".repeat(65);
     let mut parts = create_parts_with_query(&too_long_key);
     let state = DummyState;
@@ -120,13 +120,11 @@ async fn test_api_key_extraction_too_long_query() {
     let (status, body) = result.unwrap_err();
     assert_eq!(status, StatusCode::UNAUTHORIZED);
 
-    // Verify the error message mentions the API key issue
+    // Verify the error message mentions the API key validation issue
     let json_body = body.0;
     assert!(json_body.get("message").is_some());
     let message = json_body["message"].as_str().unwrap();
-    assert!(message.contains("Missing API key"));
-    assert!(message.contains("api-key"));
-    assert!(message.contains("Authorization"));
+    assert!(message.contains("Invalid API key"));
 }
 
 #[tokio::test]

@@ -23,7 +23,7 @@ use oramacore::{
     python::embeddings::Model,
     types::{
         ApiKey, CollectionId, CreateCollection, CreateIndexRequest, DeleteDocuments, DocumentList,
-        IndexEmbeddingsCalculation, IndexId, LanguageDTO, SearchParams, WriteApiKey,
+        IndexEmbeddingsCalculation, IndexId, LanguageDTO, ReadApiKey, SearchParams, WriteApiKey,
     },
     web_server::HttpConfig,
     LogConfig, OramacoreConfig,
@@ -150,6 +150,7 @@ fn create_test_config(build: bool) -> OramacoreConfig {
                 force_commit: 4,
             },
             analytics: None,
+            jwt: None,
         },
     }
 }
@@ -182,7 +183,8 @@ async fn main() -> Result<()> {
 
     let collection_id =
         CollectionId::try_new("test-collection").context("Invalid collection ID")?;
-    let read_api_key = ApiKey::try_new("read-key").context("Invalid read API key")?;
+    let read_api_key_raw = ApiKey::try_new("read-key").context("Invalid read API key")?;
+    let read_api_key = ReadApiKey::from_api_key(read_api_key_raw);
     let write_api_key =
         WriteApiKey::ApiKey(ApiKey::try_new("write-key").context("Invalid write API key")?);
     let master_api_key = ApiKey::try_new("master-key").context("Invalid master API key")?;
@@ -199,7 +201,7 @@ async fn main() -> Result<()> {
                         "Performance test collection for search benchmarking".to_string(),
                     ),
                     language: Some(LanguageDTO::English),
-                    read_api_key,
+                    read_api_key: read_api_key_raw,
                     write_api_key: match write_api_key {
                         WriteApiKey::ApiKey(ref key) => *key,
                         _ => return Err(anyhow::anyhow!("Expected API key for write access")),

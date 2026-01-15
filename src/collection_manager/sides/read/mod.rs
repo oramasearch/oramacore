@@ -50,15 +50,16 @@ pub use crate::collection_manager::sides::read::context::ReadSideContext;
 use crate::collection_manager::sides::read::logs::HookLogs;
 use crate::collection_manager::sides::read::notify::Notifier;
 use crate::collection_manager::sides::read::search::Search;
+use crate::collection_manager::sides::write::jwt_manager::{JwtConfig, JwtManager};
 use crate::lock::{OramaAsyncLock, OramaAsyncMutex};
 use crate::metrics::operations::OPERATION_COUNT;
 use crate::metrics::Empty;
 use crate::python::PythonService;
-use crate::types::CollectionId;
 use crate::types::{
-    ApiKey, CollectionStatsRequest, Document, InteractionLLMConfig, SearchMode, SearchModeResult,
-    SearchResult,
+    ApiKey, CollectionStatsRequest, Document, InteractionLLMConfig, ReadApiKey, SearchMode,
+    SearchModeResult, SearchResult,
 };
+use crate::types::{CollectionId, DashboardClaims};
 use crate::types::{IndexId, NLPSearchRequest};
 use oramacore_lib::fs::BufferedFile;
 use oramacore_lib::generic_kv::{KVConfig, KV};
@@ -78,6 +79,8 @@ pub struct ReadSideConfig {
     pub analytics: Option<OramaCoreAnalyticConfig>,
     pub input: InputSideChannelType,
     pub config: IndexesConfig,
+
+    pub jwt: Option<JwtConfig>,
 }
 
 #[derive(Debug, Deserialize, Clone, Copy)]
@@ -176,6 +179,8 @@ pub struct ReadSide {
 
     #[allow(dead_code)]
     python_service: Arc<PythonService>,
+
+    jwt_manager: JwtManager<DashboardClaims>,
 }
 
 impl ReadSide {
@@ -253,6 +258,10 @@ impl ReadSide {
             None
         };
 
+        let jwt_manager = JwtManager::<DashboardClaims>::new(config.jwt)
+            .await
+            .context("Cannot create JWT manager")?;
+
         let read_side = ReadSide {
             collections: collections_reader,
             _global_document_storage: global_document_storage,
@@ -276,6 +285,8 @@ impl ReadSide {
             stop_sender,
             stop_done_receiver: OramaAsyncLock::new("stop_done_receiver", stop_done_receiver),
             python_service,
+
+            jwt_manager,
         };
 
         let operation_receiver = operation_receiver_creator.create(last_offset).await?;
@@ -370,7 +381,7 @@ impl ReadSide {
 
     pub async fn collection_stats(
         &self,
-        read_api_key: ApiKey,
+        read_api_key: ReadApiKey,
         collection_id: CollectionId,
         req: CollectionStatsRequest,
     ) -> Result<CollectionStats, ReadError> {
@@ -389,7 +400,7 @@ impl ReadSide {
     /// Missing document IDs are silently omitted from the result.
     pub async fn batch_get_documents(
         &self,
-        read_api_key: ApiKey,
+        read_api_key: ReadApiKey,
         collection_id: CollectionId,
         doc_id_strs: Vec<String>,
     ) -> Result<HashMap<String, Document>, ReadError> {
@@ -405,7 +416,7 @@ impl ReadSide {
 
     pub async fn filterable_fields(
         &self,
-        read_api_key: ApiKey,
+        read_api_key: ReadApiKey,
         collection_id: CollectionId,
         with_keys: bool,
     ) -> Result<Vec<FilterableFieldsStats>, ReadError> {
@@ -532,7 +543,7 @@ impl ReadSide {
 
     pub async fn search(
         &self,
-        read_api_key: ApiKey,
+        read_api_key: ReadApiKey,
         collection_id: CollectionId,
         request: SearchRequest,
     ) -> Result<SearchResult, ReadError> {
@@ -556,7 +567,7 @@ impl ReadSide {
     pub async fn nlp_search(
         &self,
         read_side: State<Arc<ReadSide>>,
-        read_api_key: ApiKey,
+        read_api_key: ReadApiKey,
         collection_id: CollectionId,
         search_params: NLPSearchRequest,
         log_sender: Option<Arc<tokio::sync::broadcast::Sender<(OutputChannel, String)>>>,
@@ -593,7 +604,7 @@ impl ReadSide {
     pub async fn nlp_search_stream(
         &self,
         read_side: State<Arc<ReadSide>>,
-        read_api_key: ApiKey,
+        read_api_key: ReadApiKey,
         collection_id: CollectionId,
         search_params: NLPSearchRequest,
         log_sender: Option<Arc<tokio::sync::broadcast::Sender<(OutputChannel, String)>>>,
@@ -628,7 +639,7 @@ impl ReadSide {
     pub async fn get_collection(
         &self,
         collection_id: CollectionId,
-        read_api_key: ApiKey,
+        read_api_key: ReadApiKey,
     ) -> Result<CollectionReadLock, ReadError> {
         let collection = self.collections.get_collection(collection_id).await;
         let collection = match collection {
@@ -648,7 +659,7 @@ impl ReadSide {
 
     pub async fn get_system_prompt(
         &self,
-        read_api_key: ApiKey,
+        read_api_key: ReadApiKey,
         collection_id: CollectionId,
         system_prompt_id: String,
     ) -> Result<Option<SystemPrompt>> {
@@ -661,7 +672,7 @@ impl ReadSide {
 
     pub async fn has_system_prompts(
         &self,
-        read_api_key: ApiKey,
+        read_api_key: ReadApiKey,
         collection_id: CollectionId,
     ) -> Result<bool> {
         self.check_read_api_key(collection_id, read_api_key).await?;
@@ -671,7 +682,7 @@ impl ReadSide {
 
     pub async fn perform_system_prompt_selection(
         &self,
-        read_api_key: ApiKey,
+        read_api_key: ReadApiKey,
         collection_id: CollectionId,
     ) -> Result<Option<SystemPrompt>> {
         self.check_read_api_key(collection_id, read_api_key).await?;
@@ -683,7 +694,7 @@ impl ReadSide {
 
     pub async fn get_all_system_prompts_by_collection(
         &self,
-        read_api_key: ApiKey,
+        read_api_key: ReadApiKey,
         collection_id: CollectionId,
     ) -> Result<Vec<SystemPrompt>> {
         self.check_read_api_key(collection_id, read_api_key).await?;
@@ -714,7 +725,7 @@ impl ReadSide {
     pub async fn check_read_api_key(
         &self,
         collection_id: CollectionId,
-        read_api_key: ApiKey,
+        read_api_key: ReadApiKey,
     ) -> Result<(), ReadError> {
         let collection = self
             .collections
@@ -759,7 +770,7 @@ impl ReadSide {
 
     pub async fn get_tools_interface(
         &self,
-        read_api_key: ApiKey,
+        read_api_key: ReadApiKey,
         collection_id: CollectionId,
     ) -> Result<CollectionToolsRuntime, ToolError> {
         self.check_read_api_key(collection_id, read_api_key).await?;
@@ -772,7 +783,7 @@ impl ReadSide {
 
     pub async fn get_hook_storage<'s>(
         &'s self,
-        read_api_key: ApiKey,
+        read_api_key: ReadApiKey,
         collection_id: CollectionId,
     ) -> Result<HookReaderLock<'s>, ReadError> {
         let collection = self
@@ -796,7 +807,7 @@ impl ReadSide {
     pub async fn get_default_system_prompt(
         &self,
         collection_id: CollectionId,
-        read_api_key: ApiKey,
+        read_api_key: ReadApiKey,
         system_prompt_id: String,
     ) -> Result<String, ReadError> {
         let collection = self
@@ -819,7 +830,7 @@ impl ReadSide {
     pub async fn list_training_data_for(
         &self,
         collection_id: CollectionId,
-        read_api_key: ApiKey,
+        read_api_key: ReadApiKey,
         training_destination: TrainingDestination,
     ) -> Result<Vec<String>, ReadError> {
         let collection = self
@@ -844,7 +855,7 @@ impl ReadSide {
     pub async fn get_training_data_for(
         &self,
         collection_id: CollectionId,
-        read_api_key: ApiKey,
+        read_api_key: ReadApiKey,
         training_destination: TrainingDestination,
     ) -> Option<Result<String, ReadError>> {
         let collection = match self.collections.get_collection(collection_id).await {
@@ -869,6 +880,10 @@ impl ReadSide {
             },
             None => None,
         }
+    }
+
+    pub fn get_jwt_manager(&self) -> JwtManager<DashboardClaims> {
+        self.jwt_manager.clone()
     }
 }
 

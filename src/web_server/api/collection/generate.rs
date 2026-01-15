@@ -6,7 +6,7 @@ use crate::collection_manager::sides::read::{
     AnalyticsHolder, AnalyticsMetadataFromRequest, ReadError, ReadSide,
 };
 use crate::types::{
-    ApiKey, CollectionId, GetSystemPromptQueryParams, Interaction, InteractionLLMConfig,
+    CollectionId, GetSystemPromptQueryParams, Interaction, InteractionLLMConfig, ReadApiKey,
 };
 use axum::extract::Query;
 use axum::response::sse::Event;
@@ -50,7 +50,7 @@ struct NlpQueryRequest {
 async fn nlp_query_v1(
     collection_id: CollectionId,
     State(read_side): State<Arc<ReadSide>>,
-    read_api_key: ApiKey,
+    read_api_key: ReadApiKey,
     Json(request): Json<NlpQueryRequest>,
 ) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
     let (event_sender, event_receiver) = mpsc::channel(100);
@@ -131,7 +131,7 @@ async fn answer_v1(
     collection_id: CollectionId,
     analytics_metadata: AnalyticsMetadataFromRequest,
     State(read_side): State<Arc<ReadSide>>,
-    read_api_key: ApiKey,
+    read_api_key: ReadApiKey,
     Json(interaction): Json<Interaction>,
 ) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
     let (event_sender, event_receiver) = mpsc::channel(100);
@@ -226,7 +226,7 @@ async fn answer_v1(
 async fn get_default_system_prompt_v1(
     collection_id: CollectionId,
     State(read_side): State<Arc<ReadSide>>,
-    read_api_key: ApiKey,
+    read_api_key: ReadApiKey,
     Query(query_params): Query<GetSystemPromptQueryParams>,
 ) -> Result<Json<serde_json::Value>, ReadError> {
     let system_prompt_id = query_params.system_prompt_id;

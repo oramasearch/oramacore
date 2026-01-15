@@ -572,7 +572,7 @@ pub struct ClaimLimits {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, Copy)]
-pub struct Claims {
+pub struct DashboardClaims {
     pub sub: CollectionId,
     pub scope: StackString<20>,
     pub iss: StackString<128>,
@@ -585,7 +585,7 @@ pub struct Claims {
 #[allow(clippy::large_enum_variant)]
 pub enum WriteApiKey {
     ApiKey(ApiKey),
-    Claims(Claims),
+    Claims(DashboardClaims),
 }
 
 impl WriteApiKey {
@@ -593,7 +593,24 @@ impl WriteApiKey {
         Self::ApiKey(api_key)
     }
 
-    pub fn from_claims(claims: Claims) -> Self {
+    pub fn from_claims(claims: DashboardClaims) -> Self {
+        Self::Claims(claims)
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+#[allow(clippy::large_enum_variant)]
+pub enum ReadApiKey {
+    ApiKey(ApiKey),
+    Claims(DashboardClaims),
+}
+
+impl ReadApiKey {
+    pub fn from_api_key(api_key: ApiKey) -> Self {
+        Self::ApiKey(api_key)
+    }
+
+    pub fn from_claims(claims: DashboardClaims) -> Self {
         Self::Claims(claims)
     }
 }

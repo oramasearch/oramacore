@@ -52,6 +52,7 @@ use crate::lock::OramaAsyncLock;
 use crate::metrics::CollectionLabels;
 use crate::python::embeddings::Model;
 use crate::python::PythonService;
+use crate::types::DashboardClaims;
 use crate::{
     ai::{
         automatic_embeddings_selector::AutomaticEmbeddingsSelector,
@@ -175,7 +176,7 @@ pub struct WriteSide {
     // and then we can continue the insertion.
     write_operation_counter: AtomicU32,
 
-    jwt_manager: JwtManager,
+    jwt_manager: JwtManager<DashboardClaims>,
 
     #[allow(dead_code)]
     python_service: Arc<PythonService>,
@@ -1477,7 +1478,7 @@ impl WriteSide {
         Ok(self.training_sets.clone())
     }
 
-    pub fn get_jwt_manager(&self) -> JwtManager {
+    pub fn get_jwt_manager(&self) -> JwtManager<DashboardClaims> {
         self.jwt_manager.clone()
     }
 

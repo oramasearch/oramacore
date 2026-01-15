@@ -25,7 +25,7 @@ use oramacore::{
     },
     types::{
         ApiKey, CollectionId, CollectionStatsRequest, CreateCollection, CreateIndexRequest,
-        DocumentList, IndexId, SearchParams, SearchResult, WriteApiKey,
+        DocumentList, IndexId, ReadApiKey, SearchParams, SearchResult, WriteApiKey,
     },
     web_server::HttpConfig,
     OramacoreConfig,
@@ -96,6 +96,7 @@ pub fn create_minimal_config() -> OramacoreConfig {
                 collection_commit: CollectionCommitConfig::default(),
             },
             analytics: None,
+            jwt: None,
         },
     }
 }
@@ -130,7 +131,7 @@ pub struct BenchContext {
     pub writer: Arc<WriteSide>,
     pub master_api_key: ApiKey,
     pub collection_id: CollectionId,
-    pub read_api_key: ApiKey,
+    pub read_api_key: ReadApiKey,
     pub write_api_key: WriteApiKey,
 }
 
@@ -164,6 +165,7 @@ impl BenchContext {
             .expect("Failed to create collection");
 
         // Wait for collection to be ready
+        let read_api_key = ReadApiKey::ApiKey(read_api_key);
         let reader_clone = reader.clone();
         wait_for_quick(&reader_clone, |r| {
             async move {

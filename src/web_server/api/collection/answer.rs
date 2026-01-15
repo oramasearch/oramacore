@@ -1,7 +1,7 @@
 use crate::ai::answer::{Answer, AnswerError, AnswerEvent};
 use crate::collection_manager::sides::read::ReadSide;
-use crate::types::{ApiKey, Interaction};
 use crate::types::{CollectionId, SuggestionsRequest, TitleRequest};
+use crate::types::{Interaction, ReadApiKey};
 use anyhow::Context;
 use axum::http::StatusCode;
 use axum::response::sse::Event;
@@ -40,7 +40,7 @@ pub fn apis(read_side: Arc<ReadSide>) -> Router {
 async fn planned_answer_v1(
     collection_id: CollectionId,
     State(read_side): State<Arc<ReadSide>>,
-    read_api_key: ApiKey,
+    read_api_key: ReadApiKey,
     Json(interaction): Json<Interaction>,
 ) -> Result<Sse<impl Stream<Item = Result<Event, Infallible>>>, AnswerError> {
     let (answer_sender, mut answer_receiver) = mpsc::unbounded_channel();
@@ -81,7 +81,7 @@ async fn planned_answer_v1(
 async fn answer_v1(
     collection_id: CollectionId,
     State(read_side): State<Arc<ReadSide>>,
-    read_api_key: ApiKey,
+    read_api_key: ReadApiKey,
     Json(interaction): Json<Interaction>,
 ) -> Result<Sse<impl Stream<Item = Result<Event, Infallible>>>, AnswerError> {
     let (answer_sender, mut answer_receiver) = mpsc::unbounded_channel();
@@ -125,7 +125,7 @@ async fn answer_v1(
 async fn answer_suggestions_v1(
     collection_id: CollectionId,
     State(read_side): State<Arc<ReadSide>>,
-    read_api_key: ApiKey,
+    read_api_key: ReadApiKey,
     Json(request): Json<SuggestionsRequest>,
 ) -> impl IntoResponse {
     let answer = match Answer::try_new(read_side.clone(), collection_id, read_api_key).await {
@@ -168,7 +168,7 @@ async fn answer_suggestions_v1(
 async fn answer_title_v1(
     collection_id: CollectionId,
     State(read_side): State<Arc<ReadSide>>,
-    read_api_key: ApiKey,
+    read_api_key: ReadApiKey,
     Json(request): Json<TitleRequest>,
 ) -> impl IntoResponse {
     let answer = match Answer::try_new(read_side.clone(), collection_id, read_api_key).await {
@@ -203,7 +203,7 @@ async fn answer_title_v1(
 async fn answer_logs_v1(
     collection_id: CollectionId,
     State(read_side): State<Arc<ReadSide>>,
-    read_api_key: ApiKey,
+    read_api_key: ReadApiKey,
 ) -> Result<Sse<impl Stream<Item = Result<Event, Infallible>>>, AnswerError> {
     read_side
         .check_read_api_key(collection_id, read_api_key)

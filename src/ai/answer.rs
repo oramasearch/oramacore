@@ -19,9 +19,9 @@ use crate::{
         system_prompts::SystemPrompt,
     },
     types::{
-        ApiKey, CollectionId, IndexId, Interaction, InteractionLLMConfig, InteractionMessage,
-        Limit, Properties, SearchMode, SearchOffset, SearchParams, SearchResultHit, Similarity,
-        SuggestionsRequest, TitleRequest, VectorMode,
+        CollectionId, IndexId, Interaction, InteractionLLMConfig, InteractionMessage, Limit,
+        Properties, ReadApiKey, SearchMode, SearchOffset, SearchParams, SearchResultHit,
+        Similarity, SuggestionsRequest, TitleRequest, VectorMode,
     },
 };
 
@@ -64,7 +64,7 @@ pub enum AnswerError {
 pub struct Answer {
     read_side: Arc<ReadSide>,
     collection_id: CollectionId,
-    read_api_key: ApiKey,
+    read_api_key: ReadApiKey,
 }
 
 #[derive(Debug)]
@@ -76,7 +76,7 @@ impl Answer {
     pub async fn try_new(
         read_side: Arc<ReadSide>,
         collection_id: CollectionId,
-        read_api_key: ApiKey,
+        read_api_key: ReadApiKey,
     ) -> Result<Self, AnswerError> {
         read_side
             .check_read_api_key(collection_id, read_api_key)

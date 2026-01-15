@@ -4396,6 +4396,7 @@ dependencies = [
  "axum 0.8.7",
  "axum-extra",
  "backoff",
+ "base64 0.22.1",
  "bincode",
  "chrono",
  "config",

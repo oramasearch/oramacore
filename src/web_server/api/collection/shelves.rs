@@ -15,7 +15,7 @@ use crate::{
         read::{ReadError, ReadSide},
         write::{WriteError, WriteSide},
     },
-    types::{ApiKey, CollectionId, WriteApiKey},
+    types::{CollectionId, ReadApiKey, WriteApiKey},
 };
 
 #[derive(Debug, Serialize)]
@@ -95,7 +95,7 @@ async fn list_merchandising_shelves(
 async fn get_merchandising_shelf(
     Path((collection_id, shelf_id)): Path<(CollectionId, ShelfId)>,
     read_side: State<Arc<ReadSide>>,
-    read_api_key: ApiKey,
+    read_api_key: ReadApiKey,
 ) -> impl IntoResponse {
     let collection = read_side
         .get_collection(collection_id, read_api_key)

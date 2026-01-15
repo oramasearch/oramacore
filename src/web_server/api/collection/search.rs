@@ -15,8 +15,8 @@ use crate::collection_manager::sides::read::{
 use crate::{
     collection_manager::sides::read::ReadSide,
     types::{
-        ApiKey, BatchGetDocumentsRequest, BatchGetDocumentsResponse, CollectionId,
-        CollectionStatsRequest, SearchParams,
+        BatchGetDocumentsRequest, BatchGetDocumentsResponse, CollectionId, CollectionStatsRequest,
+        ReadApiKey, SearchParams,
     },
 };
 
@@ -45,7 +45,7 @@ async fn search(
     Path(collection_id): Path<CollectionId>,
     read_side: State<Arc<ReadSide>>,
     analytics_metadata: AnalyticsMetadataFromRequest,
-    read_api_key: ApiKey,
+    read_api_key: ReadApiKey,
     Json(search_params): Json<SearchParams>,
 ) -> impl IntoResponse {
     read_side
@@ -66,7 +66,7 @@ async fn search(
 async fn stats(
     Path(collection_id): Path<CollectionId>,
     read_side: State<Arc<ReadSide>>,
-    read_api_key: ApiKey,
+    read_api_key: ReadApiKey,
 ) -> impl IntoResponse {
     read_side
         .collection_stats(
@@ -81,7 +81,7 @@ async fn stats(
 async fn filterable_fields(
     Path(collection_id): Path<CollectionId>,
     read_side: State<Arc<ReadSide>>,
-    read_api_key: ApiKey,
+    read_api_key: ReadApiKey,
     Query(query): Query<FilterableFieldsSearchQueryParams>,
 ) -> impl IntoResponse {
     let with_keys = query.with_keys.unwrap_or(false);
@@ -95,7 +95,7 @@ async fn filterable_fields(
 async fn batch_get_documents(
     Path(collection_id): Path<CollectionId>,
     read_side: State<Arc<ReadSide>>,
-    read_api_key: ApiKey,
+    read_api_key: ReadApiKey,
     Json(request): Json<BatchGetDocumentsRequest>,
 ) -> impl IntoResponse {
     // Validate request size
