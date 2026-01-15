@@ -5,7 +5,7 @@ use std::time::Duration;
 use tokio::runtime::Runtime;
 
 // Import the necessary modules directly since tests module is not available in bench context
-use std::{path::PathBuf, sync::Arc};
+use std::{path::PathBuf, sync::Arc, sync::Once};
 
 use anyhow::{bail, Result};
 use futures::{future::BoxFuture, FutureExt};
@@ -32,16 +32,22 @@ use oramacore::{
     OramacoreConfig,
 };
 
+// Ensure logging and environment variables are set only once to avoid
+// race conditions with unsafe std::env::set_var.
+static LOG_INIT: Once = Once::new();
+
 /// Initialize logging for benchmarks
 pub fn init_log() {
-    if let Ok(a) = std::env::var("LOG") {
-        if a == "info" {
-            unsafe { std::env::set_var("RUST_LOG", "oramacore=info,warn") };
-        } else {
-            unsafe { std::env::set_var("RUST_LOG", "oramacore=trace,warn") };
+    LOG_INIT.call_once(|| {
+        if let Ok(a) = std::env::var("LOG") {
+            if a == "info" {
+                unsafe { std::env::set_var("RUST_LOG", "oramacore=info,warn") };
+            } else {
+                unsafe { std::env::set_var("RUST_LOG", "oramacore=trace,warn") };
+            }
         }
-    }
-    let _ = tracing_subscriber::fmt::try_init();
+        let _ = tracing_subscriber::fmt::try_init();
+    });
 }
 
 /// Generate a new temporary path for test data
