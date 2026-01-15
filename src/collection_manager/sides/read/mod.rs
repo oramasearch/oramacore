@@ -37,6 +37,7 @@ pub use collection::{IndexFieldStats, IndexFieldStatsType, ShelfWithDocuments};
 use collections::CollectionsReader;
 use document_storage::{DocumentStorage, DocumentStorageConfig};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use tracing::{error, info, trace, warn};
 
 use crate::ai::advanced_autoquery::{AdvancedAutoQuerySteps, QueryMappedSearchResult};
@@ -55,11 +56,11 @@ use crate::lock::{OramaAsyncLock, OramaAsyncMutex};
 use crate::metrics::operations::OPERATION_COUNT;
 use crate::metrics::Empty;
 use crate::python::PythonService;
-use crate::types::{CollectionId, SearchParams};
 use crate::types::{
     ApiKey, CollectionStatsRequest, CustomerClaims, Document, InteractionLLMConfig, ReadApiKey,
     SearchMode, SearchModeResult, SearchResult,
 };
+use crate::types::{CollectionId, SearchParams};
 use crate::types::{IndexId, NLPSearchRequest};
 use oramacore_lib::fs::BufferedFile;
 use oramacore_lib::generic_kv::{KVConfig, KV};
@@ -554,27 +555,51 @@ impl ReadSide {
             .ok_or_else(|| ReadError::NotFound(collection_id))?;
         collection.check_read_api_key(read_api_key, self.master_api_key)?;
 
+        // Extract extra claims from JWT token if present, otherwise use None for plain API key
+        let claims: Option<HashMap<String, Value>> = match read_api_key {
+            ReadApiKey::Claims(customer_claims) => Some(customer_claims.extra.clone()),
+            ReadApiKey::ApiKey(_) => None,
+        };
+
         let storage = collection.get_hook_storage();
         let storage = storage.read("run_before_search").await;
         let hook_content = storage.get_hook_content(HookType::BeforeSearch)?;
         if let Some(hook_code) = hook_content {
-            let mut js_executor: JSExecutor<&SearchParams, Option<SearchParams>> = JSExecutor::try_new(
+            // Hook signature: function beforeSearch(search_params, claim)
+            // - search_params: the search parameters that can be modified
+            // - claim: the extra JWT claims (object) or null if using plain API key
+            let mut js_executor: JSExecutor<
+                (SearchParams, Option<HashMap<String, Value>>),
+                Option<SearchParams>,
+            > = JSExecutor::try_new(
                 hook_code,
                 Some(vec![]),
                 Duration::from_millis(200),
                 true,
                 HookType::BeforeSearch.get_function_name().to_string(),
             )
-            .await.unwrap();
+            .await
+            .map_err(|e| {
+                ReadError::Generic(anyhow::anyhow!("Failed to create JS executor: {e}"))
+            })?;
 
-            let output: Option<SearchParams> = js_executor.exec(
-                &request.search_params,
-                None,
-                ExecOption {
-                    timeout: Duration::from_millis(1000),
-                    allowed_hosts: Some(Vec::new()),
-                }
-            ).await.unwrap();
+            let logs = self.get_hook_logs();
+            let log_sender = logs.get_sender(&collection_id);
+
+            let hook_input = (request.search_params.clone(), claims.clone());
+            let output: Option<SearchParams> = js_executor
+                .exec(
+                    hook_input,
+                    log_sender,
+                    ExecOption {
+                        timeout: Duration::from_millis(1000),
+                        allowed_hosts: Some(Vec::new()),
+                    },
+                )
+                .await
+                .map_err(|e| {
+                    ReadError::Generic(anyhow::anyhow!("BeforeSearch hook failed: {e}"))
+                })?;
 
             drop(js_executor);
 

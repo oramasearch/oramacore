@@ -138,6 +138,28 @@ reader_side:
             -   header: longitude
                 metadata_key: longitude
 
+    # Uncomment to enable customer JWT validation for search requests.
+    # This allows customers to use their own identity provider (IdP) for authentication.
+    # The JWT must include an "orak" claim containing the collection's read API key.
+    # Additional claims can be accessed by the beforeSearch hook to apply custom restrictions.
+    # Example JWT claim: {"orak":"c1_my-read-api-key", "country": "US", "iss":"https://issuer"}
+    # jwt:
+    #     providers:
+    #         - name: "customer-idp"
+    #           jwks_url: https://customer.example.com/.well-known/jwks.json
+    #           issuers:
+    #               - https://customer.example.com
+    #           audiences:
+    #               - https://api.yourservice.com
+    #           refresh_interval: 1h
+    #         # Add more providers as needed for different customers:
+    #         # - name: "auth0-production"
+    #         #   jwks_url: https://your-tenant.auth0.com/.well-known/jwks.json
+    #         #   issuers:
+    #         #       - https://your-tenant.auth0.com/
+    #         #   audiences:
+    #         #       - https://api.yourservice.com
+
 ai_server:
     scheme: http
     host: 0.0.0.0

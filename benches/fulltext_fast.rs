@@ -200,7 +200,7 @@ fn bench_fulltext_fast(c: &mut Criterion) {
             async move {
                 let stats = r
                     .collection_stats(
-                        read_api_key,
+                        &read_api_key,
                         collection_id,
                         CollectionStatsRequest { with_keys: false },
                     )
