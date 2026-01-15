@@ -293,6 +293,15 @@ impl TestContext {
         }
     }
 
+    /// Creates a new TestContext with JWT configuration for the reader side.
+    /// This is useful for testing JWT validation flows end-to-end.
+    pub async fn new_with_jwt_config(jwt_config: crate::auth::JwtConfig) -> Self {
+        let mut config = create_oramacore_config();
+        config.writer_side.master_api_key = Self::generate_api_key();
+        config.reader_side.jwt = Some(jwt_config);
+        Self::new_with_config(config).await
+    }
+
     pub async fn reload(self) -> Self {
         self.reader.stop().await.unwrap();
 

@@ -562,4 +562,57 @@ mod tests {
         let output = jwt_manager.check(&jwt).await.unwrap_err();
         assert!(matches!(output, JwtError::NoProviderForIssuer { .. }));
     }
+
+    #[tokio::test]
+    async fn test_jwt_with_invalid_signature_rejected() {
+        let address = start_http_issuer_server().await;
+        let port = address.port();
+
+        let jwt_manager = JwtManager::<DashboardClaims>::new(Some(JwtConfig {
+            providers: vec![JwksProviderConfig {
+                name: "test-provider".to_string(),
+                jwks_url: format!("http://localhost:{port}/api/.well-known/jwks.json")
+                    .parse()
+                    .unwrap(),
+                refresh_interval: None,
+                issuers: vec![StackString::try_new("https://the-dashboard").unwrap()],
+                audiences: vec![StackString::try_new("http://the-orama-core").unwrap()],
+            }],
+        }))
+        .await
+        .unwrap();
+
+        // Create JWT signed with WRONG key ("wrong_secret" instead of "foo")
+        // The JWKS server has key "foo", so this signature won't validate
+        #[derive(Serialize)]
+        struct MyClaims {
+            #[serde(flatten)]
+            inner: DashboardClaims,
+            exp: u64,
+        }
+
+        let claims = MyClaims {
+            inner: DashboardClaims {
+                aud: StackString::try_new("http://the-orama-core").unwrap(),
+                iss: StackString::try_new("https://the-dashboard").unwrap(),
+                scope: StackString::try_new("write").unwrap(),
+                limits: ClaimLimits { max_doc_count: 1 },
+                sub: CollectionId::try_new("coll-id").unwrap(),
+            },
+            exp: Utc::now().timestamp() as u64 + 3600, // Valid expiration (1 hour from now)
+        };
+
+        let token = encode(
+            &Header::default(),
+            &claims,
+            &EncodingKey::from_secret(b"wrong_secret"), // Wrong key!
+        )
+        .unwrap();
+
+        let result = jwt_manager.check(&token).await;
+        assert!(
+            matches!(result, Err(JwtError::AllProvidersFailed { .. })),
+            "Expected AllProvidersFailed error for invalid signature, got: {result:?}"
+        );
+    }
 }
