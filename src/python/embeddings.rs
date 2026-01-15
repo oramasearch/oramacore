@@ -230,13 +230,18 @@ fn get_python_config(py: Python<'_>, orama_config: AIServiceConfig) -> PyResult<
 
 #[cfg(test)]
 mod tests {
-    use crate::{python::PythonService, tests::utils::create_oramacore_config};
+    use crate::{
+        python::PythonService,
+        tests::utils::{create_oramacore_config, init_log},
+    };
     use std::sync::{Arc, LazyLock};
 
     use super::*;
 
     static PYTHON_SERVICE: LazyLock<Arc<PythonService>> = LazyLock::new(|| {
-        Python::initialize();
+        // Use init_log() to ensure Python is initialized via the shared Once guard
+        // in utils.rs, avoiding duplicate initialization race conditions.
+        init_log();
 
         let config = create_oramacore_config();
         Arc::new(

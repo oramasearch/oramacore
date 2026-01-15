@@ -1605,15 +1605,7 @@ pub struct Interaction {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GetSystemPromptQueryParams {
-    #[serde(rename = "api-key")]
-    pub api_key: ApiKey,
     pub system_prompt_id: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TrainingSetsQueryOptimizerParams {
-    #[serde(rename = "api-key")]
-    pub api_key: ApiKey,
 }
 
 #[derive(Deserialize, Clone, Serialize)]
@@ -2283,7 +2275,9 @@ impl<'de, const N: usize> Deserialize<'de> for StackString<N> {
         D: serde::de::Deserializer<'de>,
     {
         let s = String::deserialize(deserializer)?;
-        Ok(StackString(ArrayString::<N>::try_from(s.as_str()).unwrap()))
+        ArrayString::<N>::try_from(s.as_str())
+            .map(StackString)
+            .map_err(|e| serde::de::Error::custom(format!("String too long (max {N} chars): {e}")))
     }
 }
 impl<const N: usize> StackString<N> {

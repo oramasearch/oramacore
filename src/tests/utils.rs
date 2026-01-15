@@ -1,4 +1,10 @@
-use std::{collections::HashMap, net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
+use std::{
+    collections::HashMap,
+    net::SocketAddr,
+    path::PathBuf,
+    sync::{Arc, Once},
+    time::Duration,
+};
 
 use anyhow::{bail, Result};
 use axum::{response::sse::Event, Json};
@@ -7,6 +13,7 @@ use fake::Fake;
 use fake::Faker;
 use futures::{future::BoxFuture, FutureExt};
 use oramacore_lib::hook_storage::HookType;
+use pyo3::Python;
 use tokio::{
     sync::{mpsc, RwLock},
     time::sleep,
@@ -44,15 +51,29 @@ use anyhow::Context;
 use oramacore_lib::pin_rules::PinRule;
 use oramacore_lib::shelves::{Shelf, ShelfId};
 
+// Ensure Python is initialized only once across all tests.
+// Python::initialize() must be called from a consistent thread and only once
+// to avoid race conditions that can cause SIGSEGV.
+static PYTHON_INIT: Once = Once::new();
+// Ensure logging and environment variables are set only once to avoid
+// race conditions with unsafe std::env::set_var in multi-threaded tests.
+static LOG_INIT: Once = Once::new();
+
 pub fn init_log() {
-    if let Ok(a) = std::env::var("LOG") {
-        if a == "info" {
-            unsafe { std::env::set_var("RUST_LOG", "oramacore=info,warn") };
-        } else {
-            unsafe { std::env::set_var("RUST_LOG", "oramacore=trace,warn") };
+    PYTHON_INIT.call_once(|| {
+        Python::initialize();
+    });
+
+    LOG_INIT.call_once(|| {
+        if let Ok(a) = std::env::var("LOG") {
+            if a == "info" {
+                unsafe { std::env::set_var("RUST_LOG", "oramacore=info,warn") };
+            } else {
+                unsafe { std::env::set_var("RUST_LOG", "oramacore=trace,warn") };
+            }
         }
-    }
-    let _ = tracing_subscriber::fmt::try_init();
+        let _ = tracing_subscriber::fmt::try_init();
+    });
 }
 
 pub fn generate_new_path() -> PathBuf {
@@ -72,7 +93,13 @@ pub fn create_oramacore_config() -> OramacoreConfig {
             with_prometheus: false,
         },
         ai_server: AIServiceConfig {
-            models_cache_dir: "/tmp/fastembed_cache".to_string(),
+            // Use a process-unique cache directory to avoid race conditions
+            // when multiple test processes access ONNX model files simultaneously.
+            models_cache_dir: format!(
+                "{}/fastembed_cache_{}",
+                std::env::temp_dir().display(),
+                std::process::id()
+            ),
             total_threads: 4,
             embeddings: Some(AIServiceEmbeddingsConfig {
                 automatic_embeddings_selector: None,
@@ -362,6 +389,7 @@ impl TestContext {
 
 impl Drop for TestContext {
     fn drop(&mut self) {
+        // First, stop the reader while in tokio context
         let output = tokio::task::block_in_place(|| {
             tokio::runtime::Handle::current().block_on(async {
                 // Some tests may close the connection intentionally
@@ -373,6 +401,12 @@ impl Drop for TestContext {
         if let Err(err) = output {
             warn!("Error stopping reader: {}", err);
         }
+
+        // Then acquire GIL to ensure Python objects are properly cleaned up
+        // This must happen after the async cleanup to avoid deadlocks
+        Python::attach(|_py| {
+            // GIL is held, any Python object drops that happen now are safe
+        });
     }
 }
 

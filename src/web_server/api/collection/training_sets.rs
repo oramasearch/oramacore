@@ -2,12 +2,11 @@ use crate::ai::training_sets::TrainingSet;
 use crate::collection_manager::sides::read::ReadSide;
 use crate::collection_manager::sides::write::WriteSide;
 use crate::types::{
-    ApiKey, CollectionId, InsertTrainingSetParams, InteractionLLMConfig, TrainingSetId,
-    TrainingSetsQueryOptimizerParams, WriteApiKey,
+    ApiKey, CollectionId, InsertTrainingSetParams, InteractionLLMConfig, TrainingSetId, WriteApiKey,
 };
 use crate::web_server::api::util::print_error;
 use axum::{
-    extract::{Path, Query, State},
+    extract::{Path, State},
     response::IntoResponse,
     routing::{get, post},
     Json, Router,
@@ -21,12 +20,6 @@ use std::sync::Arc;
 struct TrainingSetsQueryBody {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub llm_config: Option<InteractionLLMConfig>,
-}
-
-#[derive(Deserialize)]
-struct ApiKeyOnlyQuery {
-    #[serde(rename = "api-key")]
-    api_key: ApiKey,
 }
 
 pub fn read_apis(read_side: Arc<ReadSide>) -> Router {
@@ -57,11 +50,10 @@ pub fn write_apis(write_side: Arc<WriteSide>) -> Router {
 
 async fn generate_training_sets_v1(
     Path((collection_id, training_set_destination)): Path<(CollectionId, TrainingSetId)>,
-    Query(query_params): Query<TrainingSetsQueryOptimizerParams>,
     read_side: State<Arc<ReadSide>>,
+    read_api_key: ApiKey,
     Json(body): Json<TrainingSetsQueryBody>,
 ) -> impl IntoResponse {
-    let read_api_key = query_params.api_key;
     let llm_config = body.llm_config;
     let llm_service = read_side.get_llm_service();
 
@@ -97,12 +89,10 @@ async fn generate_training_sets_v1(
 async fn get_training_sets_v1(
     Path((collection_id, training_set)): Path<(CollectionId, TrainingSetId)>,
     State(read_side): State<Arc<ReadSide>>,
-    Query(query_params): Query<ApiKeyOnlyQuery>,
+    read_api_key: ApiKey,
 ) -> impl IntoResponse {
     match training_set.try_into_destination() {
         Ok(destination) => {
-            let read_api_key = query_params.api_key;
-
             match read_side
                 .get_training_data_for(collection_id, read_api_key, destination)
                 .await

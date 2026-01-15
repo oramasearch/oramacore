@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use crate::types::ApiKey;
 use axum::{
-    extract::{Query, State},
+    extract::State,
     response::IntoResponse,
     routing::{get, post},
     Json, Router,
@@ -90,18 +90,14 @@ async fn delete_merchandising_pin_rules_v1(
     Result::<Json<serde_json::Value>, WriteError>::Ok(Json(json!({ "success": true })))
 }
 
-#[derive(Deserialize)]
-struct ApiKeyQueryParams {
-    #[serde(rename = "api-key")]
-    api_key: ApiKey,
-}
-
 async fn list_merchandising_pin_rules_ids_v1(
     collection_id: CollectionId,
-    Query(ApiKeyQueryParams { api_key }): Query<ApiKeyQueryParams>,
     read_side: State<Arc<ReadSide>>,
+    read_api_key: ApiKey,
 ) -> Result<impl IntoResponse, impl IntoResponse> {
-    let collection = read_side.get_collection(collection_id, api_key).await?;
+    let collection = read_side
+        .get_collection(collection_id, read_api_key)
+        .await?;
 
     let rules = collection.get_pin_rules_reader("list").await;
     let ids = rules.get_rule_ids();

@@ -3,6 +3,7 @@
 mod analytics;
 mod answer;
 mod api_key_chain;
+mod api_key_extraction;
 mod batch_get_documents;
 mod boost_integration;
 mod bugs;
