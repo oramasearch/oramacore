@@ -206,7 +206,7 @@ async fn answer_logs_v1(
     read_api_key: ReadApiKey,
 ) -> Result<Sse<impl Stream<Item = Result<Event, Infallible>>>, AnswerError> {
     read_side
-        .check_read_api_key(collection_id, read_api_key)
+        .check_read_api_key(collection_id, &read_api_key)
         .await?;
 
     let logs = read_side.get_hook_logs();

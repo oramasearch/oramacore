@@ -79,7 +79,7 @@ impl Answer {
         read_api_key: ReadApiKey,
     ) -> Result<Self, AnswerError> {
         read_side
-            .check_read_api_key(collection_id, read_api_key)
+            .check_read_api_key(collection_id, &read_api_key)
             .await?;
 
         Ok(Self {
@@ -191,7 +191,7 @@ impl Answer {
 
             let hook_storage = self
                 .read_side
-                .get_hook_storage(self.read_api_key, self.collection_id)
+                .get_hook_storage(&self.read_api_key, self.collection_id)
                 .await?;
             let lock = hook_storage.read("answer").await;
             let params = run_before_retrieval(
@@ -209,7 +209,7 @@ impl Answer {
             let result = self
                 .read_side
                 .search(
-                    self.read_api_key,
+                    &self.read_api_key,
                     self.collection_id,
                     SearchRequest {
                         search_params: params,
@@ -239,7 +239,7 @@ impl Answer {
 
         let hook_storage = self
             .read_side
-            .get_hook_storage(self.read_api_key, self.collection_id)
+            .get_hook_storage(&self.read_api_key, self.collection_id)
             .await?;
         let lock = hook_storage.read("answer").await;
         let (variables, system_prompt) = run_before_answer(
@@ -541,7 +541,7 @@ impl Answer {
 
         let hook_storage = self
             .read_side
-            .get_hook_storage(self.read_api_key, self.collection_id)
+            .get_hook_storage(&self.read_api_key, self.collection_id)
             .await?;
         let lock = hook_storage.read("run_before_retrieval").await;
         let params = run_before_retrieval(
@@ -559,7 +559,7 @@ impl Answer {
         let result = match self
             .read_side
             .search(
-                self.read_api_key,
+                &self.read_api_key,
                 self.collection_id,
                 SearchRequest {
                     search_params: params,
@@ -610,20 +610,20 @@ impl Answer {
             Some(id) => {
                 let full_prompt = self
                     .read_side
-                    .get_system_prompt(self.read_api_key, self.collection_id, id)
+                    .get_system_prompt(&self.read_api_key, self.collection_id, id)
                     .await?;
                 Ok(full_prompt)
             }
             None => {
                 let has_system_prompts = self
                     .read_side
-                    .has_system_prompts(self.read_api_key, self.collection_id)
+                    .has_system_prompts(&self.read_api_key, self.collection_id)
                     .await?;
 
                 if has_system_prompts {
                     let chosen_system_prompt = self
                         .read_side
-                        .perform_system_prompt_selection(self.read_api_key, self.collection_id)
+                        .perform_system_prompt_selection(&self.read_api_key, self.collection_id)
                         .await?;
                     Ok(chosen_system_prompt)
                 } else {
@@ -710,7 +710,7 @@ impl Answer {
         let search_results = self
             .read_side
             .search(
-                self.read_api_key,
+                &self.read_api_key,
                 self.collection_id,
                 SearchRequest {
                     search_params: SearchParams {

@@ -598,12 +598,16 @@ impl WriteApiKey {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, Copy)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct CustomerClaims {
     pub orak: ApiKey,
+    /// Additional JWT claims from the customer's identity provider.
+    /// These can be used by hooks to apply custom restrictions.
+    #[serde(flatten)]
+    pub extra: HashMap<String, Value>,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 #[allow(clippy::large_enum_variant)]
 pub enum ReadApiKey {
     ApiKey(ApiKey),

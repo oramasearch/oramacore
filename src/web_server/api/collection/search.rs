@@ -50,7 +50,7 @@ async fn search(
 ) -> impl IntoResponse {
     read_side
         .search(
-            read_api_key,
+            &read_api_key,
             collection_id,
             SearchRequest {
                 search_params,
@@ -70,7 +70,7 @@ async fn stats(
 ) -> impl IntoResponse {
     read_side
         .collection_stats(
-            read_api_key,
+            &read_api_key,
             collection_id,
             CollectionStatsRequest { with_keys: true },
         )
@@ -87,7 +87,7 @@ async fn filterable_fields(
     let with_keys = query.with_keys.unwrap_or(false);
 
     read_side
-        .filterable_fields(read_api_key, collection_id, with_keys)
+        .filterable_fields(&read_api_key, collection_id, with_keys)
         .await
         .map(Json)
 }
@@ -104,7 +104,7 @@ async fn batch_get_documents(
     }
 
     match read_side
-        .batch_get_documents(read_api_key, collection_id, request.ids)
+        .batch_get_documents(&read_api_key, collection_id, request.ids)
         .await
     {
         Ok(documents) => Json(BatchGetDocumentsResponse { documents }).into_response(),

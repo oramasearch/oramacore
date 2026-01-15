@@ -166,11 +166,13 @@ impl BenchContext {
 
         // Wait for collection to be ready
         let read_api_key = ReadApiKey::ApiKey(read_api_key);
+        let read_api_key_for_wait = read_api_key.clone();
         let reader_clone = reader.clone();
         wait_for_quick(&reader_clone, |r| {
+            let read_api_key = read_api_key_for_wait.clone();
             async move {
                 r.collection_stats(
-                    read_api_key,
+                    &read_api_key,
                     collection_id,
                     CollectionStatsRequest { with_keys: false },
                 )
@@ -211,12 +213,13 @@ impl BenchContext {
         // Wait for index to be ready
         let reader_clone = self.reader.clone();
         let collection_id = self.collection_id;
-        let read_api_key = self.read_api_key;
+        let read_api_key_for_wait = self.read_api_key.clone();
         wait_for_quick(&reader_clone, |r| {
+            let read_api_key = read_api_key_for_wait.clone();
             async move {
                 let stats = r
                     .collection_stats(
-                        read_api_key,
+                        &read_api_key,
                         collection_id,
                         CollectionStatsRequest { with_keys: false },
                     )
@@ -249,7 +252,7 @@ impl BenchContext {
     pub async fn search(&self, search_params: SearchParams) -> Result<SearchResult> {
         self.reader
             .search(
-                self.read_api_key,
+                &self.read_api_key,
                 self.collection_id,
                 SearchRequest {
                     search_params,

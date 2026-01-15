@@ -43,7 +43,7 @@ async fn mcp_endpoint(
     body: Body,
 ) -> impl IntoResponse {
     if let Err(_err) = read_side
-        .check_read_api_key(collection_id, read_api_key)
+        .check_read_api_key(collection_id, &read_api_key)
         .await
     {
         let error_response = serde_json::json!({
@@ -89,7 +89,7 @@ async fn mcp_endpoint(
 
     let collection_info = read_side
         .collection_stats(
-            read_api_key,
+            &read_api_key,
             collection_id,
             CollectionStatsRequest { with_keys: false },
         )

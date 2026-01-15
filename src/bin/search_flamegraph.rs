@@ -327,7 +327,7 @@ async fn main() -> Result<()> {
 
             read_side
                 .search(
-                    read_api_key,
+                    &read_api_key,
                     collection_id,
                     SearchRequest {
                         search_params,
@@ -363,7 +363,7 @@ async fn main() -> Result<()> {
 
             match read_side
                 .search(
-                    read_api_key,
+                    &read_api_key,
                     collection_id,
                     SearchRequest {
                         search_params,

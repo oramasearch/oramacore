@@ -628,11 +628,12 @@ impl AdvancedAutoQuery {
             let read_side = read_side.clone();
             let tracked_query = tracked_query.clone();
             let log_sender = log_sender.clone();
+            let read_api_key = read_api_key.clone();
 
             async move {
                 let search_params = tracked_query.search_params.clone();
                 let hook_storage = read_side
-                    .get_hook_storage(read_api_key, collection_id)
+                    .get_hook_storage(&read_api_key, collection_id)
                     .await?;
                 let lock = hook_storage.read("execute_mapped_searches").await;
                 let search_params = run_before_retrieval(
@@ -649,7 +650,7 @@ impl AdvancedAutoQuery {
 
                 let search_result = read_side
                     .search(
-                        read_api_key,
+                        &read_api_key,
                         collection_id,
                         SearchRequest {
                             search_params,

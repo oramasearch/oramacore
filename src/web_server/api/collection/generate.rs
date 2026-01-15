@@ -59,7 +59,7 @@ async fn nlp_query_v1(
     tokio::spawn(async move {
         let collection_stats = match read_side
             .collection_stats(
-                read_api_key,
+                &read_api_key,
                 collection_id,
                 crate::types::CollectionStatsRequest { with_keys: true },
             )
@@ -88,7 +88,7 @@ async fn nlp_query_v1(
             collection_stats,
             read_side.clone(),
             collection_id,
-            read_api_key,
+            read_api_key.clone(),
         );
 
         let event_stream = match state_machine
@@ -154,7 +154,7 @@ async fn answer_v1(
             llm_service,
             read_side.clone(),
             collection_id,
-            read_api_key,
+            read_api_key.clone(),
             Some(analytics_holder.clone()),
         );
 

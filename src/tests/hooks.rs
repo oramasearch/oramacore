@@ -25,14 +25,15 @@ export default { beforeRetrieval }"#
         .await
         .unwrap();
 
-    let read_api_key = collection_client.read_api_key;
+    let read_api_key = collection_client.read_api_key.clone();
     let collection_id = collection_client.collection_id;
     let stats = wait_for(&test_context, |t| {
         let reader = t.reader.clone();
+        let read_api_key = read_api_key.clone();
         async move {
             let stats = reader
                 .collection_stats(
-                    read_api_key,
+                    &read_api_key,
                     collection_id,
                     CollectionStatsRequest { with_keys: false },
                 )
@@ -73,15 +74,17 @@ export default { beforeRetrieval }"#
         .await
         .unwrap();
 
-    let read_api_key = collection_client.read_api_key;
+    let read_api_key = collection_client.read_api_key.clone();
     let write_api_key = collection_client.write_api_key;
     let collection_id = collection_client.collection_id;
+    let read_api_key_for_reload = read_api_key.clone();
     let stats = wait_for(&test_context, |t| {
         let reader = t.reader.clone();
+        let read_api_key = read_api_key.clone();
         async move {
             let stats = reader
                 .collection_stats(
-                    read_api_key,
+                    &read_api_key,
                     collection_id,
                     CollectionStatsRequest { with_keys: false },
                 )
@@ -105,7 +108,7 @@ export default { beforeRetrieval }"#
     let test_context = test_context.reload().await;
 
     let collection_client = test_context
-        .get_test_collection_client(collection_id, write_api_key, read_api_key)
+        .get_test_collection_client(collection_id, write_api_key, read_api_key_for_reload)
         .unwrap();
 
     let stats = collection_client.reader_stats().await.unwrap();

@@ -225,7 +225,7 @@ async fn test_vector_search_should_work_after_commit() {
 
     let collection_id = collection_client.collection_id;
     let write_api_key = collection_client.write_api_key;
-    let read_api_key = collection_client.read_api_key;
+    let read_api_key = collection_client.read_api_key.clone();
     let index_id = index_client.index_id;
 
     let test_context = test_context.reload().await;
@@ -339,7 +339,7 @@ export default {
         .get_test_collection_client(
             collection_client.collection_id,
             collection_client.write_api_key,
-            collection_client.read_api_key,
+            collection_client.read_api_key.clone(),
         )
         .unwrap();
     let index_client = collection_client
@@ -418,7 +418,7 @@ export default {
         .get_test_collection_client(
             collection_client.collection_id,
             collection_client.write_api_key,
-            collection_client.read_api_key,
+            collection_client.read_api_key.clone(),
         )
         .unwrap();
 

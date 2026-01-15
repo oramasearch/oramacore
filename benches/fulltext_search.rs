@@ -195,12 +195,14 @@ impl TestContext {
             .await?;
 
         let read_api_key = ReadApiKey::ApiKey(read_api_key);
+        let read_api_key_for_wait = read_api_key.clone();
         wait_for(self, |s| {
             let reader = s.reader.clone();
+            let read_api_key = read_api_key_for_wait.clone();
             async move {
                 reader
                     .collection_stats(
-                        read_api_key,
+                        &read_api_key,
                         id,
                         CollectionStatsRequest { with_keys: false },
                     )
@@ -272,12 +274,12 @@ impl TestCollectionClient {
 
         wait_for(self, |s| {
             let reader = s.reader.clone();
-            let read_api_key = s.read_api_key;
+            let read_api_key = s.read_api_key.clone();
             let collection_id = s.collection_id;
             async move {
                 let stats = reader
                     .collection_stats(
-                        read_api_key,
+                        &read_api_key,
                         collection_id,
                         CollectionStatsRequest { with_keys: false },
                     )
@@ -299,7 +301,7 @@ impl TestCollectionClient {
             collection_id: self.collection_id,
             index_id,
             write_api_key: self.write_api_key,
-            read_api_key: self.read_api_key,
+            read_api_key: self.read_api_key.clone(),
             reader: self.reader.clone(),
             writer: self.writer.clone(),
         })
@@ -308,7 +310,7 @@ impl TestCollectionClient {
     pub async fn search(&self, search_params: SearchParams) -> Result<SearchResult> {
         self.reader
             .search(
-                self.read_api_key,
+                &self.read_api_key,
                 self.collection_id,
                 SearchRequest {
                     search_params,
@@ -342,7 +344,7 @@ impl TestIndexClient {
         let stats = self
             .reader
             .collection_stats(
-                self.read_api_key,
+                &self.read_api_key,
                 self.collection_id,
                 CollectionStatsRequest { with_keys: false },
             )
@@ -367,12 +369,12 @@ impl TestIndexClient {
 
         wait_for(self, |s| {
             let reader = s.reader.clone();
-            let read_api_key = s.read_api_key;
+            let read_api_key = s.read_api_key.clone();
             let collection_id = s.collection_id;
             async move {
                 let stats = reader
                     .collection_stats(
-                        read_api_key,
+                        &read_api_key,
                         collection_id,
                         CollectionStatsRequest { with_keys: false },
                     )

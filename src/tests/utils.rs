@@ -337,12 +337,14 @@ impl TestContext {
             )
             .await?;
 
+        let read_api_key_for_wait = read_api_key.clone();
         wait_for(self, |s| {
             let reader = s.reader.clone();
+            let read_api_key = read_api_key_for_wait.clone();
             async move {
                 reader
                     .collection_stats(
-                        read_api_key,
+                        &read_api_key,
                         id,
                         CollectionStatsRequest { with_keys: false },
                     )
@@ -445,12 +447,12 @@ impl TestCollectionClient<'_> {
 
         wait_for(self, |s| {
             let reader = s.reader;
-            let read_api_key = s.read_api_key;
+            let read_api_key = s.read_api_key.clone();
             let collection_id = s.collection_id;
             async move {
                 let stats = reader
                     .collection_stats(
-                        read_api_key,
+                        &read_api_key,
                         collection_id,
                         CollectionStatsRequest { with_keys: false },
                     )
@@ -496,7 +498,7 @@ impl TestCollectionClient<'_> {
             collection_id: self.collection_id,
             index_id,
             write_api_key: self.write_api_key,
-            read_api_key: self.read_api_key,
+            read_api_key: self.read_api_key.clone(),
             reader: self.reader,
             writer: self.writer,
         })
@@ -534,12 +536,12 @@ impl TestCollectionClient<'_> {
 
         wait_for(self, |s| {
             let reader = s.reader;
-            let read_api_key = s.read_api_key;
+            let read_api_key = s.read_api_key.clone();
             let collection_id = s.collection_id;
             async move {
                 let stats = reader
                     .collection_stats(
-                        read_api_key,
+                        &read_api_key,
                         collection_id,
                         CollectionStatsRequest { with_keys: false },
                     )
@@ -569,12 +571,12 @@ impl TestCollectionClient<'_> {
 
         wait_for(self, |s| {
             let reader = s.reader;
-            let read_api_key = s.read_api_key;
+            let read_api_key = s.read_api_key.clone();
             let collection_id = s.collection_id;
             async move {
                 if reader
                     .collection_stats(
-                        read_api_key,
+                        &read_api_key,
                         collection_id,
                         CollectionStatsRequest { with_keys: false },
                     )
@@ -595,7 +597,7 @@ impl TestCollectionClient<'_> {
     pub async fn reader_stats(&self) -> Result<CollectionStats> {
         self.reader
             .collection_stats(
-                self.read_api_key,
+                &self.read_api_key,
                 self.collection_id,
                 CollectionStatsRequest { with_keys: false },
             )
@@ -606,7 +608,7 @@ impl TestCollectionClient<'_> {
     pub async fn search(&self, search_params: SearchParams) -> Result<SearchResult, ReadError> {
         self.reader
             .search(
-                self.read_api_key,
+                &self.read_api_key,
                 self.collection_id,
                 SearchRequest {
                     search_params,
@@ -638,7 +640,7 @@ impl TestCollectionClient<'_> {
         doc_ids: Vec<String>,
     ) -> Result<HashMap<String, Document>> {
         self.reader
-            .batch_get_documents(self.read_api_key, self.collection_id, doc_ids)
+            .batch_get_documents(&self.read_api_key, self.collection_id, doc_ids)
             .await
             .map_err(|e| e.into())
     }
@@ -691,7 +693,7 @@ impl TestCollectionClient<'_> {
     pub async fn get_shelf_documents(&self, shelf_id: String) -> Result<ShelfWithDocuments> {
         let collection = self
             .reader
-            .get_collection(self.collection_id, self.read_api_key)
+            .get_collection(self.collection_id, &self.read_api_key)
             .await?;
 
         let shelf_id_typed =
@@ -738,7 +740,7 @@ impl TestIndexClient<'_> {
         let stats = self
             .reader
             .collection_stats(
-                self.read_api_key,
+                &self.read_api_key,
                 self.collection_id,
                 CollectionStatsRequest { with_keys: false },
             )
@@ -763,12 +765,12 @@ impl TestIndexClient<'_> {
 
         wait_for(self, |s| {
             let reader = s.reader;
-            let read_api_key = s.read_api_key;
+            let read_api_key = s.read_api_key.clone();
             let collection_id = s.collection_id;
             async move {
                 let stats = reader
                     .collection_stats(
-                        read_api_key,
+                        &read_api_key,
                         collection_id,
                         CollectionStatsRequest { with_keys: false },
                     )
@@ -799,7 +801,7 @@ impl TestIndexClient<'_> {
         let stats = self
             .reader
             .collection_stats(
-                self.read_api_key,
+                &self.read_api_key,
                 self.collection_id,
                 CollectionStatsRequest { with_keys: false },
             )
@@ -818,12 +820,12 @@ impl TestIndexClient<'_> {
 
         wait_for(self, |s| {
             let reader = s.reader;
-            let read_api_key = s.read_api_key;
+            let read_api_key = s.read_api_key.clone();
             let collection_id = s.collection_id;
             async move {
                 let stats = reader
                     .collection_stats(
-                        read_api_key,
+                        &read_api_key,
                         collection_id,
                         CollectionStatsRequest { with_keys: false },
                     )
@@ -858,12 +860,12 @@ impl TestIndexClient<'_> {
 
         wait_for(self, |s| {
             let reader = s.reader;
-            let read_api_key = s.read_api_key;
+            let read_api_key = s.read_api_key.clone();
             let collection_id = s.collection_id;
             async move {
                 let stats = reader
                     .collection_stats(
-                        read_api_key,
+                        &read_api_key,
                         collection_id,
                         CollectionStatsRequest { with_keys: false },
                     )
@@ -921,11 +923,11 @@ impl TestIndexClient<'_> {
 
         wait_for(self, |s| {
             let reader = s.reader;
-            let read_api_key = s.read_api_key;
+            let read_api_key = s.read_api_key.clone();
             let collection_id = s.collection_id;
             let r = &rule_id;
             async move {
-                let collection = reader.get_collection(collection_id, read_api_key).await?;
+                let collection = reader.get_collection(collection_id, &read_api_key).await?;
                 let reader = collection.get_pin_rules_reader("test").await;
                 let ids = reader.get_rule_ids();
 
@@ -955,11 +957,11 @@ impl TestIndexClient<'_> {
 
         wait_for(self, |s| {
             let reader = s.reader;
-            let read_api_key = s.read_api_key;
+            let read_api_key = s.read_api_key.clone();
             let collection_id = s.collection_id;
             let r = &rule_id;
             async move {
-                let collection = reader.get_collection(collection_id, read_api_key).await?;
+                let collection = reader.get_collection(collection_id, &read_api_key).await?;
                 let reader = collection.get_pin_rules_reader("test").await;
                 let ids = reader.get_rule_ids();
 

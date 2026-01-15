@@ -98,7 +98,7 @@ async fn get_merchandising_shelf(
     read_api_key: ReadApiKey,
 ) -> impl IntoResponse {
     let collection = read_side
-        .get_collection(collection_id, read_api_key)
+        .get_collection(collection_id, &read_api_key)
         .await?;
 
     let shelf_with_documents = collection.get_shelf_documents(shelf_id.clone()).await?;

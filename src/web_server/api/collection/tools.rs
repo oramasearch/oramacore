@@ -68,7 +68,7 @@ async fn get_tool_v1(
     let tool_id = query.tool_id;
 
     let tool_interface = read_side
-        .get_tools_interface(read_api_key, collection_id)
+        .get_tools_interface(&read_api_key, collection_id)
         .await?;
 
     let j = match tool_interface.get_tool(tool_id).await? {
@@ -85,7 +85,7 @@ async fn get_all_tools_v1(
     read_api_key: ReadApiKey,
 ) -> Result<impl IntoResponse, ToolError> {
     let tool_interface = read_side
-        .get_tools_interface(read_api_key, collection_id)
+        .get_tools_interface(&read_api_key, collection_id)
         .await?;
 
     let tools = tool_interface.get_all_tools_by_collection().await?;
@@ -100,7 +100,7 @@ async fn run_tools_v1(
     Json(params): Json<RunToolsParams>,
 ) -> Result<impl IntoResponse, ToolError> {
     let tool_interface = read_side
-        .get_tools_interface(read_api_key, collection_id)
+        .get_tools_interface(&read_api_key, collection_id)
         .await?;
 
     let tools_result = tool_interface

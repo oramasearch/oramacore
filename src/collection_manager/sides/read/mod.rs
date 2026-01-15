@@ -14,12 +14,12 @@ use axum::extract::State;
 use duration_string::DurationString;
 use futures::Stream;
 pub use index::*;
-use oramacore_lib::hook_storage::{HookReader, HookReaderError};
+use oramacore_lib::hook_storage::{HookReader, HookReaderError, HookType};
 
 pub use collection::CollectionStats;
 use duration_str::deserialize_duration;
 use notify::NotifierConfig;
-use orama_js_pool::OutputChannel;
+use orama_js_pool::{ExecOption, JSExecutor, OutputChannel};
 use oramacore_lib::shelves::ShelfId;
 use std::ops::Deref;
 use std::sync::Arc;
@@ -55,7 +55,7 @@ use crate::lock::{OramaAsyncLock, OramaAsyncMutex};
 use crate::metrics::operations::OPERATION_COUNT;
 use crate::metrics::Empty;
 use crate::python::PythonService;
-use crate::types::CollectionId;
+use crate::types::{CollectionId, SearchParams};
 use crate::types::{
     ApiKey, CollectionStatsRequest, CustomerClaims, Document, InteractionLLMConfig, ReadApiKey,
     SearchMode, SearchModeResult, SearchResult,
@@ -381,7 +381,7 @@ impl ReadSide {
 
     pub async fn collection_stats(
         &self,
-        read_api_key: ReadApiKey,
+        read_api_key: &ReadApiKey,
         collection_id: CollectionId,
         req: CollectionStatsRequest,
     ) -> Result<CollectionStats, ReadError> {
@@ -400,7 +400,7 @@ impl ReadSide {
     /// Missing document IDs are silently omitted from the result.
     pub async fn batch_get_documents(
         &self,
-        read_api_key: ReadApiKey,
+        read_api_key: &ReadApiKey,
         collection_id: CollectionId,
         doc_id_strs: Vec<String>,
     ) -> Result<HashMap<String, Document>, ReadError> {
@@ -416,7 +416,7 @@ impl ReadSide {
 
     pub async fn filterable_fields(
         &self,
-        read_api_key: ReadApiKey,
+        read_api_key: &ReadApiKey,
         collection_id: CollectionId,
         with_keys: bool,
     ) -> Result<Vec<FilterableFieldsStats>, ReadError> {
@@ -543,9 +543,9 @@ impl ReadSide {
 
     pub async fn search(
         &self,
-        read_api_key: ReadApiKey,
+        read_api_key: &ReadApiKey,
         collection_id: CollectionId,
-        request: SearchRequest,
+        mut request: SearchRequest,
     ) -> Result<SearchResult, ReadError> {
         let collection = self
             .collections
@@ -553,6 +553,36 @@ impl ReadSide {
             .await
             .ok_or_else(|| ReadError::NotFound(collection_id))?;
         collection.check_read_api_key(read_api_key, self.master_api_key)?;
+
+        let storage = collection.get_hook_storage();
+        let storage = storage.read("run_before_search").await;
+        let hook_content = storage.get_hook_content(HookType::BeforeSearch)?;
+        if let Some(hook_code) = hook_content {
+            let mut js_executor: JSExecutor<&SearchParams, Option<SearchParams>> = JSExecutor::try_new(
+                hook_code,
+                Some(vec![]),
+                Duration::from_millis(200),
+                true,
+                HookType::BeforeSearch.get_function_name().to_string(),
+            )
+            .await.unwrap();
+
+            let output: Option<SearchParams> = js_executor.exec(
+                &request.search_params,
+                None,
+                ExecOption {
+                    timeout: Duration::from_millis(1000),
+                    allowed_hosts: Some(Vec::new()),
+                }
+            ).await.unwrap();
+
+            drop(js_executor);
+
+            if let Some(modified_params) = output {
+                info!("Search params modified by hook");
+                request.search_params = modified_params;
+            }
+        }
 
         let search = Search::new(
             &collection,
@@ -577,11 +607,11 @@ impl ReadSide {
             .get_collection(collection_id)
             .await
             .ok_or_else(|| ReadError::NotFound(collection_id))?;
-        collection.check_read_api_key(read_api_key, self.master_api_key)?;
+        collection.check_read_api_key(&read_api_key, self.master_api_key)?;
 
         let collection_stats = self
             .collection_stats(
-                read_api_key,
+                &read_api_key,
                 collection_id,
                 CollectionStatsRequest { with_keys: true },
             )
@@ -614,11 +644,11 @@ impl ReadSide {
             .get_collection(collection_id)
             .await
             .ok_or_else(|| ReadError::NotFound(collection_id))?;
-        collection.check_read_api_key(read_api_key, self.master_api_key)?;
+        collection.check_read_api_key(&read_api_key, self.master_api_key)?;
 
         let collection_stats = self
             .collection_stats(
-                read_api_key,
+                &read_api_key,
                 collection_id,
                 CollectionStatsRequest { with_keys: true },
             )
@@ -639,7 +669,7 @@ impl ReadSide {
     pub async fn get_collection(
         &self,
         collection_id: CollectionId,
-        read_api_key: ReadApiKey,
+        read_api_key: &ReadApiKey,
     ) -> Result<CollectionReadLock, ReadError> {
         let collection = self.collections.get_collection(collection_id).await;
         let collection = match collection {
@@ -659,7 +689,7 @@ impl ReadSide {
 
     pub async fn get_system_prompt(
         &self,
-        read_api_key: ReadApiKey,
+        read_api_key: &ReadApiKey,
         collection_id: CollectionId,
         system_prompt_id: String,
     ) -> Result<Option<SystemPrompt>> {
@@ -672,7 +702,7 @@ impl ReadSide {
 
     pub async fn has_system_prompts(
         &self,
-        read_api_key: ReadApiKey,
+        read_api_key: &ReadApiKey,
         collection_id: CollectionId,
     ) -> Result<bool> {
         self.check_read_api_key(collection_id, read_api_key).await?;
@@ -682,7 +712,7 @@ impl ReadSide {
 
     pub async fn perform_system_prompt_selection(
         &self,
-        read_api_key: ReadApiKey,
+        read_api_key: &ReadApiKey,
         collection_id: CollectionId,
     ) -> Result<Option<SystemPrompt>> {
         self.check_read_api_key(collection_id, read_api_key).await?;
@@ -694,7 +724,7 @@ impl ReadSide {
 
     pub async fn get_all_system_prompts_by_collection(
         &self,
-        read_api_key: ReadApiKey,
+        read_api_key: &ReadApiKey,
         collection_id: CollectionId,
     ) -> Result<Vec<SystemPrompt>> {
         self.check_read_api_key(collection_id, read_api_key).await?;
@@ -725,7 +755,7 @@ impl ReadSide {
     pub async fn check_read_api_key(
         &self,
         collection_id: CollectionId,
-        read_api_key: ReadApiKey,
+        read_api_key: &ReadApiKey,
     ) -> Result<(), ReadError> {
         let collection = self
             .collections
@@ -770,7 +800,7 @@ impl ReadSide {
 
     pub async fn get_tools_interface(
         &self,
-        read_api_key: ReadApiKey,
+        read_api_key: &ReadApiKey,
         collection_id: CollectionId,
     ) -> Result<CollectionToolsRuntime, ToolError> {
         self.check_read_api_key(collection_id, read_api_key).await?;
@@ -783,7 +813,7 @@ impl ReadSide {
 
     pub async fn get_hook_storage<'s>(
         &'s self,
-        read_api_key: ReadApiKey,
+        read_api_key: &ReadApiKey,
         collection_id: CollectionId,
     ) -> Result<HookReaderLock<'s>, ReadError> {
         let collection = self
@@ -815,7 +845,7 @@ impl ReadSide {
             .get_collection(collection_id)
             .await
             .ok_or_else(|| ReadError::NotFound(collection_id))?;
-        collection.check_read_api_key(read_api_key, self.master_api_key)?;
+        collection.check_read_api_key(&read_api_key, self.master_api_key)?;
 
         let known_prompt: KnownPrompts = system_prompt_id
             .as_str()
@@ -838,7 +868,7 @@ impl ReadSide {
             .get_collection(collection_id)
             .await
             .ok_or_else(|| ReadError::NotFound(collection_id))?;
-        collection.check_read_api_key(read_api_key, self.master_api_key)?;
+        collection.check_read_api_key(&read_api_key, self.master_api_key)?;
 
         match self
             .training_sets
@@ -863,7 +893,7 @@ impl ReadSide {
             None => return Some(Err(ReadError::NotFound(collection_id))),
         };
 
-        if let Err(e) = collection.check_read_api_key(read_api_key, self.master_api_key) {
+        if let Err(e) = collection.check_read_api_key(&read_api_key, self.master_api_key) {
             return Some(Err(e));
         }
 

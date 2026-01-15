@@ -1068,6 +1068,7 @@ impl AdvancedAutoqueryStateMachine {
     ) -> Result<(), AdvancedAutoqueryError> {
         let processed_queries = self
             .transition_with_retry("execute_before_retrieval_hook", || {
+                let read_api_key = read_api_key.clone();
                 self.execute_before_retrieval_hook(
                     tracked_queries.clone(),
                     collection_id,
@@ -1118,6 +1119,7 @@ impl AdvancedAutoqueryStateMachine {
     ) -> Result<(), AdvancedAutoqueryError> {
         let results = self
             .transition_with_retry("execute_searches", || {
+                let read_api_key = read_api_key.clone();
                 self.execute_concurrent_searches(
                     processed_queries.clone(),
                     collection_id,
@@ -1311,6 +1313,7 @@ impl AdvancedAutoqueryStateMachine {
         for (i, query) in tracked_queries.into_iter().enumerate() {
             let tx = tx.clone();
             let read_side = self.read_side.clone();
+            let read_api_key = read_api_key.clone();
 
             let handle = tokio::spawn(async move {
                 let result = Self::execute_single_hook_with_retry(
@@ -1366,6 +1369,7 @@ impl AdvancedAutoqueryStateMachine {
             let tx = tx.clone();
             let config = self.config.clone();
             let read_side = self.read_side.clone();
+            let read_api_key = read_api_key.clone();
 
             let handle = tokio::spawn(async move {
                 let result = Self::execute_single_search_with_retry(
@@ -1426,7 +1430,7 @@ impl AdvancedAutoqueryStateMachine {
             match Self::execute_single_search(
                 query.clone(),
                 collection_id,
-                read_api_key,
+                read_api_key.clone(),
                 read_side.clone(),
             )
             .await
@@ -1473,7 +1477,7 @@ impl AdvancedAutoqueryStateMachine {
 
         let search_result = read_side
             .search(
-                read_api_key,
+                &read_api_key,
                 collection_id,
                 SearchRequest {
                     search_params,
@@ -1511,7 +1515,7 @@ impl AdvancedAutoqueryStateMachine {
             match Self::execute_single_hook(
                 query.clone(),
                 collection_id,
-                read_api_key,
+                read_api_key.clone(),
                 read_side.clone(),
             )
             .await
@@ -1556,7 +1560,7 @@ impl AdvancedAutoqueryStateMachine {
     ) -> Result<ProcessedTrackedQuery, AdvancedAutoqueryError> {
         let search_params = tracked_query.search_params.clone();
         let hook_storage = read_side
-            .get_hook_storage(read_api_key, collection_id)
+            .get_hook_storage(&read_api_key, collection_id)
             .await
             .map_err(|e| AdvancedAutoqueryError::ExecuteBeforeRetrievalHookError(e.to_string()))?;
 

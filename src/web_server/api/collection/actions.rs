@@ -37,7 +37,7 @@ async fn execute_action_v0(
             let search_params: SearchParams = serde_json::from_str(&context).unwrap(); // @todo: handle error
             read_side
                 .search(
-                    read_api_key,
+                    &read_api_key,
                     collection_id,
                     SearchRequest {
                         search_params,

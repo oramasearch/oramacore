@@ -72,7 +72,7 @@ async fn test_write_api_key_to_search() {
     let output = collection_client
         .reader
         .search(
-            ReadApiKey::from_api_key(write_api_key),
+            &ReadApiKey::from_api_key(write_api_key),
             collection_client.collection_id,
             SearchRequest {
                 search_params: json!({
@@ -124,7 +124,7 @@ async fn test_master_api_key_to_search() {
     let output = collection_client
         .reader
         .search(
-            ReadApiKey::from_api_key(test_context.master_api_key),
+            &ReadApiKey::from_api_key(test_context.master_api_key),
             collection_client.collection_id,
             SearchRequest {
                 search_params: json!({

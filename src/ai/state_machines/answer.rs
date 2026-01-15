@@ -606,7 +606,7 @@ impl AnswerStateMachine {
                             interaction.clone(),
                             llm_config.clone(),
                             collection_id,
-                            read_api_key,
+                            read_api_key.clone(),
                             optimized_query,
                         )
                         .await?;
@@ -898,7 +898,7 @@ impl AnswerStateMachine {
             let collection_stats = self
                 .read_side
                 .collection_stats(
-                    self.read_api_key,
+                    &self.read_api_key,
                     self.collection_id,
                     crate::types::CollectionStatsRequest { with_keys: false },
                 )
@@ -913,7 +913,7 @@ impl AnswerStateMachine {
                 collection_stats,
                 self.read_side.clone(),
                 self.collection_id,
-                self.read_api_key,
+                self.read_api_key.clone(),
             );
 
             // Run the advanced autoquery with streaming and capture events
@@ -925,7 +925,7 @@ impl AnswerStateMachine {
                 });
             }
             let advanced_event_stream = advanced_state_machine
-                .run_stream(messages, self.collection_id, self.read_api_key)
+                .run_stream(messages, self.collection_id, self.read_api_key.clone())
                 .await
                 .map_err(|e| AnswerError::AdvancedAutoqueryError(e.to_string()))?;
 
@@ -978,7 +978,7 @@ impl AnswerStateMachine {
                 interaction,
                 llm_config,
                 collection_id: self.collection_id,
-                read_api_key: self.read_api_key,
+                read_api_key: self.read_api_key.clone(),
             };
         } else {
             // Simple RAG flow - go directly to system prompt handling
@@ -995,7 +995,7 @@ impl AnswerStateMachine {
                 llm_config: llm_config.clone(),
                 system_prompt: None,
                 collection_id: self.collection_id,
-                read_api_key: self.read_api_key,
+                read_api_key: self.read_api_key.clone(),
                 optimized_query: interaction.query.clone(),
             };
         }
@@ -1095,6 +1095,7 @@ impl AnswerStateMachine {
     ) -> Result<(Vec<(String, String)>, Option<SystemPrompt>), AnswerError> {
         let (variables, processed_system_prompt) = self
             .transition_with_retry("execute_before_answer_hook", || {
+                let read_api_key = read_api_key.clone();
                 self.execute_before_answer_hook(
                     interaction.clone(),
                     system_prompt.clone(),
@@ -1147,6 +1148,7 @@ impl AnswerStateMachine {
     ) -> Result<String, AnswerError> {
         let answer = self
             .transition_with_retry("generate_answer", || {
+                let read_api_key = read_api_key.clone();
                 self.generate_answer(
                     interaction.clone(),
                     llm_config.clone(),
@@ -1260,7 +1262,7 @@ impl AnswerStateMachine {
             Some(id) => {
                 let full_prompt = self
                     .read_side
-                    .get_system_prompt(self.read_api_key, self.collection_id, id)
+                    .get_system_prompt(&self.read_api_key, self.collection_id, id)
                     .await
                     .map_err(|e| AnswerError::SystemPromptError(e.to_string()))?;
                 Ok(full_prompt)
@@ -1268,14 +1270,14 @@ impl AnswerStateMachine {
             None => {
                 let has_system_prompts = self
                     .read_side
-                    .has_system_prompts(self.read_api_key, self.collection_id)
+                    .has_system_prompts(&self.read_api_key, self.collection_id)
                     .await
                     .map_err(|e| AnswerError::SystemPromptError(e.to_string()))?;
 
                 if has_system_prompts {
                     let chosen_system_prompt = self
                         .read_side
-                        .perform_system_prompt_selection(self.read_api_key, self.collection_id)
+                        .perform_system_prompt_selection(&self.read_api_key, self.collection_id)
                         .await
                         .map_err(|e| AnswerError::SystemPromptError(e.to_string()))?;
                     Ok(chosen_system_prompt)
@@ -1414,7 +1416,7 @@ impl AnswerStateMachine {
 
             let hook_storage = self
                 .read_side
-                .get_hook_storage(read_api_key, collection_id)
+                .get_hook_storage(&read_api_key, collection_id)
                 .await
                 .map_err(|e| AnswerError::HookError(e.to_string()))?;
             let lock = hook_storage.read("run_before_retrieval").await;
@@ -1434,7 +1436,7 @@ impl AnswerStateMachine {
             let result = self
                 .read_side
                 .search(
-                    read_api_key,
+                    &read_api_key,
                     collection_id,
                     SearchRequest {
                         search_params: params,
@@ -1469,7 +1471,7 @@ impl AnswerStateMachine {
 
         let hook_storage = self
             .read_side
-            .get_hook_storage(read_api_key, collection_id)
+            .get_hook_storage(&read_api_key, collection_id)
             .await
             .map_err(|e| AnswerError::HookError(e.to_string()))?;
         let lock = hook_storage.read("run_before_answer").await;
@@ -1610,7 +1612,7 @@ impl AnswerStateMachine {
         let search_results = self
             .read_side
             .search(
-                self.read_api_key,
+                &self.read_api_key,
                 self.collection_id,
                 SearchRequest {
                     search_params: SearchParams {

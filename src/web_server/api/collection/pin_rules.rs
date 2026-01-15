@@ -96,7 +96,7 @@ async fn list_merchandising_pin_rules_ids_v1(
     read_api_key: ReadApiKey,
 ) -> Result<impl IntoResponse, impl IntoResponse> {
     let collection = read_side
-        .get_collection(collection_id, read_api_key)
+        .get_collection(collection_id, &read_api_key)
         .await?;
 
     let rules = collection.get_pin_rules_reader("list").await;

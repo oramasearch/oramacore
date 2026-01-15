@@ -301,7 +301,7 @@ async fn test_mcp_update_endpoint() {
     let stats = collection_client
         .reader
         .collection_stats(
-            collection_client.read_api_key,
+            &collection_client.read_api_key,
             collection_client.collection_id,
             crate::types::CollectionStatsRequest { with_keys: false },
         )
@@ -336,7 +336,7 @@ async fn test_mcp_update_endpoint() {
     let stats = collection_client
         .reader
         .collection_stats(
-            collection_client.read_api_key,
+            &collection_client.read_api_key,
             collection_client.collection_id,
             crate::types::CollectionStatsRequest { with_keys: false },
         )

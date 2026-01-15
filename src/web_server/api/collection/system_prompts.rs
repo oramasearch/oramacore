@@ -74,7 +74,7 @@ async fn get_system_prompt_v1(
     let system_prompt_id = query.system_prompt_id;
 
     match read_side
-        .get_system_prompt(read_api_key, collection_id, system_prompt_id)
+        .get_system_prompt(&read_api_key, collection_id, system_prompt_id)
         .await
     {
         Ok(Some(system_prompt)) => Ok((
@@ -98,7 +98,7 @@ async fn list_system_prompts_v1(
     read_api_key: ReadApiKey,
 ) -> impl IntoResponse {
     match read_side
-        .get_all_system_prompts_by_collection(read_api_key, collection_id)
+        .get_all_system_prompts_by_collection(&read_api_key, collection_id)
         .await
     {
         Ok(system_prompts) => Ok((

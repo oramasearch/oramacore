@@ -634,21 +634,21 @@ impl CollectionReader {
     #[allow(clippy::result_large_err)]
     pub fn check_read_api_key(
         &self,
-        api_key: ReadApiKey,
+        api_key: &ReadApiKey,
         master_api_key: Option<ApiKey>,
     ) -> Result<(), ReadError> {
         match api_key {
             ReadApiKey::ApiKey(api_key) => {
-                if api_key == self.read_api_key {
+                if *api_key == self.read_api_key {
                     return Ok(());
                 }
                 if let Some(write_api_key) = self.write_api_key {
-                    if write_api_key == api_key {
+                    if write_api_key == *api_key {
                         return Ok(());
                     }
                 }
                 if let Some(master_api_key) = master_api_key {
-                    if master_api_key == api_key {
+                    if master_api_key == *api_key {
                         return Ok(());
                     }
                 }
