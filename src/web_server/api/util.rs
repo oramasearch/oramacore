@@ -25,12 +25,10 @@ use crate::{
         answer::{AnswerError, SuggestionsError},
         tools::ToolError,
     },
+    auth::{JwtError, JwtManager},
     collection_manager::sides::{
         read::{AnalyticsMetadataFromRequest, OramaCoreAnalytics, ReadError, ReadSide},
-        write::{
-            jwt_manager::{JwtError, JwtManager},
-            WriteError, WriteSide,
-        },
+        write::{WriteError, WriteSide},
     },
     types::{
         ApiKey, CollectionId, DashboardClaims, IndexId, ReadApiKey, TrainingSetId, WriteApiKey,

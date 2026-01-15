@@ -9,7 +9,6 @@ use oramacore_lib::nlp::NLPService;
 use oramacore_lib::shelves::ShelvesWriterError;
 use thiserror::Error;
 mod context;
-pub mod jwt_manager;
 
 use std::borrow::Cow;
 use std::collections::HashSet;
@@ -60,10 +59,10 @@ use crate::{
         tools::{CollectionToolsRuntime, ToolsRuntime},
         training_sets::TrainingSetInterface,
     },
+    auth::{JwtConfig, JwtManager},
     collection_manager::sides::{
-        system_prompts::CollectionSystemPromptsInterface,
-        write::jwt_manager::{JwtConfig, JwtManager},
-        DocumentToInsert, ReplaceIndexReason, WriteOperation,
+        system_prompts::CollectionSystemPromptsInterface, DocumentToInsert, ReplaceIndexReason,
+        WriteOperation,
     },
     metrics::document_insertion::DOCUMENTS_INSERTION_TIME,
     types::{

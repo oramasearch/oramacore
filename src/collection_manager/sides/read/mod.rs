@@ -50,7 +50,7 @@ pub use crate::collection_manager::sides::read::context::ReadSideContext;
 use crate::collection_manager::sides::read::logs::HookLogs;
 use crate::collection_manager::sides::read::notify::Notifier;
 use crate::collection_manager::sides::read::search::Search;
-use crate::collection_manager::sides::write::jwt_manager::{JwtConfig, JwtManager};
+use crate::auth::{JwtConfig, JwtManager};
 use crate::lock::{OramaAsyncLock, OramaAsyncMutex};
 use crate::metrics::operations::OPERATION_COUNT;
 use crate::metrics::Empty;
