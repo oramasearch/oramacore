@@ -26,7 +26,8 @@ use oramacore::{
     },
     types::{
         ApiKey, CollectionId, CollectionStatsRequest, CreateCollection, CreateIndexRequest,
-        DocumentList, IndexId, InsertDocumentsResult, ReadApiKey, SearchParams, SearchResult, WriteApiKey,
+        DocumentList, IndexId, InsertDocumentsResult, ReadApiKey, SearchParams, SearchResult,
+        WriteApiKey,
     },
     web_server::HttpConfig,
     OramacoreConfig,

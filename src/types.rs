@@ -598,11 +598,16 @@ impl WriteApiKey {
     }
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone, Copy)]
+pub struct CustomerClaims {
+    pub orak: ApiKey,
+}
+
 #[derive(Debug, Clone, Copy)]
 #[allow(clippy::large_enum_variant)]
 pub enum ReadApiKey {
     ApiKey(ApiKey),
-    Claims(DashboardClaims),
+    Claims(CustomerClaims),
 }
 
 impl ReadApiKey {
@@ -610,7 +615,7 @@ impl ReadApiKey {
         Self::ApiKey(api_key)
     }
 
-    pub fn from_claims(claims: DashboardClaims) -> Self {
+    pub fn from_claims(claims: CustomerClaims) -> Self {
         Self::Claims(claims)
     }
 }

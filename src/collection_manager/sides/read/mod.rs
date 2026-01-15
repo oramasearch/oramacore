@@ -45,21 +45,21 @@ use crate::ai::llms::{self, KnownPrompts, LLMService};
 use crate::ai::tools::{CollectionToolsRuntime, ToolError, ToolsRuntime};
 use crate::ai::training_sets::{TrainingDestination, TrainingSetInterface};
 use crate::ai::RemoteLLMProvider;
+use crate::auth::{JwtConfig, JwtManager};
 use crate::collection_manager::sides::read::collection::FilterableFieldsStats;
 pub use crate::collection_manager::sides::read::context::ReadSideContext;
 use crate::collection_manager::sides::read::logs::HookLogs;
 use crate::collection_manager::sides::read::notify::Notifier;
 use crate::collection_manager::sides::read::search::Search;
-use crate::auth::{JwtConfig, JwtManager};
 use crate::lock::{OramaAsyncLock, OramaAsyncMutex};
 use crate::metrics::operations::OPERATION_COUNT;
 use crate::metrics::Empty;
 use crate::python::PythonService;
+use crate::types::CollectionId;
 use crate::types::{
-    ApiKey, CollectionStatsRequest, Document, InteractionLLMConfig, ReadApiKey, SearchMode,
-    SearchModeResult, SearchResult,
+    ApiKey, CollectionStatsRequest, CustomerClaims, Document, InteractionLLMConfig, ReadApiKey,
+    SearchMode, SearchModeResult, SearchResult,
 };
-use crate::types::{CollectionId, DashboardClaims};
 use crate::types::{IndexId, NLPSearchRequest};
 use oramacore_lib::fs::BufferedFile;
 use oramacore_lib::generic_kv::{KVConfig, KV};
@@ -180,7 +180,7 @@ pub struct ReadSide {
     #[allow(dead_code)]
     python_service: Arc<PythonService>,
 
-    jwt_manager: JwtManager<DashboardClaims>,
+    jwt_manager: JwtManager<CustomerClaims>,
 }
 
 impl ReadSide {
@@ -258,7 +258,7 @@ impl ReadSide {
             None
         };
 
-        let jwt_manager = JwtManager::<DashboardClaims>::new(config.jwt)
+        let jwt_manager = JwtManager::<CustomerClaims>::new(config.jwt)
             .await
             .context("Cannot create JWT manager")?;
 
@@ -882,7 +882,7 @@ impl ReadSide {
         }
     }
 
-    pub fn get_jwt_manager(&self) -> JwtManager<DashboardClaims> {
+    pub fn get_jwt_manager(&self) -> JwtManager<CustomerClaims> {
         self.jwt_manager.clone()
     }
 }

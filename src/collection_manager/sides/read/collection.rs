@@ -654,8 +654,8 @@ impl CollectionReader {
                 }
             }
             ReadApiKey::Claims(claims) => {
-                // For JWT claims, verify the subject matches this collection's ID
-                if claims.sub == self.id {
+                // For JWT claims, verify the orak matches this collection's read API key
+                if claims.orak == self.read_api_key {
                     return Ok(());
                 }
             }

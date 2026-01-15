@@ -31,7 +31,8 @@ use crate::{
         write::{WriteError, WriteSide},
     },
     types::{
-        ApiKey, CollectionId, DashboardClaims, IndexId, ReadApiKey, TrainingSetId, WriteApiKey,
+        ApiKey, CollectionId, CustomerClaims, DashboardClaims, IndexId, ReadApiKey, TrainingSetId,
+        WriteApiKey,
     },
 };
 
@@ -222,7 +223,7 @@ where
 
 impl<S> FromRequestParts<S> for ReadApiKey
 where
-    JwtManager<DashboardClaims>: FromRef<S>,
+    JwtManager<CustomerClaims>: FromRef<S>,
     S: Send + Sync,
 {
     type Rejection = (StatusCode, Json<serde_json::Value>);
@@ -232,7 +233,7 @@ where
             .await
             .ok();
 
-        let jwt_manager = JwtManager::<DashboardClaims>::from_ref(state);
+        let jwt_manager = JwtManager::<CustomerClaims>::from_ref(state);
 
         if let Some(Query(ReaderAPIKeyParams { api_key })) = query_api_key {
             return get_read_api_key(&jwt_manager, &api_key).await;
@@ -251,7 +252,7 @@ where
 }
 
 async fn get_read_api_key(
-    jwt_manager: &JwtManager<DashboardClaims>,
+    jwt_manager: &JwtManager<CustomerClaims>,
     token: &str,
 ) -> Result<ReadApiKey, (StatusCode, Json<serde_json::Value>)> {
     let api_key = if is_jwt_token(token) {
@@ -785,8 +786,8 @@ impl FromRef<Arc<WriteSide>> for JwtManager<DashboardClaims> {
     }
 }
 
-impl FromRef<Arc<ReadSide>> for JwtManager<DashboardClaims> {
-    fn from_ref(app_state: &Arc<ReadSide>) -> JwtManager<DashboardClaims> {
+impl FromRef<Arc<ReadSide>> for JwtManager<CustomerClaims> {
+    fn from_ref(app_state: &Arc<ReadSide>) -> JwtManager<CustomerClaims> {
         app_state.get_jwt_manager()
     }
 }
