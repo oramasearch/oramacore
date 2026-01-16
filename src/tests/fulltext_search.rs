@@ -109,7 +109,7 @@ async fn test_fulltext_search_should_work_after_commit() {
 
     let collection_id = collection_client.collection_id;
     let write_api_key = collection_client.write_api_key;
-    let read_api_key = collection_client.read_api_key;
+    let read_api_key = collection_client.read_api_key.clone();
     let index_id = index_client.index_id;
 
     let test_context = test_context.reload().await;
@@ -927,7 +927,7 @@ async fn test_fulltext_empty_term() {
 
     let collection_id = collection_client.collection_id;
     let write_api_key = collection_client.write_api_key;
-    let read_api_key = collection_client.read_api_key;
+    let read_api_key = collection_client.read_api_key.clone();
 
     let test_context = test_context.reload().await;
 

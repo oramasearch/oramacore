@@ -833,7 +833,7 @@ async fn test_pin_rule_commit() {
 
     let collection_id = collection_client.collection_id;
     let write_api_key = collection_client.write_api_key;
-    let read_api_key = collection_client.read_api_key;
+    let read_api_key = collection_client.read_api_key.clone();
 
     // Now reload the system to verify pin rules are loaded from disk
     let test_context = test_context.reload().await;
@@ -845,10 +845,10 @@ async fn test_pin_rule_commit() {
     // Wait for the reader to fully load the collection and pin rules
     wait_for(&collection_client, |c| {
         let reader = c.reader;
-        let read_api_key = c.read_api_key;
+        let read_api_key = c.read_api_key.clone();
         let collection_id = c.collection_id;
         async move {
-            let collection = reader.get_collection(collection_id, read_api_key).await?;
+            let collection = reader.get_collection(collection_id, &read_api_key).await?;
             let pin_rules_reader = collection.get_pin_rules_reader("reload-test").await;
             let rule_ids = pin_rules_reader.get_rule_ids();
 
@@ -1063,7 +1063,7 @@ async fn test_pin_rule_updated_when_document_id_changes() {
             .reader
             .get_collection(
                 collection_client.collection_id,
-                collection_client.read_api_key,
+                &collection_client.read_api_key,
             )
             .await
             .unwrap();
@@ -1093,11 +1093,11 @@ async fn test_pin_rule_updated_when_document_id_changes() {
     // Wait for the pin rule to be updated in the reader
     wait_for(&collection_client, |c| {
         let reader = c.reader;
-        let read_api_key = c.read_api_key;
+        let read_api_key = c.read_api_key.clone();
         let collection_id = c.collection_id;
         let expected_doc_ids = doc_ids_before.clone();
         async move {
-            let collection = reader.get_collection(collection_id, read_api_key).await?;
+            let collection = reader.get_collection(collection_id, &read_api_key).await?;
             let pin_rules_reader = collection.get_pin_rules_reader("test").await;
             let rule = pin_rules_reader.get_by_id(TEST_UPDATE_RULE_ID).unwrap();
 

@@ -40,7 +40,7 @@ async fn test_answer() {
 
     let collection_client = test_context.create_collection().await.unwrap();
     let collection_id = collection_client.collection_id;
-    let read_api_key = collection_client.read_api_key;
+    let read_api_key = collection_client.read_api_key.clone();
     let index_client = collection_client.create_index().await.unwrap();
 
     let docs = r#" [
@@ -174,7 +174,7 @@ async fn test_answer_before_retrieval() {
 
     let collection_client = test_context.create_collection().await.unwrap();
     let collection_id = collection_client.collection_id;
-    let read_api_key = collection_client.read_api_key;
+    let read_api_key = collection_client.read_api_key.clone();
     let index_client = collection_client.create_index().await.unwrap();
 
     // Insert hook
@@ -353,7 +353,7 @@ async fn test_answer_before_answer() {
 
     let collection_client = test_context.create_collection().await.unwrap();
     let collection_id = collection_client.collection_id;
-    let read_api_key = collection_client.read_api_key;
+    let read_api_key = collection_client.read_api_key.clone();
     let index_client = collection_client.create_index().await.unwrap();
 
     // Insert hook

@@ -65,7 +65,7 @@ async fn test_empty_index_reload() {
 
     let collection_id = collection_client.collection_id;
     let write_api_key = collection_client.write_api_key;
-    let read_api_key = collection_client.read_api_key;
+    let read_api_key = collection_client.read_api_key.clone();
 
     let test_context = test_context.reload().await;
     let collection_client = test_context
@@ -97,7 +97,7 @@ async fn test_empty_collection_reload() {
 
     let collection_id = collection_client.collection_id;
     let write_api_key = collection_client.write_api_key;
-    let read_api_key = collection_client.read_api_key;
+    let read_api_key = collection_client.read_api_key.clone();
 
     let test_context = test_context.reload().await;
     let collection_client = test_context
@@ -139,7 +139,7 @@ async fn test_collection_continue_commit() {
 
     let collection_id = collection_client.collection_id;
     let write_api_key = collection_client.write_api_key;
-    let read_api_key = collection_client.read_api_key;
+    let read_api_key = collection_client.read_api_key.clone();
 
     let test_context = test_context.reload().await;
     let collection_client = test_context

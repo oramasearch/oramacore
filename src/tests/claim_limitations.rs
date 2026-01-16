@@ -3,7 +3,7 @@ use crate::collection_manager::sides::ReplaceIndexReason;
 use crate::tests::utils::init_log;
 use crate::tests::utils::TestContext;
 use crate::types::ReplaceIndexRequest;
-use crate::types::{ClaimLimits, Claims, StackString, WriteApiKey};
+use crate::types::{ClaimLimits, DashboardClaims, StackString, WriteApiKey};
 use serde_json::json;
 use std::convert::TryInto;
 
@@ -21,7 +21,7 @@ async fn test_temp_index_doc_limitation() {
     let test_context = TestContext::new().await;
     let collection_client = test_context.create_collection().await.unwrap();
 
-    let api_key = WriteApiKey::Claims(Claims {
+    let api_key = WriteApiKey::Claims(DashboardClaims {
         sub: collection_client.collection_id,
         aud: StackString::try_new("aa").unwrap(),
         iss: StackString::try_new("aa").unwrap(),
@@ -113,7 +113,7 @@ async fn test_temp_index_excludes_linked_runtime_index() {
     let test_context = TestContext::new().await;
     let collection_client = test_context.create_collection().await.unwrap();
 
-    let api_key = WriteApiKey::Claims(Claims {
+    let api_key = WriteApiKey::Claims(DashboardClaims {
         sub: collection_client.collection_id,
         aud: StackString::try_new("aa").unwrap(),
         iss: StackString::try_new("aa").unwrap(),
@@ -229,7 +229,7 @@ async fn test_doc_limitation_zero() {
     let res = index_client
         .writer
         .insert_documents(
-            WriteApiKey::Claims(Claims {
+            WriteApiKey::Claims(DashboardClaims {
                 sub: collection_client.collection_id,
                 aud: StackString::try_new("aa").unwrap(),
                 iss: StackString::try_new("aa").unwrap(),
@@ -255,7 +255,7 @@ async fn test_doc_limitation_some() {
     let collection_client = test_context.create_collection().await.unwrap();
     let index_client = collection_client.create_index().await.unwrap();
 
-    let api_key = WriteApiKey::Claims(Claims {
+    let api_key = WriteApiKey::Claims(DashboardClaims {
         sub: collection_client.collection_id,
         aud: StackString::try_new("aa").unwrap(),
         iss: StackString::try_new("aa").unwrap(),
@@ -306,7 +306,7 @@ async fn test_replace_doc_limitation() {
     let test_context = TestContext::new().await;
     let collection_client = test_context.create_collection().await.unwrap();
 
-    let api_key = WriteApiKey::Claims(Claims {
+    let api_key = WriteApiKey::Claims(DashboardClaims {
         sub: collection_client.collection_id,
         aud: StackString::try_new("aa").unwrap(),
         iss: StackString::try_new("aa").unwrap(),

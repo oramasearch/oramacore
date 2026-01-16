@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use axum::{
-    extract::{FromRef, Path, State},
+    extract::{Path, State},
     response::IntoResponse,
     routing::{get, post},
     Json, Router,
@@ -10,22 +10,13 @@ use serde_json::json;
 use tracing::info;
 
 use crate::{
-    collection_manager::sides::{
-        write::{jwt_manager::JwtManager, WriteSide},
-        ReplaceIndexReason,
-    },
+    collection_manager::sides::{write::WriteSide, ReplaceIndexReason},
     types::{
         ApiKey, CollectionId, CreateCollection, CreateIndexRequest, DeleteCollection,
         DeleteDocuments, DeleteIndex, DocumentList, IndexId, ListDocumentInCollectionRequest,
         ReindexConfig, ReplaceIndexRequest, UpdateDocumentRequest, WriteApiKey,
     },
 };
-
-impl FromRef<Arc<WriteSide>> for JwtManager {
-    fn from_ref(app_state: &Arc<WriteSide>) -> JwtManager {
-        app_state.get_jwt_manager()
-    }
-}
 
 pub fn apis(write_side: Arc<WriteSide>) -> Router {
     Router::new()

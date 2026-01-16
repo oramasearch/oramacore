@@ -16,7 +16,7 @@ use tracing::{error, info, warn};
 
 use crate::ai::llms::{KnownPrompts, LLMService};
 use crate::types::{
-    ApiKey, CollectionId, IndexId, InteractionLLMConfig, InteractionMessage, SearchParams,
+    CollectionId, IndexId, InteractionLLMConfig, InteractionMessage, ReadApiKey, SearchParams,
     SearchResult,
 };
 
@@ -152,64 +152,64 @@ pub enum AdvancedAutoqueryFlow {
     Initialize {
         conversation: Vec<InteractionMessage>,
         collection_id: CollectionId,
-        read_api_key: ApiKey,
+        read_api_key: ReadApiKey,
     },
     AnalyzeInput {
         conversation_json: String,
         collection_id: CollectionId,
-        read_api_key: ApiKey,
+        read_api_key: ReadApiKey,
     },
     QueryOptimized {
         optimized_queries: Vec<String>,
         collection_id: CollectionId,
-        read_api_key: ApiKey,
+        read_api_key: ReadApiKey,
     },
     SelectProperties {
         queries: Vec<String>,
         collection_id: CollectionId,
-        read_api_key: ApiKey,
+        read_api_key: ReadApiKey,
     },
     PropertiesSelected {
         queries: Vec<String>,
         selected_properties: Vec<HashMap<String, CollectionSelectedProperties>>,
         collection_id: CollectionId,
-        read_api_key: ApiKey,
+        read_api_key: ReadApiKey,
     },
     CombineQueriesAndProperties {
         queries: Vec<String>,
         properties: Vec<HashMap<String, CollectionSelectedProperties>>,
         collection_id: CollectionId,
-        read_api_key: ApiKey,
+        read_api_key: ReadApiKey,
     },
     QueriesCombined {
         queries_and_properties: Vec<QueryAndProperties>,
         collection_id: CollectionId,
-        read_api_key: ApiKey,
+        read_api_key: ReadApiKey,
     },
     GenerateTrackedQueries {
         queries_and_properties: Vec<QueryAndProperties>,
         collection_id: CollectionId,
-        read_api_key: ApiKey,
+        read_api_key: ReadApiKey,
     },
     TrackedQueriesGenerated {
         tracked_queries: Vec<TrackedQuery>,
         collection_id: CollectionId,
-        read_api_key: ApiKey,
+        read_api_key: ReadApiKey,
     },
     ExecuteBeforeRetrievalHook {
         tracked_queries: Vec<TrackedQuery>,
         collection_id: CollectionId,
-        read_api_key: ApiKey,
+        read_api_key: ReadApiKey,
     },
     HooksExecuted {
         processed_queries: Vec<ProcessedTrackedQuery>,
         collection_id: CollectionId,
-        read_api_key: ApiKey,
+        read_api_key: ReadApiKey,
     },
     ExecuteSearches {
         processed_queries: Vec<ProcessedTrackedQuery>,
         collection_id: CollectionId,
-        read_api_key: ApiKey,
+        read_api_key: ReadApiKey,
     },
     SearchResults {
         results: Vec<QueryMappedSearchResult>,
@@ -263,7 +263,7 @@ impl AdvancedAutoqueryStateMachine {
         collection_stats: CollectionStats,
         read_side: Arc<ReadSide>,
         collection_id: CollectionId,
-        read_api_key: ApiKey,
+        read_api_key: ReadApiKey,
     ) -> Self {
         Self {
             config,
@@ -408,7 +408,7 @@ impl AdvancedAutoqueryStateMachine {
         &self,
         conversation: Vec<InteractionMessage>,
         collection_id: CollectionId,
-        read_api_key: ApiKey,
+        read_api_key: ReadApiKey,
     ) -> Result<GeneratedAnswer, AdvancedAutoqueryError> {
         info!("Starting advanced search for collection: {}", collection_id);
 
@@ -736,7 +736,7 @@ impl AdvancedAutoqueryStateMachine {
         mut self,
         conversation: Vec<InteractionMessage>,
         collection_id: CollectionId,
-        read_api_key: ApiKey,
+        read_api_key: ReadApiKey,
     ) -> Result<UnboundedReceiverStream<AdvancedAutoqueryEvent>, AdvancedAutoqueryError> {
         let (event_sender, event_receiver) = mpsc::unbounded_channel();
 
@@ -830,7 +830,7 @@ impl AdvancedAutoqueryStateMachine {
         &self,
         conversation: Vec<InteractionMessage>,
         collection_id: CollectionId,
-        read_api_key: ApiKey,
+        read_api_key: ReadApiKey,
     ) -> Result<(), AdvancedAutoqueryError> {
         let conversation_json = serde_json::to_string(&conversation)
             .map_err(|e| AdvancedAutoqueryError::JsonParsingError(e.to_string()))?;
@@ -848,7 +848,7 @@ impl AdvancedAutoqueryStateMachine {
         &self,
         conversation_json: String,
         collection_id: CollectionId,
-        read_api_key: ApiKey,
+        read_api_key: ReadApiKey,
     ) -> Result<Vec<String>, AdvancedAutoqueryError> {
         let optimized_queries = self
             .transition_with_retry("analyze_input", || {
@@ -879,7 +879,7 @@ impl AdvancedAutoqueryStateMachine {
         &self,
         optimized_queries: Vec<String>,
         collection_id: CollectionId,
-        read_api_key: ApiKey,
+        read_api_key: ReadApiKey,
     ) -> Result<(), AdvancedAutoqueryError> {
         let selected_properties = self
             .transition_with_retry("select_properties", || {
@@ -911,7 +911,7 @@ impl AdvancedAutoqueryStateMachine {
         &self,
         queries: Vec<String>,
         collection_id: CollectionId,
-        read_api_key: ApiKey,
+        read_api_key: ReadApiKey,
     ) -> Result<(), AdvancedAutoqueryError> {
         let selected_properties = self
             .transition_with_retry("select_properties", || {
@@ -943,7 +943,7 @@ impl AdvancedAutoqueryStateMachine {
         queries: Vec<String>,
         selected_properties: Vec<HashMap<String, CollectionSelectedProperties>>,
         collection_id: CollectionId,
-        read_api_key: ApiKey,
+        read_api_key: ReadApiKey,
     ) -> Result<(), AdvancedAutoqueryError> {
         let queries_and_properties =
             self.combine_queries_and_properties(queries.clone(), selected_properties.clone());
@@ -974,7 +974,7 @@ impl AdvancedAutoqueryStateMachine {
         queries: Vec<String>,
         properties: Vec<HashMap<String, CollectionSelectedProperties>>,
         collection_id: CollectionId,
-        read_api_key: ApiKey,
+        read_api_key: ReadApiKey,
     ) -> Result<(), AdvancedAutoqueryError> {
         let queries_and_properties =
             self.combine_queries_and_properties(queries.clone(), properties.clone());
@@ -1003,7 +1003,7 @@ impl AdvancedAutoqueryStateMachine {
         &self,
         queries_and_properties: Vec<QueryAndProperties>,
         collection_id: CollectionId,
-        read_api_key: ApiKey,
+        read_api_key: ReadApiKey,
     ) -> Result<(), AdvancedAutoqueryError> {
         let mut state = self.state.lock().await;
         *state = AdvancedAutoqueryFlow::GenerateTrackedQueries {
@@ -1018,7 +1018,7 @@ impl AdvancedAutoqueryStateMachine {
         &self,
         queries_and_properties: Vec<QueryAndProperties>,
         collection_id: CollectionId,
-        read_api_key: ApiKey,
+        read_api_key: ReadApiKey,
     ) -> Result<(), AdvancedAutoqueryError> {
         let tracked_queries = self
             .transition_with_retry("generate_tracked_queries", || {
@@ -1049,7 +1049,7 @@ impl AdvancedAutoqueryStateMachine {
         &self,
         tracked_queries: Vec<TrackedQuery>,
         collection_id: CollectionId,
-        read_api_key: ApiKey,
+        read_api_key: ReadApiKey,
     ) -> Result<(), AdvancedAutoqueryError> {
         let mut state = self.state.lock().await;
         *state = AdvancedAutoqueryFlow::ExecuteBeforeRetrievalHook {
@@ -1064,10 +1064,11 @@ impl AdvancedAutoqueryStateMachine {
         &self,
         tracked_queries: Vec<TrackedQuery>,
         collection_id: CollectionId,
-        read_api_key: ApiKey,
+        read_api_key: ReadApiKey,
     ) -> Result<(), AdvancedAutoqueryError> {
         let processed_queries = self
             .transition_with_retry("execute_before_retrieval_hook", || {
+                let read_api_key = read_api_key.clone();
                 self.execute_before_retrieval_hook(
                     tracked_queries.clone(),
                     collection_id,
@@ -1099,7 +1100,7 @@ impl AdvancedAutoqueryStateMachine {
         &self,
         processed_queries: Vec<ProcessedTrackedQuery>,
         collection_id: CollectionId,
-        read_api_key: ApiKey,
+        read_api_key: ReadApiKey,
     ) -> Result<(), AdvancedAutoqueryError> {
         let mut state = self.state.lock().await;
         *state = AdvancedAutoqueryFlow::ExecuteSearches {
@@ -1114,10 +1115,11 @@ impl AdvancedAutoqueryStateMachine {
         &self,
         processed_queries: Vec<ProcessedTrackedQuery>,
         collection_id: CollectionId,
-        read_api_key: ApiKey,
+        read_api_key: ReadApiKey,
     ) -> Result<(), AdvancedAutoqueryError> {
         let results = self
             .transition_with_retry("execute_searches", || {
+                let read_api_key = read_api_key.clone();
                 self.execute_concurrent_searches(
                     processed_queries.clone(),
                     collection_id,
@@ -1302,7 +1304,7 @@ impl AdvancedAutoqueryStateMachine {
         &self,
         tracked_queries: Vec<TrackedQuery>,
         collection_id: CollectionId,
-        read_api_key: ApiKey,
+        read_api_key: ReadApiKey,
     ) -> Result<Vec<ProcessedTrackedQuery>, AdvancedAutoqueryError> {
         let (tx, mut rx) = mpsc::channel(self.config.max_concurrent_operations);
 
@@ -1311,6 +1313,7 @@ impl AdvancedAutoqueryStateMachine {
         for (i, query) in tracked_queries.into_iter().enumerate() {
             let tx = tx.clone();
             let read_side = self.read_side.clone();
+            let read_api_key = read_api_key.clone();
 
             let handle = tokio::spawn(async move {
                 let result = Self::execute_single_hook_with_retry(
@@ -1356,7 +1359,7 @@ impl AdvancedAutoqueryStateMachine {
         &self,
         processed_queries: Vec<ProcessedTrackedQuery>,
         collection_id: CollectionId,
-        read_api_key: ApiKey,
+        read_api_key: ReadApiKey,
     ) -> Result<Vec<QueryMappedSearchResult>, AdvancedAutoqueryError> {
         let (tx, mut rx) = mpsc::channel(self.config.max_concurrent_operations);
 
@@ -1366,6 +1369,7 @@ impl AdvancedAutoqueryStateMachine {
             let tx = tx.clone();
             let config = self.config.clone();
             let read_side = self.read_side.clone();
+            let read_api_key = read_api_key.clone();
 
             let handle = tokio::spawn(async move {
                 let result = Self::execute_single_search_with_retry(
@@ -1411,7 +1415,7 @@ impl AdvancedAutoqueryStateMachine {
     async fn execute_single_search_with_retry(
         query: ProcessedTrackedQuery,
         collection_id: CollectionId,
-        read_api_key: ApiKey,
+        read_api_key: ReadApiKey,
         read_side: Arc<ReadSide>,
         config: AdvancedAutoqueryConfig,
     ) -> Result<QueryMappedSearchResult, AdvancedAutoqueryError> {
@@ -1426,7 +1430,7 @@ impl AdvancedAutoqueryStateMachine {
             match Self::execute_single_search(
                 query.clone(),
                 collection_id,
-                read_api_key,
+                read_api_key.clone(),
                 read_side.clone(),
             )
             .await
@@ -1466,14 +1470,14 @@ impl AdvancedAutoqueryStateMachine {
     async fn execute_single_search(
         processed_query: ProcessedTrackedQuery,
         collection_id: CollectionId,
-        read_api_key: ApiKey,
+        read_api_key: ReadApiKey,
         read_side: Arc<ReadSide>,
     ) -> Result<QueryMappedSearchResult, AdvancedAutoqueryError> {
         let search_params = processed_query.processed_search_params.clone();
 
         let search_result = read_side
             .search(
-                read_api_key,
+                &read_api_key,
                 collection_id,
                 SearchRequest {
                     search_params,
@@ -1497,7 +1501,7 @@ impl AdvancedAutoqueryStateMachine {
     async fn execute_single_hook_with_retry(
         query: TrackedQuery,
         collection_id: CollectionId,
-        read_api_key: ApiKey,
+        read_api_key: ReadApiKey,
         read_side: Arc<ReadSide>,
     ) -> Result<ProcessedTrackedQuery, AdvancedAutoqueryError> {
         let mut backoff = ExponentialBackoffBuilder::new()
@@ -1511,7 +1515,7 @@ impl AdvancedAutoqueryStateMachine {
             match Self::execute_single_hook(
                 query.clone(),
                 collection_id,
-                read_api_key,
+                read_api_key.clone(),
                 read_side.clone(),
             )
             .await
@@ -1551,12 +1555,12 @@ impl AdvancedAutoqueryStateMachine {
     async fn execute_single_hook(
         tracked_query: TrackedQuery,
         collection_id: CollectionId,
-        read_api_key: ApiKey,
+        read_api_key: ReadApiKey,
         read_side: Arc<ReadSide>,
     ) -> Result<ProcessedTrackedQuery, AdvancedAutoqueryError> {
         let search_params = tracked_query.search_params.clone();
         let hook_storage = read_side
-            .get_hook_storage(read_api_key, collection_id)
+            .get_hook_storage(&read_api_key, collection_id)
             .await
             .map_err(|e| AdvancedAutoqueryError::ExecuteBeforeRetrievalHookError(e.to_string()))?;
 

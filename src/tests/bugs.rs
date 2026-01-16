@@ -17,7 +17,7 @@ async fn test_bug_1() {
     let collection_client = test_context.create_collection().await.unwrap();
     let coll_id = collection_client.collection_id;
     let write_api_key = collection_client.write_api_key;
-    let read_api_key = collection_client.read_api_key;
+    let read_api_key = collection_client.read_api_key.clone();
     let index_client = collection_client.create_index().await.unwrap();
 
     let docs = r#" [

@@ -622,7 +622,7 @@ async fn test_date() {
 
     let collection_id = collection_client.collection_id;
     let write_api_key = collection_client.write_api_key;
-    let read_api_key = collection_client.read_api_key;
+    let read_api_key = collection_client.read_api_key.clone();
 
     let test_context = test_context.reload().await;
     let collection_client = test_context
@@ -757,7 +757,7 @@ async fn test_enum_strategy() {
 
     let collection_id = collection_client.collection_id;
     let write_api_key = collection_client.write_api_key;
-    let read_api_key = collection_client.read_api_key;
+    let read_api_key = collection_client.read_api_key.clone();
 
     let new_test_context = test_context.reload().await;
 

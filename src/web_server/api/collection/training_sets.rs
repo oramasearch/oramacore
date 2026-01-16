@@ -2,7 +2,8 @@ use crate::ai::training_sets::TrainingSet;
 use crate::collection_manager::sides::read::ReadSide;
 use crate::collection_manager::sides::write::WriteSide;
 use crate::types::{
-    ApiKey, CollectionId, InsertTrainingSetParams, InteractionLLMConfig, TrainingSetId, WriteApiKey,
+    CollectionId, InsertTrainingSetParams, InteractionLLMConfig, ReadApiKey, TrainingSetId,
+    WriteApiKey,
 };
 use crate::web_server::api::util::print_error;
 use axum::{
@@ -51,7 +52,7 @@ pub fn write_apis(write_side: Arc<WriteSide>) -> Router {
 async fn generate_training_sets_v1(
     Path((collection_id, training_set_destination)): Path<(CollectionId, TrainingSetId)>,
     read_side: State<Arc<ReadSide>>,
-    read_api_key: ApiKey,
+    read_api_key: ReadApiKey,
     Json(body): Json<TrainingSetsQueryBody>,
 ) -> impl IntoResponse {
     let llm_config = body.llm_config;
@@ -89,7 +90,7 @@ async fn generate_training_sets_v1(
 async fn get_training_sets_v1(
     Path((collection_id, training_set)): Path<(CollectionId, TrainingSetId)>,
     State(read_side): State<Arc<ReadSide>>,
-    read_api_key: ApiKey,
+    read_api_key: ReadApiKey,
 ) -> impl IntoResponse {
     match training_set.try_into_destination() {
         Ok(destination) => {

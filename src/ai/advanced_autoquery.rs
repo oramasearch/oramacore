@@ -16,7 +16,7 @@ use crate::collection_manager::sides::read::{SearchAnalyticEventOrigin, SearchRe
 use crate::{
     collection_manager::sides::read::{CollectionStats, ReadSide},
     types::{
-        ApiKey, CollectionId, IndexId, InteractionLLMConfig, InteractionMessage, SearchParams,
+        CollectionId, IndexId, InteractionLLMConfig, InteractionMessage, ReadApiKey, SearchParams,
         SearchResult,
     },
 };
@@ -305,7 +305,7 @@ impl AdvancedAutoQuery {
     pub async fn run_legacy(
         self,
         read_side: State<Arc<ReadSide>>,
-        read_api_key: ApiKey,
+        read_api_key: ReadApiKey,
         collection_id: CollectionId,
         conversation: Vec<InteractionMessage>,
         invocation_origin: SearchAnalyticEventOrigin,
@@ -335,7 +335,7 @@ impl AdvancedAutoQuery {
     pub async fn run(
         self,
         read_side: State<Arc<ReadSide>>,
-        read_api_key: ApiKey,
+        read_api_key: ReadApiKey,
         collection_id: CollectionId,
         conversation: Vec<InteractionMessage>,
         log_sender: Option<Arc<tokio::sync::broadcast::Sender<(OutputChannel, String)>>>,
@@ -378,7 +378,7 @@ impl AdvancedAutoQuery {
     pub async fn run_stream(
         mut self,
         read_side: State<Arc<ReadSide>>,
-        read_api_key: ApiKey,
+        read_api_key: ReadApiKey,
         collection_id: CollectionId,
         conversation: Vec<InteractionMessage>,
         log_sender: Option<Arc<tokio::sync::broadcast::Sender<(OutputChannel, String)>>>,
@@ -618,7 +618,7 @@ impl AdvancedAutoQuery {
     async fn execute_mapped_searches(
         &self,
         read_side: State<Arc<ReadSide>>,
-        read_api_key: ApiKey,
+        read_api_key: ReadApiKey,
         collection_id: CollectionId,
         tracked_queries: Vec<TrackedQuery>,
         log_sender: Option<Arc<tokio::sync::broadcast::Sender<(OutputChannel, String)>>>,
@@ -628,11 +628,12 @@ impl AdvancedAutoQuery {
             let read_side = read_side.clone();
             let tracked_query = tracked_query.clone();
             let log_sender = log_sender.clone();
+            let read_api_key = read_api_key.clone();
 
             async move {
                 let search_params = tracked_query.search_params.clone();
                 let hook_storage = read_side
-                    .get_hook_storage(read_api_key, collection_id)
+                    .get_hook_storage(&read_api_key, collection_id)
                     .await?;
                 let lock = hook_storage.read("execute_mapped_searches").await;
                 let search_params = run_before_retrieval(
@@ -649,7 +650,7 @@ impl AdvancedAutoQuery {
 
                 let search_result = read_side
                     .search(
-                        read_api_key,
+                        &read_api_key,
                         collection_id,
                         SearchRequest {
                             search_params,

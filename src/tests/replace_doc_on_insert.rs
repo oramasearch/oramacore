@@ -61,7 +61,7 @@ async fn test_replace_doc_on_insert() {
             .get_test_collection_client(
                 collection_client.collection_id,
                 collection_client.write_api_key,
-                collection_client.read_api_key,
+                collection_client.read_api_key.clone(),
             )
             .unwrap();
 

@@ -23,6 +23,8 @@ pub mod lock;
 
 pub mod types;
 
+pub mod auth;
+
 pub mod code_parser;
 
 pub mod collection_manager;

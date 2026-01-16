@@ -16,7 +16,7 @@ use crate::{
     },
     python::mcp::McpService,
     types::{
-        ApiKey, CollectionId, CollectionStatsRequest, UpdateCollectionMcpRequest, WriteApiKey,
+        CollectionId, CollectionStatsRequest, ReadApiKey, UpdateCollectionMcpRequest, WriteApiKey,
     },
 };
 
@@ -38,12 +38,12 @@ pub fn write_apis(write_side: Arc<WriteSide>) -> Router {
 async fn mcp_endpoint(
     Path(collection_id): Path<CollectionId>,
     State(read_side): State<Arc<ReadSide>>,
-    read_api_key: ApiKey,
+    read_api_key: ReadApiKey,
     _headers: HeaderMap,
     body: Body,
 ) -> impl IntoResponse {
     if let Err(_err) = read_side
-        .check_read_api_key(collection_id, read_api_key)
+        .check_read_api_key(collection_id, &read_api_key)
         .await
     {
         let error_response = serde_json::json!({
@@ -89,7 +89,7 @@ async fn mcp_endpoint(
 
     let collection_info = read_side
         .collection_stats(
-            read_api_key,
+            &read_api_key,
             collection_id,
             CollectionStatsRequest { with_keys: false },
         )

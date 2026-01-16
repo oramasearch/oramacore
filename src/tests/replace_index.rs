@@ -121,7 +121,7 @@ async fn test_index_replacement_1() {
 
     let collection_id = collection_client.collection_id;
     let write_api_key = collection_client.write_api_key;
-    let read_api_key = collection_client.read_api_key;
+    let read_api_key = collection_client.read_api_key.clone();
 
     let test_context = test_context.reload().await;
     let collection_client = test_context
