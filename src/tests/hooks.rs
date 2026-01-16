@@ -116,3 +116,64 @@ export default { beforeRetrieval }"#
 
     drop(test_context);
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_before_search_hook_after_commit() {
+    init_log();
+
+    let test_context = TestContext::new().await;
+    let collection_client = test_context.create_collection().await.unwrap();
+
+    collection_client
+        .insert_hook(
+            HookType::BeforeSearch,
+            r#"
+const beforeSearch = function (search_params, claims) { return search_params; }
+export default { beforeSearch }"#
+                .to_string(),
+        )
+        .await
+        .unwrap();
+
+    let read_api_key = collection_client.read_api_key.clone();
+    let write_api_key = collection_client.write_api_key;
+    let collection_id = collection_client.collection_id;
+    let read_api_key_for_reload = read_api_key.clone();
+    let stats = wait_for(&test_context, |t| {
+        let reader = t.reader.clone();
+        let read_api_key = read_api_key.clone();
+        async move {
+            let stats = reader
+                .collection_stats(
+                    &read_api_key,
+                    collection_id,
+                    CollectionStatsRequest { with_keys: false },
+                )
+                .await
+                .context("")?;
+
+            if stats.hooks.is_empty() {
+                return Err(anyhow::anyhow!("hooks not arrived yet"));
+            }
+
+            Ok(stats)
+        }
+        .boxed()
+    })
+    .await
+    .unwrap();
+
+    assert_eq!(stats.hooks, vec![HookType::BeforeSearch,]);
+
+    test_context.commit_all().await.unwrap();
+    let test_context = test_context.reload().await;
+
+    let collection_client = test_context
+        .get_test_collection_client(collection_id, write_api_key, read_api_key_for_reload)
+        .unwrap();
+
+    let stats = collection_client.reader_stats().await.unwrap();
+    assert_eq!(stats.hooks, vec![HookType::BeforeSearch,]);
+
+    drop(test_context);
+}
