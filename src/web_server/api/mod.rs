@@ -52,7 +52,7 @@ pub fn api_config(
                     "http_request",
                     req_id,
                     method = ?request.method(),
-                    path = ?request.uri(),
+                    path = ?request.uri().path_and_query().map(|pq| pq.path()),
                 )
             }),
         )

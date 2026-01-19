@@ -42,7 +42,7 @@ async fn test_analytics_search() {
     collection_client
         .reader
         .search(
-            collection_client.read_api_key,
+            &collection_client.read_api_key,
             collection_client.collection_id,
             SearchRequest {
                 search_params: json!({

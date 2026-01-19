@@ -14,7 +14,7 @@ use crate::{
     ai::tools::{Tool, ToolError},
     collection_manager::sides::{read::ReadSide, write::WriteSide},
     types::{
-        ApiKey, CollectionId, DeleteToolParams, InsertToolsParams, RunToolsParams,
+        CollectionId, DeleteToolParams, InsertToolsParams, ReadApiKey, RunToolsParams,
         UpdateToolParams, WriteApiKey,
     },
 };
@@ -62,13 +62,13 @@ pub fn write_apis(write_side: Arc<WriteSide>) -> Router {
 async fn get_tool_v1(
     Path(collection_id): Path<CollectionId>,
     read_side: State<Arc<ReadSide>>,
-    read_api_key: ApiKey,
+    read_api_key: ReadApiKey,
     Query(query): Query<GetToolQueryParams>,
 ) -> Result<impl IntoResponse, ToolError> {
     let tool_id = query.tool_id;
 
     let tool_interface = read_side
-        .get_tools_interface(read_api_key, collection_id)
+        .get_tools_interface(&read_api_key, collection_id)
         .await?;
 
     let j = match tool_interface.get_tool(tool_id).await? {
@@ -82,10 +82,10 @@ async fn get_tool_v1(
 async fn get_all_tools_v1(
     Path(collection_id): Path<CollectionId>,
     read_side: State<Arc<ReadSide>>,
-    read_api_key: ApiKey,
+    read_api_key: ReadApiKey,
 ) -> Result<impl IntoResponse, ToolError> {
     let tool_interface = read_side
-        .get_tools_interface(read_api_key, collection_id)
+        .get_tools_interface(&read_api_key, collection_id)
         .await?;
 
     let tools = tool_interface.get_all_tools_by_collection().await?;
@@ -95,12 +95,12 @@ async fn get_all_tools_v1(
 // #[axum::debug_handler]
 async fn run_tools_v1(
     Path(collection_id): Path<CollectionId>,
-    read_api_key: ApiKey,
+    read_api_key: ReadApiKey,
     read_side: State<Arc<ReadSide>>,
     Json(params): Json<RunToolsParams>,
 ) -> Result<impl IntoResponse, ToolError> {
     let tool_interface = read_side
-        .get_tools_interface(read_api_key, collection_id)
+        .get_tools_interface(&read_api_key, collection_id)
         .await?;
 
     let tools_result = tool_interface

@@ -6,7 +6,7 @@ use crate::collection_manager::sides::read::{
     AnalyticsHolder, AnalyticsMetadataFromRequest, ReadError, ReadSide,
 };
 use crate::types::{
-    ApiKey, CollectionId, GetSystemPromptQueryParams, Interaction, InteractionLLMConfig,
+    CollectionId, GetSystemPromptQueryParams, Interaction, InteractionLLMConfig, ReadApiKey,
 };
 use axum::extract::Query;
 use axum::response::sse::Event;
@@ -50,7 +50,7 @@ struct NlpQueryRequest {
 async fn nlp_query_v1(
     collection_id: CollectionId,
     State(read_side): State<Arc<ReadSide>>,
-    read_api_key: ApiKey,
+    read_api_key: ReadApiKey,
     Json(request): Json<NlpQueryRequest>,
 ) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
     let (event_sender, event_receiver) = mpsc::channel(100);
@@ -59,7 +59,7 @@ async fn nlp_query_v1(
     tokio::spawn(async move {
         let collection_stats = match read_side
             .collection_stats(
-                read_api_key,
+                &read_api_key,
                 collection_id,
                 crate::types::CollectionStatsRequest { with_keys: true },
             )
@@ -88,7 +88,7 @@ async fn nlp_query_v1(
             collection_stats,
             read_side.clone(),
             collection_id,
-            read_api_key,
+            read_api_key.clone(),
         );
 
         let event_stream = match state_machine
@@ -131,7 +131,7 @@ async fn answer_v1(
     collection_id: CollectionId,
     analytics_metadata: AnalyticsMetadataFromRequest,
     State(read_side): State<Arc<ReadSide>>,
-    read_api_key: ApiKey,
+    read_api_key: ReadApiKey,
     Json(interaction): Json<Interaction>,
 ) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
     let (event_sender, event_receiver) = mpsc::channel(100);
@@ -154,7 +154,7 @@ async fn answer_v1(
             llm_service,
             read_side.clone(),
             collection_id,
-            read_api_key,
+            read_api_key.clone(),
             Some(analytics_holder.clone()),
         );
 
@@ -226,13 +226,13 @@ async fn answer_v1(
 async fn get_default_system_prompt_v1(
     collection_id: CollectionId,
     State(read_side): State<Arc<ReadSide>>,
-    read_api_key: ApiKey,
+    read_api_key: ReadApiKey,
     Query(query_params): Query<GetSystemPromptQueryParams>,
 ) -> Result<Json<serde_json::Value>, ReadError> {
     let system_prompt_id = query_params.system_prompt_id;
 
     match read_side
-        .get_default_system_prompt(collection_id, read_api_key, system_prompt_id)
+        .get_default_system_prompt(collection_id, &read_api_key, system_prompt_id)
         .await
     {
         Ok(prompt) => Ok(Json(json!({ "system_prompt": prompt }))),

@@ -16,7 +16,7 @@ use crate::collection_manager::sides::read::{SearchAnalyticEventOrigin, SearchRe
 use crate::{
     collection_manager::sides::read::{CollectionStats, ReadSide},
     types::{
-        ApiKey, CollectionId, IndexId, InteractionLLMConfig, InteractionMessage, SearchParams,
+        CollectionId, IndexId, InteractionLLMConfig, InteractionMessage, ReadApiKey, SearchParams,
         SearchResult,
     },
 };
@@ -305,7 +305,7 @@ impl AdvancedAutoQuery {
     pub async fn run_legacy(
         self,
         read_side: State<Arc<ReadSide>>,
-        read_api_key: ApiKey,
+        read_api_key: &ReadApiKey,
         collection_id: CollectionId,
         conversation: Vec<InteractionMessage>,
         invocation_origin: SearchAnalyticEventOrigin,
@@ -335,7 +335,7 @@ impl AdvancedAutoQuery {
     pub async fn run(
         self,
         read_side: State<Arc<ReadSide>>,
-        read_api_key: ApiKey,
+        read_api_key: &ReadApiKey,
         collection_id: CollectionId,
         conversation: Vec<InteractionMessage>,
         log_sender: Option<Arc<tokio::sync::broadcast::Sender<(OutputChannel, String)>>>,
@@ -378,7 +378,7 @@ impl AdvancedAutoQuery {
     pub async fn run_stream(
         mut self,
         read_side: State<Arc<ReadSide>>,
-        read_api_key: ApiKey,
+        read_api_key: &ReadApiKey,
         collection_id: CollectionId,
         conversation: Vec<InteractionMessage>,
         log_sender: Option<Arc<tokio::sync::broadcast::Sender<(OutputChannel, String)>>>,
@@ -387,6 +387,7 @@ impl AdvancedAutoQuery {
     ) -> impl Stream<Item = Result<AdvancedAutoQuerySteps>> {
         let (tx, rx) = mpsc::channel(100);
 
+        let read_api_key = read_api_key.clone();
         tokio::spawn(async move {
             let result: Result<()> = async {
                 // Step 0: Initialize
@@ -437,7 +438,7 @@ impl AdvancedAutoQuery {
                 let mapped_results = self
                     .execute_mapped_searches(
                         read_side,
-                        read_api_key,
+                        &read_api_key,
                         collection_id,
                         tracked_queries,
                         log_sender,
@@ -618,7 +619,7 @@ impl AdvancedAutoQuery {
     async fn execute_mapped_searches(
         &self,
         read_side: State<Arc<ReadSide>>,
-        read_api_key: ApiKey,
+        read_api_key: &ReadApiKey,
         collection_id: CollectionId,
         tracked_queries: Vec<TrackedQuery>,
         log_sender: Option<Arc<tokio::sync::broadcast::Sender<(OutputChannel, String)>>>,

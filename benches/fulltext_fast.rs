@@ -26,7 +26,7 @@ use oramacore::{
     python::embeddings::Model,
     types::{
         ApiKey, CollectionId, CollectionStatsRequest, CreateCollection, CreateIndexRequest,
-        IndexId, WriteApiKey,
+        IndexId, ReadApiKey, WriteApiKey,
     },
     web_server::HttpConfig,
     OramacoreConfig,
@@ -97,6 +97,7 @@ pub fn create_minimal_config() -> OramacoreConfig {
                 collection_commit: CollectionCommitConfig::default(),
             },
             analytics: None,
+            jwt: None,
         },
     }
 }
@@ -160,10 +161,13 @@ fn bench_fulltext_fast(c: &mut Criterion) {
             .await
             .expect("Failed to create collection");
 
+        let read_api_key = ReadApiKey::ApiKey(read_api_key);
+        let read_api_key_for_wait = read_api_key.clone();
         wait_quick(&reader, |r| {
+            let read_api_key = read_api_key_for_wait.clone();
             async move {
                 r.collection_stats(
-                    read_api_key,
+                    &read_api_key,
                     collection_id,
                     CollectionStatsRequest { with_keys: false },
                 )
@@ -190,11 +194,13 @@ fn bench_fulltext_fast(c: &mut Criterion) {
             .await
             .expect("Failed to create index");
 
+        let read_api_key_for_wait = read_api_key.clone();
         wait_quick(&reader, |r| {
+            let read_api_key = read_api_key_for_wait.clone();
             async move {
                 let stats = r
                     .collection_stats(
-                        read_api_key,
+                        &read_api_key,
                         collection_id,
                         CollectionStatsRequest { with_keys: false },
                     )
@@ -241,43 +247,56 @@ fn bench_fulltext_fast(c: &mut Criterion) {
 
     // Game-based search benchmarks
     c.bench_function("fulltext_rpg_search", |b| {
-        b.to_async(&rt).iter(|| async {
-            let search_params = black_box(json!({"term": "RPG"}).try_into().unwrap());
-            let result = reader
-                .search(
-                    read_api_key,
-                    collection_id,
-                    SearchRequest {
-                        search_params,
-                        analytics_metadata: None,
-                        interaction_id: None,
-                        search_analytics_event_origin: None,
-                    },
-                )
-                .await
-                .expect("Search failed");
-            black_box(result);
+        let read_api_key = read_api_key.clone();
+        let reader = reader.clone();
+        b.to_async(&rt).iter(|| {
+            let read_api_key = read_api_key.clone();
+            let reader = reader.clone();
+            async move {
+                let search_params = black_box(json!({"term": "RPG"}).try_into().unwrap());
+                let result = reader
+                    .search(
+                        &read_api_key,
+                        collection_id,
+                        SearchRequest {
+                            search_params,
+                            analytics_metadata: None,
+                            interaction_id: None,
+                            search_analytics_event_origin: None,
+                        },
+                    )
+                    .await
+                    .expect("Search failed");
+                black_box(result);
+            }
         });
     });
 
     // Multi-word game search benchmark
     c.bench_function("fulltext_adventure_indie", |b| {
-        b.to_async(&rt).iter(|| async {
-            let search_params = black_box(json!({"term": "adventure indie"}).try_into().unwrap());
-            let result = reader
-                .search(
-                    read_api_key,
-                    collection_id,
-                    SearchRequest {
-                        search_params,
-                        analytics_metadata: None,
-                        interaction_id: None,
-                        search_analytics_event_origin: None,
-                    },
-                )
-                .await
-                .expect("Search failed");
-            black_box(result);
+        let read_api_key = read_api_key.clone();
+        let reader = reader.clone();
+        b.to_async(&rt).iter(|| {
+            let read_api_key = read_api_key.clone();
+            let reader = reader.clone();
+            async move {
+                let search_params =
+                    black_box(json!({"term": "adventure indie"}).try_into().unwrap());
+                let result = reader
+                    .search(
+                        &read_api_key,
+                        collection_id,
+                        SearchRequest {
+                            search_params,
+                            analytics_metadata: None,
+                            interaction_id: None,
+                            search_analytics_event_origin: None,
+                        },
+                    )
+                    .await
+                    .expect("Search failed");
+                black_box(result);
+            }
         });
     });
 
@@ -289,22 +308,28 @@ fn bench_fulltext_fast(c: &mut Criterion) {
 
     // Committed search benchmark
     c.bench_function("fulltext_committed_platform", |b| {
-        b.to_async(&rt).iter(|| async {
-            let search_params = black_box(json!({"term": "platform"}).try_into().unwrap());
-            let result = reader
-                .search(
-                    read_api_key,
-                    collection_id,
-                    SearchRequest {
-                        search_params,
-                        analytics_metadata: None,
-                        interaction_id: None,
-                        search_analytics_event_origin: None,
-                    },
-                )
-                .await
-                .expect("Search failed");
-            black_box(result);
+        let read_api_key = read_api_key.clone();
+        let reader = reader.clone();
+        b.to_async(&rt).iter(|| {
+            let read_api_key = read_api_key.clone();
+            let reader = reader.clone();
+            async move {
+                let search_params = black_box(json!({"term": "platform"}).try_into().unwrap());
+                let result = reader
+                    .search(
+                        &read_api_key,
+                        collection_id,
+                        SearchRequest {
+                            search_params,
+                            analytics_metadata: None,
+                            interaction_id: None,
+                            search_analytics_event_origin: None,
+                        },
+                    )
+                    .await
+                    .expect("Search failed");
+                black_box(result);
+            }
         });
     });
 }

@@ -124,7 +124,7 @@ async fn test_geosearch_commit() {
 
     let collection_id = collection_client.collection_id;
     let write_api_key = collection_client.write_api_key;
-    let read_api_key = collection_client.read_api_key;
+    let read_api_key = collection_client.read_api_key.clone();
 
     let test_context = test_context.reload().await;
 
@@ -237,7 +237,7 @@ async fn test_add_delete_commit_reload_search() {
 
     let collection_id = collection_client.collection_id;
     let write_api_key = collection_client.write_api_key;
-    let read_api_key = collection_client.read_api_key;
+    let read_api_key = collection_client.read_api_key.clone();
     let index_id = index_client.index_id;
 
     // Reload context
@@ -369,7 +369,7 @@ async fn test_add_commit_delete_commit_reload_search() {
 
     let collection_id = collection_client.collection_id;
     let write_api_key = collection_client.write_api_key;
-    let read_api_key = collection_client.read_api_key;
+    let read_api_key = collection_client.read_api_key.clone();
     let index_id = index_client.index_id;
 
     // Reload context

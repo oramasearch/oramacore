@@ -17,7 +17,7 @@ use tracing::error;
 #[derive(Deserialize)]
 struct ReaderAPIKeyParams {
     #[serde(rename = "api-key")]
-    api_key: ApiKey,
+    api_key: String,
 }
 
 use crate::{
@@ -25,19 +25,25 @@ use crate::{
         answer::{AnswerError, SuggestionsError},
         tools::ToolError,
     },
+    auth::{JwtError, JwtManager},
     collection_manager::sides::{
         read::{AnalyticsMetadataFromRequest, OramaCoreAnalytics, ReadError, ReadSide},
-        write::{
-            jwt_manager::{JwtError, JwtManager},
-            WriteError,
-        },
+        write::{WriteError, WriteSide},
     },
-    types::{ApiKey, CollectionId, IndexId, TrainingSetId, WriteApiKey},
+    types::{
+        ApiKey, CollectionId, CustomerClaims, DashboardClaims, IndexId, ReadApiKey, TrainingSetId,
+        WriteApiKey,
+    },
 };
+
+// This is ugly, but our Dashboard api keys doesn't contains dots, while JWTs contains dots.
+fn is_jwt_token(token: &str) -> bool {
+    token.starts_with("ey") && token.contains('.')
+}
 
 impl<S> FromRequestParts<S> for WriteApiKey
 where
-    JwtManager: FromRef<S>,
+    JwtManager<DashboardClaims>: FromRef<S>,
     S: Send + Sync,
 {
     type Rejection = (StatusCode, Json<serde_json::Value>);
@@ -55,7 +61,7 @@ where
             })?;
         let bearer_token = bearer_token.0 .0;
         let bearer_token = bearer_token.token();
-        let api_key = if bearer_token.starts_with("ey") && bearer_token.contains('.') {
+        let api_key = if is_jwt_token(bearer_token) {
             let manager = JwtManager::from_ref(state);
             let claims = match manager.check(bearer_token).await {
                 Ok(claims) => claims,
@@ -113,6 +119,38 @@ where
                         })),
                     ));
                 }
+                Err(JwtError::NoProviderForIssuer { issuer, providers }) => {
+                    return Err((
+                        StatusCode::UNAUTHORIZED,
+                        Json(json!({
+                            "message": format!(
+                                "No JWT provider found for issuer '{}'. Configured providers: {:?}",
+                                issuer,
+                                providers
+                            )
+                        })),
+                    ));
+                }
+                Err(JwtError::UnableToDecodeIssuer { reason }) => {
+                    return Err((
+                        StatusCode::UNAUTHORIZED,
+                        Json(json!({
+                            "message": format!("Unable to decode JWT issuer: {}", reason)
+                        })),
+                    ));
+                }
+                Err(JwtError::AllProvidersFailed { issuer, errors }) => {
+                    return Err((
+                        StatusCode::UNAUTHORIZED,
+                        Json(json!({
+                            "message": format!(
+                                "All JWT providers failed for issuer '{}'. Errors: {:?}",
+                                issuer,
+                                errors
+                            )
+                        })),
+                    ));
+                }
             };
             WriteApiKey::from_claims(claims)
         } else {
@@ -139,16 +177,24 @@ where
     type Rejection = (StatusCode, Json<serde_json::Value>);
 
     async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
+        // First check query parameter (takes precedence)
         let query_api_key = Query::<ReaderAPIKeyParams>::from_request_parts(parts, state)
             .await
-            .ok()
-            .map(|q| q.api_key);
+            .ok();
 
-        // Return the API key from query if present (query takes precedence)
-        if let Some(api_key) = query_api_key {
+        if let Some(Query(ReaderAPIKeyParams { api_key })) = query_api_key {
+            let api_key = ApiKey::try_new(&api_key).map_err(|e| {
+                (
+                    StatusCode::UNAUTHORIZED,
+                    Json(json!({
+                        "message": format!("Invalid API key: {:?}", e)
+                    })),
+                )
+            })?;
             return Ok(api_key);
         }
 
+        // Then fall back to Authorization header
         let header_api_key = TypedHeader::<Authorization<Bearer>>::from_request_parts(parts, state)
             .await
             .ok()
@@ -163,7 +209,6 @@ where
             ));
         };
 
-        // Check the API key from the header
         let api_key = ApiKey::try_new(&raw_api_key).map_err(|e| {
             (
                 StatusCode::UNAUTHORIZED,
@@ -172,9 +217,150 @@ where
                 })),
             )
         })?;
-
         Ok(api_key)
     }
+}
+
+impl<S> FromRequestParts<S> for ReadApiKey
+where
+    JwtManager<CustomerClaims>: FromRef<S>,
+    S: Send + Sync,
+{
+    type Rejection = (StatusCode, Json<serde_json::Value>);
+
+    async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
+        let query_api_key = Query::<ReaderAPIKeyParams>::from_request_parts(parts, state)
+            .await
+            .ok();
+
+        let jwt_manager = JwtManager::<CustomerClaims>::from_ref(state);
+
+        if let Some(Query(ReaderAPIKeyParams { api_key })) = query_api_key {
+            return get_read_api_key(&jwt_manager, &api_key).await;
+        }
+
+        match TypedHeader::<Authorization<Bearer>>::from_request_parts(parts, state).await {
+            Ok(header) => get_read_api_key(&jwt_manager, header.0 .0.token()).await,
+            Err(err) => Err((
+                StatusCode::UNAUTHORIZED,
+                Json(json!({
+                    "message": format!("missing api key: {:?}", err)
+                })),
+            )),
+        }
+    }
+}
+
+async fn get_read_api_key(
+    jwt_manager: &JwtManager<CustomerClaims>,
+    token: &str,
+) -> Result<ReadApiKey, (StatusCode, Json<serde_json::Value>)> {
+    let api_key = if is_jwt_token(token) {
+        let claims = match jwt_manager.check(token).await {
+            Ok(claims) => claims,
+            Err(JwtError::Generic(e)) => {
+                return Err((
+                    StatusCode::UNAUTHORIZED,
+                    Json(json!({
+                        "message": format!("JWT Auth error: {:?}", e)
+                    })),
+                ));
+            }
+            Err(JwtError::InvalidIssuer { wanted }) => {
+                return Err((
+                    StatusCode::UNAUTHORIZED,
+                    Json(json!({
+                        "message": format!(
+                            "Invalid issuer. Wanted one of {:?}",
+                            wanted
+                        )
+                    })),
+                ));
+            }
+            Err(JwtError::InvalidAudience { wanted }) => {
+                return Err((
+                    StatusCode::UNAUTHORIZED,
+                    Json(json!({
+                        "message": format!(
+                            "Invalid audience. Wanted '{:?}'",
+                            wanted
+                        )
+                    })),
+                ));
+            }
+            Err(JwtError::NotConfigured) => {
+                return Err((
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({
+                        "message": "JWT is not configured on this instance"
+                    })),
+                ));
+            }
+            Err(JwtError::ExpiredToken) => {
+                return Err((
+                    StatusCode::UNAUTHORIZED,
+                    Json(json!({
+                        "message": "JWT token is expired"
+                    })),
+                ));
+            }
+            Err(JwtError::MissingRequiredClaim(c)) => {
+                return Err((
+                    StatusCode::UNAUTHORIZED,
+                    Json(json!({
+                        "message": format!("Missing required claim {c}"),
+                    })),
+                ));
+            }
+            Err(JwtError::NoProviderForIssuer { issuer, providers }) => {
+                return Err((
+                    StatusCode::UNAUTHORIZED,
+                    Json(json!({
+                        "message": format!(
+                            "No JWT provider found for issuer '{}'. Configured providers: {:?}",
+                            issuer,
+                            providers
+                        )
+                    })),
+                ));
+            }
+            Err(JwtError::UnableToDecodeIssuer { reason }) => {
+                return Err((
+                    StatusCode::UNAUTHORIZED,
+                    Json(json!({
+                        "message": format!("Unable to decode JWT issuer: {}", reason)
+                    })),
+                ));
+            }
+            Err(JwtError::AllProvidersFailed { issuer, errors }) => {
+                return Err((
+                    StatusCode::UNAUTHORIZED,
+                    Json(json!({
+                        "message": format!(
+                            "All JWT providers failed for issuer '{}'. Errors: {:?}",
+                            issuer,
+                            errors
+                        )
+                    })),
+                ));
+            }
+        };
+
+        ReadApiKey::from_claims(claims)
+    } else {
+        let api_key = ApiKey::try_new(token).map_err(|e| {
+            (
+                StatusCode::UNAUTHORIZED,
+                Json(json!({
+                    "message": format!("Invalid API key: {:?}", e)
+                })),
+            )
+        })?;
+
+        ReadApiKey::from_api_key(api_key)
+    };
+
+    Ok(api_key)
 }
 
 impl<S> FromRequestParts<S> for CollectionId
@@ -591,5 +777,17 @@ pub struct OramaCoreAnalyticsOption(pub Option<OramaCoreAnalytics>);
 impl FromRef<Arc<ReadSide>> for OramaCoreAnalyticsOption {
     fn from_ref(app_state: &Arc<ReadSide>) -> OramaCoreAnalyticsOption {
         OramaCoreAnalyticsOption(app_state.get_analytics_logs())
+    }
+}
+
+impl FromRef<Arc<WriteSide>> for JwtManager<DashboardClaims> {
+    fn from_ref(app_state: &Arc<WriteSide>) -> JwtManager<DashboardClaims> {
+        app_state.get_jwt_manager()
+    }
+}
+
+impl FromRef<Arc<ReadSide>> for JwtManager<CustomerClaims> {
+    fn from_ref(app_state: &Arc<ReadSide>) -> JwtManager<CustomerClaims> {
+        app_state.get_jwt_manager()
     }
 }
