@@ -30,7 +30,7 @@ pub enum JwtError {
     #[error("No provider found for issuer: {issuer}. Configured providers: {providers:?}")]
     NoProviderForIssuer {
         issuer: String,
-        providers: Vec<String>,
+        providers: Arc<Vec<String>>,
     },
     #[error("Unable to decode JWT claims to extract issuer: {reason}")]
     UnableToDecodeIssuer { reason: String },
@@ -114,7 +114,7 @@ pub enum JwtManager<Claims: Clone + Send + Sync + DeserializeOwned> {
         /// Multiple providers can share the same issuer
         providers_by_issuer: Arc<HashMap<String, Vec<Arc<JwksProvider<Claims>>>>>,
         /// All provider names for error messages
-        provider_names: Vec<String>,
+        provider_names: Arc<Vec<String>>,
     },
     Disabled,
 }
@@ -199,7 +199,7 @@ impl<Claims: Clone + Send + Sync + DeserializeOwned> JwtManager<Claims> {
 
         Ok(Self::Enabled {
             providers_by_issuer: Arc::new(providers_by_issuer),
-            provider_names,
+            provider_names: Arc::new(provider_names),
         })
     }
 

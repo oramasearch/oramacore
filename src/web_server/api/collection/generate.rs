@@ -232,7 +232,7 @@ async fn get_default_system_prompt_v1(
     let system_prompt_id = query_params.system_prompt_id;
 
     match read_side
-        .get_default_system_prompt(collection_id, read_api_key, system_prompt_id)
+        .get_default_system_prompt(collection_id, &read_api_key, system_prompt_id)
         .await
     {
         Ok(prompt) => Ok(Json(json!({ "system_prompt": prompt }))),

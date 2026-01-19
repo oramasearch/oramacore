@@ -659,7 +659,7 @@ impl ReadSide {
     pub async fn nlp_search_stream(
         &self,
         read_side: State<Arc<ReadSide>>,
-        read_api_key: ReadApiKey,
+        read_api_key: &ReadApiKey,
         collection_id: CollectionId,
         search_params: NLPSearchRequest,
         log_sender: Option<Arc<tokio::sync::broadcast::Sender<(OutputChannel, String)>>>,
@@ -669,11 +669,11 @@ impl ReadSide {
             .get_collection(collection_id)
             .await
             .ok_or_else(|| ReadError::NotFound(collection_id))?;
-        collection.check_read_api_key(&read_api_key, self.master_api_key)?;
+        collection.check_read_api_key(read_api_key, self.master_api_key)?;
 
         let collection_stats = self
             .collection_stats(
-                &read_api_key,
+                read_api_key,
                 collection_id,
                 CollectionStatsRequest { with_keys: true },
             )
@@ -862,7 +862,7 @@ impl ReadSide {
     pub async fn get_default_system_prompt(
         &self,
         collection_id: CollectionId,
-        read_api_key: ReadApiKey,
+        read_api_key: &ReadApiKey,
         system_prompt_id: String,
     ) -> Result<String, ReadError> {
         let collection = self
@@ -870,7 +870,7 @@ impl ReadSide {
             .get_collection(collection_id)
             .await
             .ok_or_else(|| ReadError::NotFound(collection_id))?;
-        collection.check_read_api_key(&read_api_key, self.master_api_key)?;
+        collection.check_read_api_key(read_api_key, self.master_api_key)?;
 
         let known_prompt: KnownPrompts = system_prompt_id
             .as_str()
@@ -885,7 +885,7 @@ impl ReadSide {
     pub async fn list_training_data_for(
         &self,
         collection_id: CollectionId,
-        read_api_key: ReadApiKey,
+        read_api_key: &ReadApiKey,
         training_destination: TrainingDestination,
     ) -> Result<Vec<String>, ReadError> {
         let collection = self
@@ -893,7 +893,7 @@ impl ReadSide {
             .get_collection(collection_id)
             .await
             .ok_or_else(|| ReadError::NotFound(collection_id))?;
-        collection.check_read_api_key(&read_api_key, self.master_api_key)?;
+        collection.check_read_api_key(read_api_key, self.master_api_key)?;
 
         match self
             .training_sets
@@ -910,7 +910,7 @@ impl ReadSide {
     pub async fn get_training_data_for(
         &self,
         collection_id: CollectionId,
-        read_api_key: ReadApiKey,
+        read_api_key: &ReadApiKey,
         training_destination: TrainingDestination,
     ) -> Option<Result<String, ReadError>> {
         let collection = match self.collections.get_collection(collection_id).await {
@@ -918,7 +918,7 @@ impl ReadSide {
             None => return Some(Err(ReadError::NotFound(collection_id))),
         };
 
-        if let Err(e) = collection.check_read_api_key(&read_api_key, self.master_api_key) {
+        if let Err(e) = collection.check_read_api_key(read_api_key, self.master_api_key) {
             return Some(Err(e));
         }
 

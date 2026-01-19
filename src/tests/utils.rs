@@ -95,11 +95,7 @@ pub fn create_oramacore_config() -> OramacoreConfig {
         ai_server: AIServiceConfig {
             // Use a process-unique cache directory to avoid race conditions
             // when multiple test processes access ONNX model files simultaneously.
-            models_cache_dir: format!(
-                "{}/fastembed_cache_{}",
-                std::env::temp_dir().display(),
-                std::process::id()
-            ),
+            models_cache_dir: format!("{}", std::env::temp_dir().display()),
             total_threads: 4,
             embeddings: Some(AIServiceEmbeddingsConfig {
                 automatic_embeddings_selector: None,

@@ -95,7 +95,7 @@ async fn get_training_sets_v1(
     match training_set.try_into_destination() {
         Ok(destination) => {
             match read_side
-                .get_training_data_for(collection_id, read_api_key, destination)
+                .get_training_data_for(collection_id, &read_api_key, destination)
                 .await
             {
                 Some(Ok(training_data)) => Ok((

@@ -703,7 +703,7 @@ impl CollectionReader {
         let search_results = advanced_autoquery
             .run(
                 read_side.clone(),
-                read_api_key,
+                &read_api_key,
                 collection_id,
                 conversation,
                 log_sender,
@@ -718,7 +718,7 @@ impl CollectionReader {
     pub async fn nlp_search_stream(
         &self,
         read_side: State<Arc<ReadSide>>,
-        read_api_key: ReadApiKey,
+        read_api_key: &ReadApiKey,
         collection_id: CollectionId,
         search_params: &NLPSearchRequest,
         collection_stats: CollectionStats,
