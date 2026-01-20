@@ -380,35 +380,44 @@ export default { beforeAnswer }
         {"id":"1","name":"I'm Tommaso, a software developer"},
         {"id":"2","name":"I'm Michele, a very good software developer"}
     ]"#;
-    let docs = serde_json::from_str::<Vec<Document>>(docs).unwrap();
+    let docs = serde_json::from_str::<Vec<Document>>(docs).expect("Failed to parse test documents");
 
     index_client
         .insert_documents(DocumentList(docs))
         .await
-        .unwrap();
+        .expect("Failed to insert documents");
 
     wait_for(&collection_client, |collection_client| {
         async {
-            let stats = collection_client.reader_stats().await.unwrap();
-            let index_stats = &stats.indexes_stats[0];
+            let stats = collection_client.reader_stats().await.expect("Failed to get reader stats");
+            let index_stats = stats.indexes_stats.first()
+                .expect("No index stats found");
             let field_stats = index_stats
                 .fields_stats
                 .iter()
-                .find(|fs| &fs.field_path == "___orama_auto_embedding")
-                .unwrap();
-            let IndexFieldStatsType::UncommittedVector(field_stats) = &field_stats.stats else {
-                panic!()
+                .find(|fs| &fs.field_path == "___orama_auto_embedding");
+
+            let Some(field_stats) = field_stats else {
+                return Err(anyhow!("Auto embedding field not found yet"));
             };
+
+            let IndexFieldStatsType::UncommittedVector(field_stats) = &field_stats.stats else {
+                return Err(anyhow!("Expected UncommittedVector field stats type"));
+            };
+
             if field_stats.document_count == 2 {
                 Ok(())
             } else {
-                Err(anyhow!("embedding not yet arrived"))
+                Err(anyhow!(
+                    "Waiting for embeddings: expected 2 documents with embeddings, got {}",
+                    field_stats.document_count
+                ))
             }
         }
         .boxed()
     })
     .await
-    .unwrap();
+    .expect("Timed out waiting for embeddings to be generated. This may indicate embeddings are not being processed or the system is overloaded.");
 
     let interaction = Interaction {
         conversation_id: "the-conversation-id".to_string(),

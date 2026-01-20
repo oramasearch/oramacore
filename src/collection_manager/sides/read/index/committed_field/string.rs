@@ -728,9 +728,9 @@ impl DocumentLengthsPerDocument {
 
     pub fn remove_doc_ids(&mut self, doc_ids: &HashSet<DocumentId>) {
         for doc_id in doc_ids {
-            self.global_info.total_documents -= 1;
-            if let Some(a) = self.inner.remove(doc_id) {
-                self.global_info.total_document_length -= a as usize;
+            if let Some(length) = self.inner.remove(doc_id) {
+                self.global_info.total_documents -= 1;
+                self.global_info.total_document_length -= length as usize;
             }
         }
     }

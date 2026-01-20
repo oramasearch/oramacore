@@ -164,3 +164,69 @@ async fn test_writeside_stats_decrements_after_delete() {
 
     drop(test_context);
 }
+
+/// Regression test for integer underflow in DocumentLengthsPerDocument::remove_doc_ids().
+/// https://github.com/oramasearch/oramacore/pull/311
+///
+/// Scenario: Sparse fields where deleted documents never existed cause total_documents
+/// to decrement incorrectly. Example: committed 'artist' field has 1 doc, we delete 2 docs
+/// (1 that exists + 1 that doesn't) -> 1 - 2 = underflow panic.
+#[tokio::test(flavor = "multi_thread")]
+async fn test_delete_document_missing_field_underflow() {
+    init_log();
+
+    let test_context = TestContext::new().await;
+    let collection_client = test_context.create_collection().await.unwrap();
+    let index_client = collection_client.create_index().await.unwrap();
+
+    index_client
+        .insert_documents(
+            json!([
+                {"id": "song_1", "title": "First Song", "artist": "Artist A"},
+                {"id": "song_2", "title": "Second Song", "artist": "Artist B"}
+            ])
+            .try_into()
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    // Create the field indexes
+    test_context.commit_all().await.unwrap();
+
+    // Remove the docs to make the "artist" doc count to 0
+    index_client
+        .delete_documents(vec!["song_1".to_string(), "song_2".to_string()])
+        .await
+        .unwrap();
+
+    index_client
+        .insert_documents(
+            json!([
+                {"id": "song_3", "title": "Third Song"},  // no artist
+                {"id": "song_4", "title": "Fourth Song", "artist": "Artist D"}
+            ])
+            .try_into()
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    test_context.commit_all().await.unwrap();
+
+    index_client
+        .delete_documents(vec!["song_3".to_string()])
+        .await
+        .unwrap();
+
+    // This insert + commit triggers the panic
+    index_client
+        .insert_documents(
+            json!([{"id": "song_5", "title": "Fifth", "artist": "Artist E"}])
+                .try_into()
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    test_context.commit_all().await.unwrap();
+}
