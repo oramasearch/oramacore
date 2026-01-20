@@ -17,14 +17,13 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     collection_manager::sides::read::{
-        index::{
+        OffloadFieldConfig, index::{
             committed_field::offload_utils::{
-                create_counter, should_offload, update_invocation_counter, Cow,
+                MutRef, create_counter, should_offload, update_invocation_counter
             },
             merge::{CommittedField, CommittedFieldMetadata, Field},
             uncommitted_field::UncommittedVectorField,
-        },
-        OffloadFieldConfig,
+        }
     },
     lock::OramaSyncLock,
     python::embeddings::Model,
@@ -55,7 +54,7 @@ impl Clone for CommittedVectorFieldStats {
     }
 }
 
-#[derive(Clone, Copy, Serialize, Deserialize, Debug)]
+#[derive(Clone, Copy, Serialize, Deserialize, Debug, PartialEq, Eq)]
 pub enum VectorLayoutType {
     #[serde(rename = "hnsw")]
     Hnsw,
@@ -94,6 +93,7 @@ impl VectorLayout {
             VectorLayout::BruteForce(index) => index.dim(),
         }
     }
+    /*
     fn add(&mut self, vector: &[f32], doc_id: DocumentId) -> Result<()> {
         match self {
             VectorLayout::Hnsw(index) => {
@@ -124,6 +124,7 @@ impl VectorLayout {
             VectorLayout::BruteForce(index) => Box::new(index.get_data()),
         }
     }
+    */
     fn save(&self, data_dir: &PathBuf) -> Result<()> {
         create_if_not_exists(data_dir).context("Cannot create data directory")?;
         match self {
@@ -288,7 +289,7 @@ impl CommittedField for CommittedVectorField {
 
             VectorLayout::BruteForce(new_index)
         } else {
-            let mut new_index = HNSW2Index::new(uncommitted.dimension);
+            let mut new_index = HNSW2Index::new_with_deletion(uncommitted.dimension);
             for (id, vectors) in iter {
                 if uncommitted_document_deletions.contains(&id) {
                     continue;
@@ -335,70 +336,55 @@ impl CommittedField for CommittedVectorField {
         uncommitted_document_deletions: &HashSet<DocumentId>,
         offload_config: OffloadFieldConfig,
     ) -> Result<Self> {
-        debug_assert_eq!(uncommitted.dimension, self.stats.dimensions,);
-        debug_assert_eq!(uncommitted.get_model(), self.metadata.model,);
+        debug_assert_eq!(uncommitted.dimension, self.stats.dimensions);
+        debug_assert_eq!(uncommitted.get_model(), self.metadata.model);
 
-        let dim = self.stats.dimensions;
+        let mut new_field = Self::try_load(self.metadata.clone(), offload_config)?;
+        new_field.metadata.data_dir = data_dir.clone();
 
-        let total_docs = uncommitted.len() + self.stats.vector_count;
-        let mut new_layout = if total_docs < MIN_HNSW_DOCS {
-            let mut brute_force = VectorBruteForce::new(dim);
-            brute_force.set_capacity(total_docs);
-            VectorLayout::BruteForce(brute_force)
-        } else {
-            let hnsw = HNSW2Index::new(dim);
-            VectorLayout::Hnsw(Box::new(hnsw))
-        };
+        {
+            let mut a = new_field.status.write("").unwrap();
+            let a = &mut **a;
+            let mut layout = match a {
+                VectorStatus::Unloaded => MutRef::Owned(load_layout(&self.metadata.data_dir)?),
+                VectorStatus::Loaded(layout) => MutRef::Borrowed(layout),
+            };
+            match &mut *layout {
+                VectorLayout::BruteForce(brute_force) => {
+                    for (doc, vec) in uncommitted.iter() {
+                        if uncommitted_document_deletions.contains(&doc) {
+                            continue;
+                        }
+                        for vector in vec {
+                            brute_force.add_owned(vector, doc);
+                        }
+                    }
 
-        let lock = self.status.read("commit").unwrap();
-        let vector_status = &**lock;
-        let current_layout = match vector_status {
-            VectorStatus::Loaded(layout) => Cow::Borrowed(layout),
-            VectorStatus::Unloaded => Cow::Owned(load_layout(&self.metadata.data_dir)?),
-        };
+                    brute_force.delete(&uncommitted_document_deletions);
 
-        let old_data = current_layout.get_data();
-        for (doc_id, vector) in old_data {
-            if uncommitted_document_deletions.contains(&doc_id) {
-                continue;
-            }
-            new_layout
-                .add(vector, doc_id)
-                .context("Cannot add vector")?;
+                    if brute_force.len() >= MIN_HNSW_DOCS {
+                        panic!("Transition from BruteForce to HNSW not implemented yet");
+                    }
+                },
+                VectorLayout::Hnsw(hnsw) => {
+                    for (doc, vec) in uncommitted.iter() {
+                        if uncommitted_document_deletions.contains(&doc) {
+                            continue;
+                        }
+                        for vector in vec {
+                            hnsw.add_owned(vector, doc)?;
+                        }
+                    }
+                    hnsw.delete_batch(&uncommitted_document_deletions);
+                }
+            };
+
+            layout.save(&data_dir)?;
         }
 
-        for (doc_id, vectors) in uncommitted.iter() {
-            if uncommitted_document_deletions.contains(&doc_id) {
-                continue;
-            }
-            for vector in vectors {
-                new_layout
-                    .add_owned(vector, doc_id)
-                    .context("Cannot add vector")?;
-            }
-        }
-        if let VectorLayout::Hnsw(hnsw) = &mut new_layout {
-            hnsw.build().context("Cannot build hnsw index")?;
-        }
+        new_field.metadata.data_dir = data_dir.clone();
 
-        new_layout.save(&data_dir)?;
-
-        Ok(Self {
-            metadata: VectorFieldInfo {
-                field_path: self.metadata.field_path.clone(),
-                data_dir,
-                model: self.metadata.model,
-            },
-            stats: CommittedVectorFieldStats {
-                dimensions: self.stats.dimensions,
-                vector_count: new_layout.len(),
-                loaded: AtomicBool::new(true),
-                layout: new_layout.as_layout_type(),
-            },
-            status: OramaSyncLock::new("vector_inner", VectorStatus::Loaded(new_layout)),
-            invocation_counter: create_counter(offload_config),
-            unload_window: offload_config.unload_window.into(),
-        })
+        Ok(new_field)
     }
 
     fn metadata(&self) -> VectorFieldInfo {

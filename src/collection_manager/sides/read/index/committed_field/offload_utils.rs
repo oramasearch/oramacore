@@ -1,5 +1,5 @@
 use std::{
-    ops::Deref,
+    ops::{Deref, DerefMut},
     time::{Duration, UNIX_EPOCH},
 };
 
@@ -35,6 +35,29 @@ impl<'a, T> Deref for Cow<'a, T> {
         match self {
             Cow::Borrowed(b) => b,
             Cow::Owned(o) => o,
+        }
+    }
+}
+
+pub enum MutRef<'a, T> {
+    Borrowed(&'a mut T),
+    Owned(T),
+}
+impl<'a, T> Deref for MutRef<'a, T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        match self {
+            MutRef::Borrowed(b) => b,
+            MutRef::Owned(o) => o,
+        }
+    }
+}
+impl<'a, T> DerefMut for MutRef<'a, T> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        match self {
+            MutRef::Borrowed(b) => b,
+            MutRef::Owned(o) => o,
         }
     }
 }

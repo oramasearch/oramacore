@@ -678,3 +678,257 @@ async fn test_document_chunk_long_text_for_embedding_calculation() {
 
     drop(test_context);
 }
+
+/// Test that vector search works correctly after multiple commits with incremental updates.
+/// This tests the incremental commit path for vector fields where:
+/// 1. Initial documents are inserted and committed
+/// 2. Additional documents are inserted and committed (incremental update)
+/// 3. Documents are deleted and committed
+/// 4. Search results correctly reflect all changes
+#[tokio::test(flavor = "multi_thread")]
+async fn test_vector_search_incremental_commits() {
+    init_log();
+
+    let test_context = TestContext::new().await;
+    let collection_client = test_context.create_collection().await.unwrap();
+    let index_client = collection_client.create_index().await.unwrap();
+
+    // Phase 1: Insert initial documents
+    index_client
+        .insert_documents(
+            json!([
+                {
+                    "id": "plant1",
+                    "text": "Photosynthesis is the process by which plants convert sunlight into energy."
+                },
+                {
+                    "id": "plant2",
+                    "text": "Chlorophyll gives plants their green color and helps absorb light."
+                },
+                {
+                    "id": "animal1",
+                    "text": "Mammals are warm-blooded animals that nurse their young with milk."
+                }
+            ])
+            .try_into()
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    // Wait for vectors to be generated
+    wait_for(&collection_client, |collection_client| {
+        async {
+            let output = collection_client
+                .search(
+                    json!({
+                        "term": "How do plants make food?",
+                        "mode": "vector",
+                        "similarity": 0.5
+                    })
+                    .try_into()
+                    .unwrap(),
+                )
+                .await
+                .unwrap();
+            if output.count >= 1 {
+                Ok(output)
+            } else {
+                Err(anyhow::anyhow!("Waiting for vectors to be generated"))
+            }
+        }
+        .boxed()
+    })
+    .await
+    .unwrap();
+
+    // First commit
+    test_context.commit_all().await.unwrap();
+
+    // Verify search works after commit
+    let output = collection_client
+        .search(
+            json!({
+                "term": "How do plants make food?",
+                "mode": "vector",
+                "similarity": 0.5
+            })
+            .try_into()
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert!(output.count >= 1, "Should find plant-related documents");
+
+    // Phase 2: Insert additional documents (incremental update)
+    index_client
+        .insert_documents(
+            json!([
+                {
+                    "id": "plant3",
+                    "text": "Roots absorb water and nutrients from the soil for plant growth."
+                },
+                {
+                    "id": "tech1",
+                    "text": "Machine learning algorithms learn patterns from large datasets."
+                }
+            ])
+            .try_into()
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    // Wait for new vectors
+    wait_for(&collection_client, |collection_client| {
+        async {
+            let output = collection_client
+                .search(
+                    json!({
+                        "term": "Machine learning and artificial intelligence",
+                        "mode": "vector",
+                        "similarity": 0.4
+                    })
+                    .try_into()
+                    .unwrap(),
+                )
+                .await
+                .unwrap();
+            if output.count >= 1 {
+                Ok(output)
+            } else {
+                Err(anyhow::anyhow!("Waiting for new vectors"))
+            }
+        }
+        .boxed()
+    })
+    .await
+    .unwrap();
+
+    // Second commit (incremental update path)
+    test_context.commit_all().await.unwrap();
+
+    // Verify both old and new documents are searchable
+    let output = collection_client
+        .search(
+            json!({
+                "term": "How do plants absorb water and nutrients?",
+                "mode": "vector",
+                "similarity": 0.5
+            })
+            .try_into()
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert!(output.count >= 1, "Should find plant-related documents including new one");
+
+    let output = collection_client
+        .search(
+            json!({
+                "term": "Machine learning and AI",
+                "mode": "vector",
+                "similarity": 0.4
+            })
+            .try_into()
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert!(output.count >= 1, "Should find machine learning document");
+
+    // Phase 3: Delete a document
+    index_client
+        .delete_documents(vec!["plant1".to_string()])
+        .await
+        .unwrap();
+
+    // Third commit (deletion)
+    test_context.commit_all().await.unwrap();
+
+    // Verify deleted document is not returned in search
+    let output = collection_client
+        .search(
+            json!({
+                "term": "Photosynthesis converts sunlight",
+                "mode": "vector",
+                "similarity": 0.7
+            })
+            .try_into()
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    // The deleted document (plant1) should not appear in results
+    for hit in &output.hits {
+        assert!(
+            !hit.id.ends_with(":plant1"),
+            "Deleted document plant1 should not appear in search results"
+        );
+    }
+
+    // But other plant documents should still be searchable
+    let output = collection_client
+        .search(
+            json!({
+                "term": "Chlorophyll and plant color",
+                "mode": "vector",
+                "similarity": 0.5
+            })
+            .try_into()
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert!(output.count >= 1, "Non-deleted plant documents should still be searchable");
+
+    // Phase 4: Verify data persists after reload
+    let collection_id = collection_client.collection_id;
+    let write_api_key = collection_client.write_api_key;
+    let read_api_key = collection_client.read_api_key.clone();
+
+    let test_context = test_context.reload().await;
+    let collection_client = test_context
+        .get_test_collection_client(collection_id, write_api_key, read_api_key)
+        .unwrap();
+
+    // Verify search still works after reload
+    let output = collection_client
+        .search(
+            json!({
+                "term": "Machine learning AI",
+                "mode": "vector",
+                "similarity": 0.4
+            })
+            .try_into()
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert!(output.count >= 1, "Should still find tech document after reload");
+
+    // Verify deleted document is still not returned after reload
+    let output = collection_client
+        .search(
+            json!({
+                "term": "Photosynthesis sunlight energy plants",
+                "mode": "vector",
+                "similarity": 0.7
+            })
+            .try_into()
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    for hit in &output.hits {
+        assert!(
+            !hit.id.ends_with(":plant1"),
+            "Deleted document should not appear after reload: found {}",
+            hit.id
+        );
+    }
+
+    drop(test_context);
+}
