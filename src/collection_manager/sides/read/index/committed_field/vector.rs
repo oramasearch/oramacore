@@ -18,13 +18,14 @@ use tracing::info;
 
 use crate::{
     collection_manager::sides::read::{
-        OffloadFieldConfig, index::{
+        index::{
             committed_field::offload_utils::{
-                MutRef, create_counter, should_offload, update_invocation_counter
+                create_counter, should_offload, update_invocation_counter, MutRef,
             },
             merge::{CommittedField, CommittedFieldMetadata, Field},
             uncommitted_field::UncommittedVectorField,
-        }
+        },
+        OffloadFieldConfig,
     },
     lock::OramaSyncLock,
     python::embeddings::Model,
@@ -35,6 +36,7 @@ use crate::{
 const MIN_HNSW_DOCS: usize = 10_000;
 const BRUTE_FORCE_INDEX_FILE_NAME: &str = "index.vec";
 const HNSW_INDEX_FILE_NAME: &str = "index.hnsw";
+const HNSW_INDEX_2_FILE_NAME: &str = "index.hnsw2";
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct CommittedVectorFieldStats {
@@ -94,43 +96,11 @@ impl VectorLayout {
             VectorLayout::BruteForce(index) => index.dim(),
         }
     }
-    /*
-    fn add(&mut self, vector: &[f32], doc_id: DocumentId) -> Result<()> {
-        match self {
-            VectorLayout::Hnsw(index) => {
-                index.add(vector, doc_id).context("Cannot add vector")?;
-            }
-            VectorLayout::BruteForce(index) => {
-                index.add_owned(vector.to_vec(), doc_id);
-            }
-        }
-        Ok(())
-    }
-    fn add_owned(&mut self, vector: Vec<f32>, doc_id: DocumentId) -> Result<()> {
-        match self {
-            VectorLayout::Hnsw(index) => {
-                index
-                    .add_owned(vector, doc_id)
-                    .context("Cannot add vector")?;
-            }
-            VectorLayout::BruteForce(index) => {
-                index.add_owned(vector, doc_id);
-            }
-        }
-        Ok(())
-    }
-    fn get_data(&self) -> Box<dyn Iterator<Item = (DocumentId, &[f32])> + '_> {
-        match self {
-            VectorLayout::Hnsw(index) => Box::new(index.get_data()),
-            VectorLayout::BruteForce(index) => Box::new(index.get_data()),
-        }
-    }
-    */
     fn save(&self, data_dir: &PathBuf) -> Result<()> {
         create_if_not_exists(data_dir).context("Cannot create data directory")?;
         match self {
             Self::Hnsw(index) => {
-                let dump_file_path = data_dir.join(HNSW_INDEX_FILE_NAME);
+                let dump_file_path = data_dir.join(HNSW_INDEX_2_FILE_NAME);
                 BufferedFile::create_or_overwrite(dump_file_path)
                     .context("Cannot create hnsw file")?
                     .write_bincode_data(&index)
@@ -364,30 +334,43 @@ impl CommittedField for CommittedVectorField {
                     brute_force.delete(&uncommitted_document_deletions);
 
                     if brute_force.len() >= MIN_HNSW_DOCS {
-                        info!("Upgrading vector field {:?} from brute-force to HNSW layout", self.metadata.field_path);
+                        info!(
+                            "Upgrading vector field {:?} from brute-force to HNSW layout",
+                            self.metadata.field_path
+                        );
                         let mut hnsw = HNSW2Index::new_with_deletion(uncommitted.dimension);
 
-                        hnsw.batch_add(uncommitted.iter().filter_map(|(doc, vecs)| {
-                            if uncommitted_document_deletions.contains(&doc) {
-                                None
-                            } else {
-                                Some(vecs.into_iter().map(move |v| (v, doc)))
-                            }
-                        }).flatten())?;
+                        hnsw.batch_add(
+                            uncommitted
+                                .iter()
+                                .filter_map(|(doc, vecs)| {
+                                    if uncommitted_document_deletions.contains(&doc) {
+                                        None
+                                    } else {
+                                        Some(vecs.into_iter().map(move |v| (v, doc)))
+                                    }
+                                })
+                                .flatten(),
+                        )?;
                         hnsw.delete_batch(&uncommitted_document_deletions);
                         hnsw.build()?;
 
                         *layout = VectorLayout::Hnsw(Box::new(hnsw));
                     }
-                },
+                }
                 VectorLayout::Hnsw(hnsw) => {
-                    hnsw.batch_add(uncommitted.iter().filter_map(|(doc, vecs)| {
-                        if uncommitted_document_deletions.contains(&doc) {
-                            None
-                        } else {
-                            Some(vecs.into_iter().map(move |v| (v, doc)))
-                        }
-                    }).flatten())?;
+                    hnsw.batch_add(
+                        uncommitted
+                            .iter()
+                            .filter_map(|(doc, vecs)| {
+                                if uncommitted_document_deletions.contains(&doc) {
+                                    None
+                                } else {
+                                    Some(vecs.into_iter().map(move |v| (v, doc)))
+                                }
+                            })
+                            .flatten(),
+                    )?;
                     hnsw.delete_batch(&uncommitted_document_deletions);
 
                     hnsw.build()?;
@@ -497,11 +480,22 @@ fn load_layout(data_dir: &Path) -> Result<VectorLayout> {
     let is_hnsw = std::fs::exists(data_dir.join(HNSW_INDEX_FILE_NAME))?;
     if is_hnsw {
         let dump_file_path = data_dir.join(HNSW_INDEX_FILE_NAME);
-        let inner: HNSW2Index<DocumentId> = BufferedFile::open(dump_file_path)
-            .map_err(|e| anyhow!("Cannot open hnsw file: {e}"))?
-            .read_bincode_data()
-            .map_err(|e| anyhow!("Cannot read hnsw file: {e}"))?;
-        Ok(VectorLayout::Hnsw(Box::new(inner)))
+        if std::fs::exists(&dump_file_path).unwrap_or(false) {
+            let inner = BufferedFile::open(dump_file_path)
+                .map_err(|e| anyhow!("Cannot open hnsw file: {e}"))?
+                .read_as_vec()
+                .map_err(|e| anyhow!("Cannot read hnsw file: {e}"))?;
+            let inner = HNSW2Index::deserialize_bincode_compat(&inner)
+                .map_err(|e| anyhow!("Cannot deserialize hnsw file: {e}"))?;
+            Ok(VectorLayout::Hnsw(Box::new(inner)))
+        } else {
+            let dump_file_path = data_dir.join(HNSW_INDEX_2_FILE_NAME);
+            let inner: HNSW2Index<DocumentId> = BufferedFile::open(dump_file_path)
+                .map_err(|e| anyhow!("Cannot open hnsw2 file: {e}"))?
+                .read_bincode_data()
+                .map_err(|e| anyhow!("Cannot read hnsw2 file: {e}"))?;
+            Ok(VectorLayout::Hnsw(Box::new(inner)))
+        }
     } else {
         let dump_file_path = data_dir.join(BRUTE_FORCE_INDEX_FILE_NAME);
         let inner: VectorBruteForce<DocumentId> = BufferedFile::open(dump_file_path)
@@ -531,7 +525,6 @@ impl CommittedFieldMetadata for VectorFieldInfo {
         self.field_path.as_ref()
     }
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -564,13 +557,15 @@ mod tests {
         // in HNSW construction where all identical vectors cause excessive computation.
         let mut rng = rand::rng();
 
-        let mut uncommitted = UncommittedVectorField::empty(
-            Box::new(["field_path".to_string()]),
-            model,
-        );
+        let mut uncommitted =
+            UncommittedVectorField::empty(Box::new(["field_path".to_string()]), model);
         for doc_id in 1..=(MIN_HNSW_DOCS - 1) {
-            let vectors = vec![(0..model.dimensions()).map(|_| rng.random::<f32>()).collect::<Vec<_>>()];
-            uncommitted.insert(DocumentId(doc_id as u64), vectors).unwrap();
+            let vectors = vec![(0..model.dimensions())
+                .map(|_| rng.random::<f32>())
+                .collect::<Vec<_>>()];
+            uncommitted
+                .insert(DocumentId(doc_id as u64), vectors)
+                .unwrap();
         }
 
         let committed = CommittedVectorField::from_uncommitted(
@@ -583,26 +578,32 @@ mod tests {
 
         assert_eq!(committed.stats.layout, VectorLayoutType::Plain);
 
-        let mut uncommitted = UncommittedVectorField::empty(
-            Box::new(["field_path".to_string()]),
-            model,
-        );
+        let mut uncommitted =
+            UncommittedVectorField::empty(Box::new(["field_path".to_string()]), model);
         for doc_id in (MIN_HNSW_DOCS - 1)..=(MIN_HNSW_DOCS + 10) {
-            let vectors = vec![(0..model.dimensions()).map(|_| rng.random::<f32>()).collect::<Vec<_>>()];
-            uncommitted.insert(DocumentId(doc_id as u64), vectors).unwrap();
+            let vectors = vec![(0..model.dimensions())
+                .map(|_| rng.random::<f32>())
+                .collect::<Vec<_>>()];
+            uncommitted
+                .insert(DocumentId(doc_id as u64), vectors)
+                .unwrap();
         }
 
-        let new_committed = committed.add_uncommitted(
-            &uncommitted,
-            second_data_dir,
-            &HashSet::new(),
-            offload_config
-        ).unwrap();
+        let new_committed = committed
+            .add_uncommitted(
+                &uncommitted,
+                second_data_dir,
+                &HashSet::new(),
+                offload_config,
+            )
+            .unwrap();
 
         assert_eq!(new_committed.stats.layout, VectorLayoutType::Hnsw);
 
-        let target = (0..model.dimensions()).map(|_| rng.random::<f32>()).collect::<Vec<_>>();
-        
+        let target = (0..model.dimensions())
+            .map(|_| rng.random::<f32>())
+            .collect::<Vec<_>>();
+
         let mut output = HashMap::new();
         let params = VectorSearchParams {
             target: &target,

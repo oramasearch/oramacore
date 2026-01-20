@@ -821,7 +821,10 @@ async fn test_vector_search_incremental_commits() {
         )
         .await
         .unwrap();
-    assert!(output.count >= 1, "Should find plant-related documents including new one");
+    assert!(
+        output.count >= 1,
+        "Should find plant-related documents including new one"
+    );
 
     let output = collection_client
         .search(
@@ -881,7 +884,10 @@ async fn test_vector_search_incremental_commits() {
         )
         .await
         .unwrap();
-    assert!(output.count >= 1, "Non-deleted plant documents should still be searchable");
+    assert!(
+        output.count >= 1,
+        "Non-deleted plant documents should still be searchable"
+    );
 
     // Phase 4: Verify data persists after reload
     let collection_id = collection_client.collection_id;
@@ -906,7 +912,10 @@ async fn test_vector_search_incremental_commits() {
         )
         .await
         .unwrap();
-    assert!(output.count >= 1, "Should still find tech document after reload");
+    assert!(
+        output.count >= 1,
+        "Should still find tech document after reload"
+    );
 
     // Verify deleted document is still not returned after reload
     let output = collection_client
