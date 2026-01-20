@@ -389,8 +389,6 @@ impl CommittedField for CommittedVectorField {
             };
         }
 
-        new_field.metadata.data_dir = data_dir.clone();
-
         Ok(new_field)
     }
 
@@ -478,6 +476,7 @@ impl CommittedVectorField {
 
 fn load_layout(data_dir: &Path) -> Result<VectorLayout> {
     let is_hnsw = std::fs::exists(data_dir.join(HNSW_INDEX_FILE_NAME))?;
+    let is_hnsw = is_hnsw || std::fs::exists(data_dir.join(HNSW_INDEX_2_FILE_NAME))?;
     if is_hnsw {
         let dump_file_path = data_dir.join(HNSW_INDEX_FILE_NAME);
         if std::fs::exists(&dump_file_path).unwrap_or(false) {
