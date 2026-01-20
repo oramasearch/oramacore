@@ -166,6 +166,7 @@ async fn test_writeside_stats_decrements_after_delete() {
 }
 
 /// Regression test for integer underflow in DocumentLengthsPerDocument::remove_doc_ids().
+/// https://github.com/oramasearch/oramacore/pull/311
 ///
 /// Scenario: Sparse fields where deleted documents never existed cause total_documents
 /// to decrement incorrectly. Example: committed 'artist' field has 1 doc, we delete 2 docs
