@@ -14,6 +14,7 @@ use oramacore_lib::{
     fs::{create_if_not_exists, BufferedFile},
 };
 use serde::{Deserialize, Serialize};
+use tracing::info;
 
 use crate::{
     collection_manager::sides::read::{
@@ -363,23 +364,46 @@ impl CommittedField for CommittedVectorField {
                     brute_force.delete(&uncommitted_document_deletions);
 
                     if brute_force.len() >= MIN_HNSW_DOCS {
-                        panic!("Transition from BruteForce to HNSW not implemented yet");
+                        info!("Upgrading vector field {:?} from brute-force to HNSW layout", self.metadata.field_path);
+                        let mut hnsw = HNSW2Index::new_with_deletion(uncommitted.dimension);
+
+                        hnsw.batch_add(uncommitted.iter().filter_map(|(doc, vecs)| {
+                            if uncommitted_document_deletions.contains(&doc) {
+                                None
+                            } else {
+                                Some(vecs.into_iter().map(move |v| (v, doc)))
+                            }
+                        }).flatten())?;
+                        hnsw.delete_batch(&uncommitted_document_deletions);
+                        hnsw.build()?;
+
+                        *layout = VectorLayout::Hnsw(Box::new(hnsw));
                     }
                 },
                 VectorLayout::Hnsw(hnsw) => {
-                    for (doc, vec) in uncommitted.iter() {
+                    hnsw.batch_add(uncommitted.iter().filter_map(|(doc, vecs)| {
                         if uncommitted_document_deletions.contains(&doc) {
-                            continue;
+                            None
+                        } else {
+                            Some(vecs.into_iter().map(move |v| (v, doc)))
                         }
-                        for vector in vec {
-                            hnsw.add_owned(vector, doc)?;
-                        }
-                    }
+                    }).flatten())?;
                     hnsw.delete_batch(&uncommitted_document_deletions);
+
+                    hnsw.build()?;
+                    hnsw.rebuild()?;
                 }
             };
 
             layout.save(&data_dir)?;
+
+            // Update stats to reflect the current layout state after potential upgrade
+            new_field.stats = CommittedVectorFieldStats {
+                dimensions: layout.dim(),
+                vector_count: layout.len(),
+                loaded: AtomicBool::new(true),
+                layout: layout.as_layout_type(),
+            };
         }
 
         new_field.metadata.data_dir = data_dir.clone();
@@ -505,5 +529,89 @@ impl CommittedFieldMetadata for VectorFieldInfo {
     }
     fn field_path(&self) -> &[String] {
         self.field_path.as_ref()
+    }
+}
+
+
+#[cfg(test)]
+mod tests {
+    use duration_string::DurationString;
+    use rand::Rng;
+
+    use super::*;
+    use crate::tests::utils::*;
+
+    #[test]
+    fn test_from_brute_force_to_hnsw() {
+        init_log();
+
+        let data_dir = generate_new_path();
+        let first_data_dir = data_dir.join("first");
+        let second_data_dir = data_dir.join("second");
+
+        std::fs::create_dir_all(&first_data_dir).unwrap();
+        std::fs::create_dir_all(&second_data_dir).unwrap();
+
+        let offload_config = OffloadFieldConfig {
+            unload_window: DurationString::from_string("12h".to_string()).unwrap(),
+            slot_count_exp: 10,
+            slot_size_exp: 8,
+        };
+
+        let model = Model::BGESmall;
+
+        // Use random vectors instead of zero vectors to avoid pathological behavior
+        // in HNSW construction where all identical vectors cause excessive computation.
+        let mut rng = rand::rng();
+
+        let mut uncommitted = UncommittedVectorField::empty(
+            Box::new(["field_path".to_string()]),
+            model,
+        );
+        for doc_id in 1..=(MIN_HNSW_DOCS - 1) {
+            let vectors = vec![(0..model.dimensions()).map(|_| rng.random::<f32>()).collect::<Vec<_>>()];
+            uncommitted.insert(DocumentId(doc_id as u64), vectors).unwrap();
+        }
+
+        let committed = CommittedVectorField::from_uncommitted(
+            &uncommitted,
+            first_data_dir,
+            &HashSet::new(),
+            offload_config,
+        )
+        .unwrap();
+
+        assert_eq!(committed.stats.layout, VectorLayoutType::Plain);
+
+        let mut uncommitted = UncommittedVectorField::empty(
+            Box::new(["field_path".to_string()]),
+            model,
+        );
+        for doc_id in (MIN_HNSW_DOCS - 1)..=(MIN_HNSW_DOCS + 10) {
+            let vectors = vec![(0..model.dimensions()).map(|_| rng.random::<f32>()).collect::<Vec<_>>()];
+            uncommitted.insert(DocumentId(doc_id as u64), vectors).unwrap();
+        }
+
+        let new_committed = committed.add_uncommitted(
+            &uncommitted,
+            second_data_dir,
+            &HashSet::new(),
+            offload_config
+        ).unwrap();
+
+        assert_eq!(new_committed.stats.layout, VectorLayoutType::Hnsw);
+
+        let target = (0..model.dimensions()).map(|_| rng.random::<f32>()).collect::<Vec<_>>();
+        
+        let mut output = HashMap::new();
+        let params = VectorSearchParams {
+            target: &target,
+            similarity: 0.0,
+            limit: 5,
+            filtered_doc_ids: None,
+        };
+        new_committed.search(&params, &mut output).unwrap();
+
+        assert!(!output.is_empty());
     }
 }
