@@ -5,12 +5,12 @@ use serde_json::Value;
 use std::sync::Arc;
 
 use crate::collection_manager::sides::read::{ReadSide, SearchAnalyticEventOrigin, SearchRequest};
-use crate::types::{ApiKey, CollectionId, NLPSearchRequest, SearchParams};
+use crate::types::{CollectionId, NLPSearchRequest, ReadApiKey, SearchParams};
 
 #[pyclass]
 pub struct SearchService {
     read_side: Arc<ReadSide>,
-    api_key: ApiKey,
+    api_key: ReadApiKey,
     collection_id: CollectionId,
 }
 
@@ -25,14 +25,14 @@ impl SearchService {
             })?;
 
         let read_side = self.read_side.clone();
-        let api_key = self.api_key;
+        let api_key = self.api_key.clone();
         let collection_id = self.collection_id;
 
         let result = tokio::task::block_in_place(|| {
             tokio::runtime::Handle::current().block_on(async move {
                 read_side
                     .search(
-                        api_key,
+                        &api_key,
                         collection_id,
                         SearchRequest {
                             search_params,
@@ -76,14 +76,14 @@ impl SearchService {
         })?;
 
         let read_side = self.read_side.clone();
-        let api_key = self.api_key;
+        let api_key = self.api_key.clone();
         let collection_id = self.collection_id;
 
         let result = tokio::task::block_in_place(|| {
             tokio::runtime::Handle::current().block_on(async move {
                 read_side
                     .search(
-                        api_key,
+                        &api_key,
                         collection_id,
                         SearchRequest {
                             search_params,
@@ -118,7 +118,7 @@ impl SearchService {
             })?;
 
         let read_side = self.read_side.clone();
-        let api_key = self.api_key;
+        let api_key = self.api_key.clone();
         let collection_id = self.collection_id;
 
         // Release the GIL before blocking on async operations
@@ -175,7 +175,7 @@ impl McpService {
     pub fn new(
         read_side: Arc<ReadSide>,
         collection_id: CollectionId,
-        api_key: ApiKey,
+        api_key: ReadApiKey,
         collection_description: String,
     ) -> PyResult<Self> {
         Python::attach(|py| {

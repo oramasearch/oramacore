@@ -3,12 +3,14 @@
 mod analytics;
 mod answer;
 mod api_key_chain;
+mod api_key_extraction;
 mod batch_get_documents;
 mod boost_integration;
 mod bugs;
 mod claim_limitations;
 mod commit;
 mod concurrency;
+mod customer_jwt_search;
 mod delete_doc;
 mod entity_lifecycle;
 mod facets;

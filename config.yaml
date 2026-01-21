@@ -8,7 +8,8 @@ log:
     # Comment the following line to disable the logging
     file_path: "./log.log"
     levels:
-        oramacore: trace
+        oramacore: info
+        oramacore_lib: info
 
 writer_side:
     output:
@@ -58,13 +59,23 @@ writer_side:
             max_age: 12h
             # Enable/disable cleanup (default: true)
             enabled: true
-    # Uncomment to allow JWT validation
+    # Uncomment to allow JWT validation with multiple providers
     # jwt:
-    #     jwks_url: http://localhost:3000/api/.well-known/jwks.json
-    #     issuers:
-    #         - http://localhost:3000
-    #     audiences:
-    #         - http://localhost:8080
+    #     providers:
+    #         - name: "internal-dashboard"
+    #           jwks_url: http://localhost:3000/api/.well-known/jwks.json
+    #           issuers:
+    #               - http://localhost:3000
+    #           audiences:
+    #               - http://localhost:8080
+    #           refresh_interval: 1h
+    #         # Add more providers as needed:
+    #         # - name: "auth0-production"
+    #         #   jwks_url: https://your-tenant.auth0.com/.well-known/jwks.json
+    #         #   issuers:
+    #         #       - https://your-tenant.auth0.com/
+    #         #   audiences:
+    #         #       - https://api.yourservice.com
 
 
 reader_side:
@@ -127,6 +138,28 @@ reader_side:
                 metadata_key: latitude
             -   header: longitude
                 metadata_key: longitude
+
+    # Uncomment to enable customer JWT validation for search requests.
+    # This allows customers to use their own identity provider (IdP) for authentication.
+    # The JWT must include an "orak" claim containing the collection's read API key.
+    # Additional claims can be accessed by the beforeSearch hook to apply custom restrictions.
+    # Example JWT claim: {"orak":"c1_my-read-api-key", "country": "US", "iss":"https://issuer"}
+    jwt:
+        providers:
+            -   name: "Supabase"
+                jwks_url: https://czjqejhvicpcufovzrtj.supabase.co/auth/v1/.well-known/jwks.json
+                issuers:
+                    - https://czjqejhvicpcufovzrtj.supabase.co/auth/v1
+                audiences:
+                    - authenticated
+                refresh_interval: 1h
+            # Add more providers as needed for different customers:
+            # - name: "auth0-production"
+            #   jwks_url: https://your-tenant.auth0.com/.well-known/jwks.json
+            #   issuers:
+            #       - https://your-tenant.auth0.com/
+            #   audiences:
+            #       - https://api.yourservice.com
 
 ai_server:
     scheme: http

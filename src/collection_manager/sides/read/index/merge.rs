@@ -10,8 +10,6 @@ use oramacore_lib::fs::create_if_not_exists;
 
 use super::super::OffloadFieldConfig;
 
-// pub use super::filter::Filterable;
-
 pub trait CommittedFieldMetadata {
     fn data_dir(&self) -> &PathBuf;
     fn set_data_dir(&mut self, data_dir: PathBuf);
@@ -135,11 +133,18 @@ pub fn merge_field<
 
             let new_field = committed.add_uncommitted(
                 uncommitted,
-                data_dir,
+                data_dir.clone(),
                 uncommitted_document_deletions,
                 *offload_config,
             )?;
-            Ok(Some(new_field))
+
+            let mut medata = new_field.metadata();
+            medata.set_data_dir(data_dir);
+
+            let new_new = CommittedField::try_load(medata, *offload_config)
+                .context("Failed to load committed vector field")?;
+
+            Ok(Some(new_new))
         }
     }
 }

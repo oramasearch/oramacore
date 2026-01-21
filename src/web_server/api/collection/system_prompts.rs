@@ -19,22 +19,14 @@ use crate::{
         write::{WriteError, WriteSide},
     },
     types::{
-        ApiKey, CollectionId, DeleteSystemPromptParams, InsertSystemPromptParams,
-        InteractionLLMConfig, UpdateSystemPromptParams, WriteApiKey,
+        CollectionId, DeleteSystemPromptParams, InsertSystemPromptParams, InteractionLLMConfig,
+        ReadApiKey, UpdateSystemPromptParams, WriteApiKey,
     },
     web_server::api::util::print_error,
 };
 
 #[derive(Deserialize)]
-struct ApiKeyQueryParams {
-    #[serde(rename = "api-key")]
-    api_key: ApiKey,
-}
-
-#[derive(Deserialize)]
 struct GetSystemPromptQueryParams {
-    #[serde(rename = "api-key")]
-    api_key: ApiKey,
     #[serde(rename = "system_prompt_id")]
     system_prompt_id: String,
 }
@@ -75,14 +67,14 @@ pub fn write_apis(write_side: Arc<WriteSide>) -> Router {
 
 async fn get_system_prompt_v1(
     Path(collection_id): Path<CollectionId>,
-    Query(query): Query<GetSystemPromptQueryParams>,
     read_side: State<Arc<ReadSide>>,
+    read_api_key: ReadApiKey,
+    Query(query): Query<GetSystemPromptQueryParams>,
 ) -> impl IntoResponse {
     let system_prompt_id = query.system_prompt_id;
-    let read_api_key = query.api_key;
 
     match read_side
-        .get_system_prompt(read_api_key, collection_id, system_prompt_id)
+        .get_system_prompt(&read_api_key, collection_id, system_prompt_id)
         .await
     {
         Ok(Some(system_prompt)) => Ok((
@@ -102,13 +94,11 @@ async fn get_system_prompt_v1(
 
 async fn list_system_prompts_v1(
     Path(collection_id): Path<CollectionId>,
-    Query(query): Query<ApiKeyQueryParams>,
     read_side: State<Arc<ReadSide>>,
+    read_api_key: ReadApiKey,
 ) -> impl IntoResponse {
-    let read_api_key = query.api_key;
-
     match read_side
-        .get_all_system_prompts_by_collection(read_api_key, collection_id)
+        .get_all_system_prompts_by_collection(&read_api_key, collection_id)
         .await
     {
         Ok(system_prompts) => Ok((

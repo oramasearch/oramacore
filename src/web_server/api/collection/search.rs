@@ -15,8 +15,8 @@ use crate::collection_manager::sides::read::{
 use crate::{
     collection_manager::sides::read::ReadSide,
     types::{
-        ApiKey, BatchGetDocumentsRequest, BatchGetDocumentsResponse, CollectionId,
-        CollectionStatsRequest, SearchParams,
+        BatchGetDocumentsRequest, BatchGetDocumentsResponse, CollectionId, CollectionStatsRequest,
+        ReadApiKey, SearchParams,
     },
 };
 
@@ -36,15 +36,7 @@ pub fn apis(read_side: Arc<ReadSide>) -> Router {
 }
 
 #[derive(Deserialize)]
-struct SearchQueryParams {
-    #[serde(rename = "api-key")]
-    api_key: ApiKey,
-}
-
-#[derive(Deserialize)]
 struct FilterableFieldsSearchQueryParams {
-    #[serde(rename = "api-key")]
-    api_key: ApiKey,
     #[serde(rename = "with-keys")]
     with_keys: Option<bool>,
 }
@@ -53,14 +45,12 @@ async fn search(
     Path(collection_id): Path<CollectionId>,
     read_side: State<Arc<ReadSide>>,
     analytics_metadata: AnalyticsMetadataFromRequest,
-    Query(query): Query<SearchQueryParams>,
+    read_api_key: ReadApiKey,
     Json(search_params): Json<SearchParams>,
 ) -> impl IntoResponse {
-    let read_api_key = query.api_key;
-
     read_side
         .search(
-            read_api_key,
+            &read_api_key,
             collection_id,
             SearchRequest {
                 search_params,
@@ -76,13 +66,11 @@ async fn search(
 async fn stats(
     Path(collection_id): Path<CollectionId>,
     read_side: State<Arc<ReadSide>>,
-    Query(query): Query<SearchQueryParams>,
+    read_api_key: ReadApiKey,
 ) -> impl IntoResponse {
-    let read_api_key = query.api_key;
-
     read_side
         .collection_stats(
-            read_api_key,
+            &read_api_key,
             collection_id,
             CollectionStatsRequest { with_keys: true },
         )
@@ -93,13 +81,13 @@ async fn stats(
 async fn filterable_fields(
     Path(collection_id): Path<CollectionId>,
     read_side: State<Arc<ReadSide>>,
+    read_api_key: ReadApiKey,
     Query(query): Query<FilterableFieldsSearchQueryParams>,
 ) -> impl IntoResponse {
-    let read_api_key = query.api_key;
     let with_keys = query.with_keys.unwrap_or(false);
 
     read_side
-        .filterable_fields(read_api_key, collection_id, with_keys)
+        .filterable_fields(&read_api_key, collection_id, with_keys)
         .await
         .map(Json)
 }
@@ -107,7 +95,7 @@ async fn filterable_fields(
 async fn batch_get_documents(
     Path(collection_id): Path<CollectionId>,
     read_side: State<Arc<ReadSide>>,
-    Query(query): Query<SearchQueryParams>,
+    read_api_key: ReadApiKey,
     Json(request): Json<BatchGetDocumentsRequest>,
 ) -> impl IntoResponse {
     // Validate request size
@@ -115,10 +103,8 @@ async fn batch_get_documents(
         return (StatusCode::BAD_REQUEST, e).into_response();
     }
 
-    let read_api_key = query.api_key;
-
     match read_side
-        .batch_get_documents(read_api_key, collection_id, request.ids)
+        .batch_get_documents(&read_api_key, collection_id, request.ids)
         .await
     {
         Ok(documents) => Json(BatchGetDocumentsResponse { documents }).into_response(),

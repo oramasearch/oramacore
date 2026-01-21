@@ -572,7 +572,7 @@ pub struct ClaimLimits {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, Copy)]
-pub struct Claims {
+pub struct DashboardClaims {
     pub sub: CollectionId,
     pub scope: StackString<20>,
     pub iss: StackString<128>,
@@ -585,7 +585,7 @@ pub struct Claims {
 #[allow(clippy::large_enum_variant)]
 pub enum WriteApiKey {
     ApiKey(ApiKey),
-    Claims(Claims),
+    Claims(DashboardClaims),
 }
 
 impl WriteApiKey {
@@ -593,7 +593,33 @@ impl WriteApiKey {
         Self::ApiKey(api_key)
     }
 
-    pub fn from_claims(claims: Claims) -> Self {
+    pub fn from_claims(claims: DashboardClaims) -> Self {
+        Self::Claims(claims)
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct CustomerClaims {
+    pub orak: ApiKey,
+    /// Additional JWT claims from the customer's identity provider.
+    /// These can be used by hooks to apply custom restrictions.
+    #[serde(flatten)]
+    pub extra: HashMap<String, Value>,
+}
+
+#[derive(Debug, Clone)]
+#[allow(clippy::large_enum_variant)]
+pub enum ReadApiKey {
+    ApiKey(ApiKey),
+    Claims(CustomerClaims),
+}
+
+impl ReadApiKey {
+    pub fn from_api_key(api_key: ApiKey) -> Self {
+        Self::ApiKey(api_key)
+    }
+
+    pub fn from_claims(claims: CustomerClaims) -> Self {
         Self::Claims(claims)
     }
 }
@@ -1605,15 +1631,7 @@ pub struct Interaction {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GetSystemPromptQueryParams {
-    #[serde(rename = "api-key")]
-    pub api_key: ApiKey,
     pub system_prompt_id: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TrainingSetsQueryOptimizerParams {
-    #[serde(rename = "api-key")]
-    pub api_key: ApiKey,
 }
 
 #[derive(Deserialize, Clone, Serialize)]
@@ -2283,7 +2301,9 @@ impl<'de, const N: usize> Deserialize<'de> for StackString<N> {
         D: serde::de::Deserializer<'de>,
     {
         let s = String::deserialize(deserializer)?;
-        Ok(StackString(ArrayString::<N>::try_from(s.as_str()).unwrap()))
+        ArrayString::<N>::try_from(s.as_str())
+            .map(StackString)
+            .map_err(|e| serde::de::Error::custom(format!("String too long (max {N} chars): {e}")))
     }
 }
 impl<const N: usize> StackString<N> {

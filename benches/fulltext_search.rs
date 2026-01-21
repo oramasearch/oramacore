@@ -5,7 +5,7 @@ use std::time::Duration;
 use tokio::runtime::Runtime;
 
 // Import the necessary modules directly since tests module is not available in bench context
-use std::{path::PathBuf, sync::Arc};
+use std::{path::PathBuf, sync::Arc, sync::Once};
 
 use anyhow::{bail, Result};
 use futures::{future::BoxFuture, FutureExt};
@@ -26,22 +26,29 @@ use oramacore::{
     },
     types::{
         ApiKey, CollectionId, CollectionStatsRequest, CreateCollection, CreateIndexRequest,
-        DocumentList, IndexId, InsertDocumentsResult, SearchParams, SearchResult, WriteApiKey,
+        DocumentList, IndexId, InsertDocumentsResult, ReadApiKey, SearchParams, SearchResult,
+        WriteApiKey,
     },
     web_server::HttpConfig,
     OramacoreConfig,
 };
 
+// Ensure logging and environment variables are set only once to avoid
+// race conditions with unsafe std::env::set_var.
+static LOG_INIT: Once = Once::new();
+
 /// Initialize logging for benchmarks
 pub fn init_log() {
-    if let Ok(a) = std::env::var("LOG") {
-        if a == "info" {
-            unsafe { std::env::set_var("RUST_LOG", "oramacore=info,warn") };
-        } else {
-            unsafe { std::env::set_var("RUST_LOG", "oramacore=trace,warn") };
+    LOG_INIT.call_once(|| {
+        if let Ok(a) = std::env::var("LOG") {
+            if a == "info" {
+                unsafe { std::env::set_var("RUST_LOG", "oramacore=info,warn") };
+            } else {
+                unsafe { std::env::set_var("RUST_LOG", "oramacore=trace,warn") };
+            }
         }
-    }
-    let _ = tracing_subscriber::fmt::try_init();
+        let _ = tracing_subscriber::fmt::try_init();
+    });
 }
 
 /// Generate a new temporary path for test data
@@ -109,6 +116,7 @@ pub fn create_oramacore_config() -> OramacoreConfig {
                 collection_commit: CollectionCommitConfig::default(),
             },
             analytics: None,
+            jwt: None,
         },
     }
 }
@@ -186,12 +194,15 @@ impl TestContext {
             )
             .await?;
 
+        let read_api_key = ReadApiKey::ApiKey(read_api_key);
+        let read_api_key_for_wait = read_api_key.clone();
         wait_for(self, |s| {
             let reader = s.reader.clone();
+            let read_api_key = read_api_key_for_wait.clone();
             async move {
                 reader
                     .collection_stats(
-                        read_api_key,
+                        &read_api_key,
                         id,
                         CollectionStatsRequest { with_keys: false },
                     )
@@ -209,7 +220,7 @@ impl TestContext {
         &self,
         collection_id: CollectionId,
         write_api_key: WriteApiKey,
-        read_api_key: ApiKey,
+        read_api_key: ReadApiKey,
     ) -> Result<TestCollectionClient> {
         Ok(TestCollectionClient {
             collection_id,
@@ -241,7 +252,7 @@ impl TestContext {
 pub struct TestCollectionClient {
     pub collection_id: CollectionId,
     pub write_api_key: WriteApiKey,
-    pub read_api_key: ApiKey,
+    pub read_api_key: ReadApiKey,
     pub reader: Arc<ReadSide>,
     pub writer: Arc<WriteSide>,
 }
@@ -263,12 +274,12 @@ impl TestCollectionClient {
 
         wait_for(self, |s| {
             let reader = s.reader.clone();
-            let read_api_key = s.read_api_key;
+            let read_api_key = s.read_api_key.clone();
             let collection_id = s.collection_id;
             async move {
                 let stats = reader
                     .collection_stats(
-                        read_api_key,
+                        &read_api_key,
                         collection_id,
                         CollectionStatsRequest { with_keys: false },
                     )
@@ -290,7 +301,7 @@ impl TestCollectionClient {
             collection_id: self.collection_id,
             index_id,
             write_api_key: self.write_api_key,
-            read_api_key: self.read_api_key,
+            read_api_key: self.read_api_key.clone(),
             reader: self.reader.clone(),
             writer: self.writer.clone(),
         })
@@ -299,7 +310,7 @@ impl TestCollectionClient {
     pub async fn search(&self, search_params: SearchParams) -> Result<SearchResult> {
         self.reader
             .search(
-                self.read_api_key,
+                &self.read_api_key,
                 self.collection_id,
                 SearchRequest {
                     search_params,
@@ -323,7 +334,7 @@ pub struct TestIndexClient {
     pub collection_id: CollectionId,
     pub index_id: IndexId,
     pub write_api_key: WriteApiKey,
-    pub read_api_key: ApiKey,
+    pub read_api_key: ReadApiKey,
     pub reader: Arc<ReadSide>,
     pub writer: Arc<WriteSide>,
 }
@@ -333,7 +344,7 @@ impl TestIndexClient {
         let stats = self
             .reader
             .collection_stats(
-                self.read_api_key,
+                &self.read_api_key,
                 self.collection_id,
                 CollectionStatsRequest { with_keys: false },
             )
@@ -358,12 +369,12 @@ impl TestIndexClient {
 
         wait_for(self, |s| {
             let reader = s.reader.clone();
-            let read_api_key = s.read_api_key;
+            let read_api_key = s.read_api_key.clone();
             let collection_id = s.collection_id;
             async move {
                 let stats = reader
                     .collection_stats(
-                        read_api_key,
+                        &read_api_key,
                         collection_id,
                         CollectionStatsRequest { with_keys: false },
                     )

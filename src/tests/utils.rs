@@ -1,4 +1,10 @@
-use std::{collections::HashMap, net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
+use std::{
+    collections::HashMap,
+    net::SocketAddr,
+    path::PathBuf,
+    sync::{Arc, Once},
+    time::Duration,
+};
 
 use anyhow::{bail, Result};
 use axum::{response::sse::Event, Json};
@@ -7,6 +13,7 @@ use fake::Fake;
 use fake::Faker;
 use futures::{future::BoxFuture, FutureExt};
 use oramacore_lib::hook_storage::HookType;
+use pyo3::Python;
 use tokio::{
     sync::{mpsc, RwLock},
     time::sleep,
@@ -33,8 +40,8 @@ use crate::{
     types::{
         ApiKey, CollectionId, CollectionStatsRequest, CreateCollection, CreateIndexRequest,
         DescribeCollectionResponse, Document, DocumentList, IndexId, InsertDocumentsResult,
-        LanguageDTO, ReplaceIndexRequest, SearchParams, SearchResult, TypeParsingStrategies,
-        UpdateDocumentRequest, UpdateDocumentsResult, WriteApiKey,
+        LanguageDTO, ReadApiKey, ReplaceIndexRequest, SearchParams, SearchResult,
+        TypeParsingStrategies, UpdateDocumentRequest, UpdateDocumentsResult, WriteApiKey,
     },
     web_server::HttpConfig,
     OramacoreConfig,
@@ -44,15 +51,31 @@ use anyhow::Context;
 use oramacore_lib::pin_rules::PinRule;
 use oramacore_lib::shelves::{Shelf, ShelfId};
 
+// Ensure Python is initialized only once across all tests.
+// Python::initialize() must be called from a consistent thread and only once
+// to avoid race conditions that can cause SIGSEGV.
+static PYTHON_INIT: Once = Once::new();
+// Ensure logging and environment variables are set only once to avoid
+// race conditions with unsafe std::env::set_var in multi-threaded tests.
+static LOG_INIT: Once = Once::new();
+
 pub fn init_log() {
-    if let Ok(a) = std::env::var("LOG") {
-        if a == "info" {
-            unsafe { std::env::set_var("RUST_LOG", "oramacore=info,warn") };
-        } else {
-            unsafe { std::env::set_var("RUST_LOG", "oramacore=trace,warn") };
+    PYTHON_INIT.call_once(|| {
+        Python::initialize();
+    });
+
+    LOG_INIT.call_once(|| {
+        if let Ok(a) = std::env::var("LOG") {
+            if a == "info" {
+                unsafe { std::env::set_var("RUST_LOG", "oramacore=info,oramacore_lib=info,warn") };
+            } else {
+                unsafe {
+                    std::env::set_var("RUST_LOG", "oramacore=trace,oramacore_lib=trace,warn")
+                };
+            }
         }
-    }
-    let _ = tracing_subscriber::fmt::try_init();
+        let _ = tracing_subscriber::fmt::try_init();
+    });
 }
 
 pub fn generate_new_path() -> PathBuf {
@@ -72,7 +95,9 @@ pub fn create_oramacore_config() -> OramacoreConfig {
             with_prometheus: false,
         },
         ai_server: AIServiceConfig {
-            models_cache_dir: "/tmp/fastembed_cache".to_string(),
+            // Use a process-unique cache directory to avoid race conditions
+            // when multiple test processes access ONNX model files simultaneously.
+            models_cache_dir: format!("{}", std::env::temp_dir().display()),
             total_threads: 4,
             embeddings: Some(AIServiceEmbeddingsConfig {
                 automatic_embeddings_selector: None,
@@ -135,6 +160,7 @@ pub fn create_oramacore_config() -> OramacoreConfig {
                 force_commit: u32::MAX,
             },
             analytics: None,
+            jwt: None,
         },
     }
 }
@@ -265,6 +291,15 @@ impl TestContext {
         }
     }
 
+    /// Creates a new TestContext with JWT configuration for the reader side.
+    /// This is useful for testing JWT validation flows end-to-end.
+    pub async fn new_with_jwt_config(jwt_config: crate::auth::JwtConfig) -> Self {
+        let mut config = create_oramacore_config();
+        config.writer_side.master_api_key = Self::generate_api_key();
+        config.reader_side.jwt = Some(jwt_config);
+        Self::new_with_config(config).await
+    }
+
     pub async fn reload(self) -> Self {
         self.reader.stop().await.unwrap();
 
@@ -291,7 +326,8 @@ impl TestContext {
     pub async fn create_collection(&self) -> Result<TestCollectionClient> {
         let id = Self::generate_collection_id();
         let write_api_key = Self::generate_api_key();
-        let read_api_key = Self::generate_api_key();
+        let read_api_key_raw = Self::generate_api_key();
+        let read_api_key = ReadApiKey::from_api_key(read_api_key_raw);
 
         self.writer
             .create_collection(
@@ -300,7 +336,7 @@ impl TestContext {
                     id,
                     description: None,
                     mcp_description: None,
-                    read_api_key,
+                    read_api_key: read_api_key_raw,
                     write_api_key,
                     language: None,
                     embeddings_model: Some(Model::BGESmall),
@@ -308,12 +344,14 @@ impl TestContext {
             )
             .await?;
 
+        let read_api_key_for_wait = read_api_key.clone();
         wait_for(self, |s| {
             let reader = s.reader.clone();
+            let read_api_key = read_api_key_for_wait.clone();
             async move {
                 reader
                     .collection_stats(
-                        read_api_key,
+                        &read_api_key,
                         id,
                         CollectionStatsRequest { with_keys: false },
                     )
@@ -331,7 +369,7 @@ impl TestContext {
         &self,
         collection_id: CollectionId,
         write_api_key: WriteApiKey,
-        read_api_key: ApiKey,
+        read_api_key: ReadApiKey,
     ) -> Result<TestCollectionClient> {
         Ok(TestCollectionClient {
             collection_id,
@@ -362,6 +400,7 @@ impl TestContext {
 
 impl Drop for TestContext {
     fn drop(&mut self) {
+        // First, stop the reader while in tokio context
         let output = tokio::task::block_in_place(|| {
             tokio::runtime::Handle::current().block_on(async {
                 // Some tests may close the connection intentionally
@@ -373,13 +412,19 @@ impl Drop for TestContext {
         if let Err(err) = output {
             warn!("Error stopping reader: {}", err);
         }
+
+        // Then acquire GIL to ensure Python objects are properly cleaned up
+        // This must happen after the async cleanup to avoid deadlocks
+        Python::attach(|_py| {
+            // GIL is held, any Python object drops that happen now are safe
+        });
     }
 }
 
 pub struct TestCollectionClient<'test> {
     pub collection_id: CollectionId,
     pub write_api_key: WriteApiKey,
-    pub read_api_key: ApiKey,
+    pub read_api_key: ReadApiKey,
     master_api_key: ApiKey,
     pub reader: &'test ReadSide,
     pub writer: &'test WriteSide,
@@ -409,12 +454,12 @@ impl TestCollectionClient<'_> {
 
         wait_for(self, |s| {
             let reader = s.reader;
-            let read_api_key = s.read_api_key;
+            let read_api_key = s.read_api_key.clone();
             let collection_id = s.collection_id;
             async move {
                 let stats = reader
                     .collection_stats(
-                        read_api_key,
+                        &read_api_key,
                         collection_id,
                         CollectionStatsRequest { with_keys: false },
                     )
@@ -460,7 +505,7 @@ impl TestCollectionClient<'_> {
             collection_id: self.collection_id,
             index_id,
             write_api_key: self.write_api_key,
-            read_api_key: self.read_api_key,
+            read_api_key: self.read_api_key.clone(),
             reader: self.reader,
             writer: self.writer,
         })
@@ -498,12 +543,12 @@ impl TestCollectionClient<'_> {
 
         wait_for(self, |s| {
             let reader = s.reader;
-            let read_api_key = s.read_api_key;
+            let read_api_key = s.read_api_key.clone();
             let collection_id = s.collection_id;
             async move {
                 let stats = reader
                     .collection_stats(
-                        read_api_key,
+                        &read_api_key,
                         collection_id,
                         CollectionStatsRequest { with_keys: false },
                     )
@@ -533,12 +578,12 @@ impl TestCollectionClient<'_> {
 
         wait_for(self, |s| {
             let reader = s.reader;
-            let read_api_key = s.read_api_key;
+            let read_api_key = s.read_api_key.clone();
             let collection_id = s.collection_id;
             async move {
                 if reader
                     .collection_stats(
-                        read_api_key,
+                        &read_api_key,
                         collection_id,
                         CollectionStatsRequest { with_keys: false },
                     )
@@ -559,7 +604,7 @@ impl TestCollectionClient<'_> {
     pub async fn reader_stats(&self) -> Result<CollectionStats> {
         self.reader
             .collection_stats(
-                self.read_api_key,
+                &self.read_api_key,
                 self.collection_id,
                 CollectionStatsRequest { with_keys: false },
             )
@@ -570,7 +615,7 @@ impl TestCollectionClient<'_> {
     pub async fn search(&self, search_params: SearchParams) -> Result<SearchResult, ReadError> {
         self.reader
             .search(
-                self.read_api_key,
+                &self.read_api_key,
                 self.collection_id,
                 SearchRequest {
                     search_params,
@@ -602,7 +647,7 @@ impl TestCollectionClient<'_> {
         doc_ids: Vec<String>,
     ) -> Result<HashMap<String, Document>> {
         self.reader
-            .batch_get_documents(self.read_api_key, self.collection_id, doc_ids)
+            .batch_get_documents(&self.read_api_key, self.collection_id, doc_ids)
             .await
             .map_err(|e| e.into())
     }
@@ -655,7 +700,7 @@ impl TestCollectionClient<'_> {
     pub async fn get_shelf_documents(&self, shelf_id: String) -> Result<ShelfWithDocuments> {
         let collection = self
             .reader
-            .get_collection(self.collection_id, self.read_api_key)
+            .get_collection(self.collection_id, &self.read_api_key)
             .await?;
 
         let shelf_id_typed =
@@ -679,7 +724,7 @@ pub struct TestIndexClient<'test> {
     pub collection_id: CollectionId,
     pub index_id: IndexId,
     pub write_api_key: WriteApiKey,
-    pub read_api_key: ApiKey,
+    pub read_api_key: ReadApiKey,
     pub reader: &'test ReadSide,
     pub writer: &'test WriteSide,
 }
@@ -702,7 +747,7 @@ impl TestIndexClient<'_> {
         let stats = self
             .reader
             .collection_stats(
-                self.read_api_key,
+                &self.read_api_key,
                 self.collection_id,
                 CollectionStatsRequest { with_keys: false },
             )
@@ -727,12 +772,12 @@ impl TestIndexClient<'_> {
 
         wait_for(self, |s| {
             let reader = s.reader;
-            let read_api_key = s.read_api_key;
+            let read_api_key = s.read_api_key.clone();
             let collection_id = s.collection_id;
             async move {
                 let stats = reader
                     .collection_stats(
-                        read_api_key,
+                        &read_api_key,
                         collection_id,
                         CollectionStatsRequest { with_keys: false },
                     )
@@ -763,7 +808,7 @@ impl TestIndexClient<'_> {
         let stats = self
             .reader
             .collection_stats(
-                self.read_api_key,
+                &self.read_api_key,
                 self.collection_id,
                 CollectionStatsRequest { with_keys: false },
             )
@@ -782,12 +827,12 @@ impl TestIndexClient<'_> {
 
         wait_for(self, |s| {
             let reader = s.reader;
-            let read_api_key = s.read_api_key;
+            let read_api_key = s.read_api_key.clone();
             let collection_id = s.collection_id;
             async move {
                 let stats = reader
                     .collection_stats(
-                        read_api_key,
+                        &read_api_key,
                         collection_id,
                         CollectionStatsRequest { with_keys: false },
                     )
@@ -822,12 +867,12 @@ impl TestIndexClient<'_> {
 
         wait_for(self, |s| {
             let reader = s.reader;
-            let read_api_key = s.read_api_key;
+            let read_api_key = s.read_api_key.clone();
             let collection_id = s.collection_id;
             async move {
                 let stats = reader
                     .collection_stats(
-                        read_api_key,
+                        &read_api_key,
                         collection_id,
                         CollectionStatsRequest { with_keys: false },
                     )
@@ -885,11 +930,11 @@ impl TestIndexClient<'_> {
 
         wait_for(self, |s| {
             let reader = s.reader;
-            let read_api_key = s.read_api_key;
+            let read_api_key = s.read_api_key.clone();
             let collection_id = s.collection_id;
             let r = &rule_id;
             async move {
-                let collection = reader.get_collection(collection_id, read_api_key).await?;
+                let collection = reader.get_collection(collection_id, &read_api_key).await?;
                 let reader = collection.get_pin_rules_reader("test").await;
                 let ids = reader.get_rule_ids();
 
@@ -919,11 +964,11 @@ impl TestIndexClient<'_> {
 
         wait_for(self, |s| {
             let reader = s.reader;
-            let read_api_key = s.read_api_key;
+            let read_api_key = s.read_api_key.clone();
             let collection_id = s.collection_id;
             let r = &rule_id;
             async move {
-                let collection = reader.get_collection(collection_id, read_api_key).await?;
+                let collection = reader.get_collection(collection_id, &read_api_key).await?;
                 let reader = collection.get_pin_rules_reader("test").await;
                 let ids = reader.get_rule_ids();
 

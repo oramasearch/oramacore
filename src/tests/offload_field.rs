@@ -110,9 +110,10 @@ async fn test_offload_string_field() {
     // This continuously commits and checks until the field is unloaded
     let collection_id = collection_client.collection_id;
     let write_api_key = collection_client.write_api_key;
-    let read_api_key = collection_client.read_api_key;
+    let read_api_key = collection_client.read_api_key.clone();
     wait_for(&test_context, |test_context| {
         let index_id = index_client.index_id;
+        let read_api_key = read_api_key.clone();
         async move {
             // Trigger commit to check for unloading
             test_context.commit_all().await?;
@@ -358,9 +359,10 @@ async fn test_offload_vector_field() {
     // This continuously commits and checks until the field is unloaded
     let collection_id = collection_client.collection_id;
     let write_api_key = collection_client.write_api_key;
-    let read_api_key = collection_client.read_api_key;
+    let read_api_key = collection_client.read_api_key.clone();
     wait_for(&test_context, |test_context| {
         let index_id = index_client.index_id;
+        let read_api_key = read_api_key.clone();
         async move {
             // Trigger commit to check for unloading
             test_context.commit_all().await?;

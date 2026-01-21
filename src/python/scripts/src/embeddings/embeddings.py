@@ -1,4 +1,5 @@
 import numpy as np
+import threading
 from enum import Enum
 from fastembed import TextEmbedding
 from fastembed.common.utils import iter_batch
@@ -6,28 +7,33 @@ from concurrent.futures import ThreadPoolExecutor
 from fastembed.text.pooled_embedding import PooledEmbedding
 
 _thread_executor = None
+_executor_lock = threading.Lock()
 
 
 def initialize_thread_executor(max_workers=None):
     global _thread_executor
-    if _thread_executor is None:
-        _thread_executor = ThreadPoolExecutor(
-            max_workers=max_workers,
-            thread_name_prefix="embedding-worker-",
-            initializer=lambda: print("Thread initialized for embedding processing."),
-        )
+    # Use lock to prevent race conditions when multiple threads try to initialize
+    with _executor_lock:
+        if _thread_executor is None:
+            _thread_executor = ThreadPoolExecutor(
+                max_workers=max_workers,
+                thread_name_prefix="embedding-worker-",
+                initializer=lambda: print("Thread initialized for embedding processing."),
+            )
 
 
 def set_thread_executor(executor):
     global _thread_executor
-    _thread_executor = executor
+    with _executor_lock:
+        _thread_executor = executor
 
 
 def shutdown_thread_executor():
     global _thread_executor
-    if _thread_executor is not None:
-        _thread_executor.shutdown()
-        _thread_executor = None
+    with _executor_lock:
+        if _thread_executor is not None:
+            _thread_executor.shutdown()
+            _thread_executor = None
 
 
 def process_mean_pooling(args):

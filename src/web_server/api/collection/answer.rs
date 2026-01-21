@@ -1,16 +1,15 @@
 use crate::ai::answer::{Answer, AnswerError, AnswerEvent};
 use crate::collection_manager::sides::read::ReadSide;
-use crate::types::{ApiKey, Interaction};
 use crate::types::{CollectionId, SuggestionsRequest, TitleRequest};
+use crate::types::{Interaction, ReadApiKey};
 use anyhow::Context;
-use axum::extract::Query;
 use axum::http::StatusCode;
 use axum::response::sse::Event;
 use axum::response::{IntoResponse, Sse};
 use axum::routing::{get, post};
 use axum::{extract::State, Json, Router};
 use futures::Stream;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use serde_json::json;
 use std::convert::Infallible;
 use std::sync::Arc;
@@ -38,20 +37,14 @@ pub fn apis(read_side: Arc<ReadSide>) -> Router {
         .with_state(read_side)
 }
 
-#[derive(Deserialize)]
-struct AnswerQueryParams {
-    #[serde(rename = "api-key")]
-    api_key: ApiKey,
-}
-
 async fn planned_answer_v1(
     collection_id: CollectionId,
     State(read_side): State<Arc<ReadSide>>,
-    Query(query_params): Query<AnswerQueryParams>,
+    read_api_key: ReadApiKey,
     Json(interaction): Json<Interaction>,
 ) -> Result<Sse<impl Stream<Item = Result<Event, Infallible>>>, AnswerError> {
     let (answer_sender, mut answer_receiver) = mpsc::unbounded_channel();
-    let answer = Answer::try_new(read_side.clone(), collection_id, query_params.api_key).await?;
+    let answer = Answer::try_new(read_side.clone(), collection_id, read_api_key).await?;
 
     tokio::spawn(async {
         let r = answer.planned_answer(interaction, answer_sender).await;
@@ -88,12 +81,12 @@ async fn planned_answer_v1(
 async fn answer_v1(
     collection_id: CollectionId,
     State(read_side): State<Arc<ReadSide>>,
-    Query(query): Query<AnswerQueryParams>,
+    read_api_key: ReadApiKey,
     Json(interaction): Json<Interaction>,
 ) -> Result<Sse<impl Stream<Item = Result<Event, Infallible>>>, AnswerError> {
     let (answer_sender, mut answer_receiver) = mpsc::unbounded_channel();
 
-    let answer = Answer::try_new(read_side.clone(), collection_id, query.api_key).await?;
+    let answer = Answer::try_new(read_side.clone(), collection_id, read_api_key).await?;
 
     let logs = read_side.get_hook_logs();
     let log_sender = logs.get_sender(&collection_id);
@@ -132,10 +125,10 @@ async fn answer_v1(
 async fn answer_suggestions_v1(
     collection_id: CollectionId,
     State(read_side): State<Arc<ReadSide>>,
-    Query(query): Query<AnswerQueryParams>,
+    read_api_key: ReadApiKey,
     Json(request): Json<SuggestionsRequest>,
 ) -> impl IntoResponse {
-    let answer = match Answer::try_new(read_side.clone(), collection_id, query.api_key).await {
+    let answer = match Answer::try_new(read_side.clone(), collection_id, read_api_key).await {
         Ok(answer) => answer,
         Err(e) => {
             error!(error = ?e, "Failed to create Answer instance");
@@ -175,10 +168,10 @@ async fn answer_suggestions_v1(
 async fn answer_title_v1(
     collection_id: CollectionId,
     State(read_side): State<Arc<ReadSide>>,
-    Query(query): Query<AnswerQueryParams>,
+    read_api_key: ReadApiKey,
     Json(request): Json<TitleRequest>,
 ) -> impl IntoResponse {
-    let answer = match Answer::try_new(read_side.clone(), collection_id, query.api_key).await {
+    let answer = match Answer::try_new(read_side.clone(), collection_id, read_api_key).await {
         Ok(answer) => answer,
         Err(e) => {
             error!(error = ?e, "Failed to create Answer instance");
@@ -210,10 +203,10 @@ async fn answer_title_v1(
 async fn answer_logs_v1(
     collection_id: CollectionId,
     State(read_side): State<Arc<ReadSide>>,
-    Query(query): Query<AnswerQueryParams>,
+    read_api_key: ReadApiKey,
 ) -> Result<Sse<impl Stream<Item = Result<Event, Infallible>>>, AnswerError> {
     read_side
-        .check_read_api_key(collection_id, query.api_key)
+        .check_read_api_key(collection_id, &read_api_key)
         .await?;
 
     let logs = read_side.get_hook_logs();

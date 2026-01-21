@@ -54,7 +54,7 @@ strum_macros = "0.26.4"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 
-oramacore_lib = { version = "0.2.0" }
+oramacore_lib = "0.2.3"
 
 # JS
 oxc_parser = "0.47.1"
@@ -96,6 +96,7 @@ pyo3 = { version = "0.27.1" }
 serde-pyobject = "0.7.0"
 include_dir = "0.7"
 derive_more = "2.0.1"
+base64 = "0.22"
 
 [dev-dependencies]
 # hurl = "6.0.0"

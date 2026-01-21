@@ -1,9 +1,18 @@
+use std::collections::HashMap;
+
+use anyhow::Context;
+use futures::FutureExt;
+use oramacore_lib::hook_storage::HookType;
 use serde::{Deserialize, Serialize};
-use serde_json::json;
+use serde_json::{json, Value};
 
 use crate::{
-    tests::utils::{init_log, TestContext},
-    types::UpdateCollectionMcpRequest,
+    python::mcp::McpService,
+    tests::utils::{init_log, wait_for, TestContext},
+    types::{
+        CollectionStatsRequest, CustomerClaims, DocumentList, ReadApiKey,
+        UpdateCollectionMcpRequest,
+    },
 };
 
 #[derive(Serialize)]
@@ -301,7 +310,7 @@ async fn test_mcp_update_endpoint() {
     let stats = collection_client
         .reader
         .collection_stats(
-            collection_client.read_api_key,
+            &collection_client.read_api_key,
             collection_client.collection_id,
             crate::types::CollectionStatsRequest { with_keys: false },
         )
@@ -336,7 +345,7 @@ async fn test_mcp_update_endpoint() {
     let stats = collection_client
         .reader
         .collection_stats(
-            collection_client.read_api_key,
+            &collection_client.read_api_key,
             collection_client.collection_id,
             crate::types::CollectionStatsRequest { with_keys: false },
         )
@@ -347,4 +356,299 @@ async fn test_mcp_update_endpoint() {
         stats.mcp_description, None,
         "MCP description was not cleared correctly"
     );
+}
+
+/// Test that MCP search with JWT claims passes the claims to the BeforeSearch hook.
+/// This verifies the complete MCP + JWT integration:
+/// 1. MCP service is created with ReadApiKey::Claims
+/// 2. When search is called via MCP, claims are extracted
+/// 3. BeforeSearch hook receives the claims
+/// 4. Search results are filtered based on claims
+#[tokio::test(flavor = "multi_thread")]
+async fn test_mcp_search_with_jwt_claims() {
+    init_log();
+
+    let test_context = TestContext::new().await;
+    let collection_client = test_context.create_collection().await.unwrap();
+    let index_client = collection_client.create_index().await.unwrap();
+
+    // Insert documents with different countries
+    let documents: DocumentList = json!([
+        {"id": "1", "name": "Document from US", "country": "US"},
+        {"id": "2", "name": "Document from IT", "country": "IT"},
+        {"id": "3", "name": "Document from UK", "country": "UK"}
+    ])
+    .try_into()
+    .unwrap();
+    index_client.insert_documents(documents).await.unwrap();
+
+    // Insert BeforeSearch hook that filters by country from JWT claims
+    collection_client
+        .insert_hook(
+            HookType::BeforeSearch,
+            r#"
+const beforeSearch = function(search_params, claim) {
+    if (claim && claim.country) {
+        search_params.where = search_params.where || {};
+        search_params.where.country = claim.country;
+        return search_params;
+    }
+}
+export default { beforeSearch }
+"#
+            .to_string(),
+        )
+        .await
+        .unwrap();
+
+    // Wait for hook and documents
+    let collection_id = collection_client.collection_id;
+    let read_api_key = collection_client.read_api_key.clone();
+    wait_for(&test_context, |t| {
+        let reader = t.reader.clone();
+        let read_api_key = read_api_key.clone();
+        async move {
+            let stats = reader
+                .collection_stats(
+                    &read_api_key,
+                    collection_id,
+                    CollectionStatsRequest { with_keys: false },
+                )
+                .await
+                .context("stats failed")?;
+
+            if stats.hooks.is_empty() {
+                return Err(anyhow::anyhow!("hooks not arrived yet"));
+            }
+            if stats.document_count != 3 {
+                return Err(anyhow::anyhow!(
+                    "documents not arrived yet: {}",
+                    stats.document_count
+                ));
+            }
+
+            Ok(stats)
+        }
+        .boxed()
+    })
+    .await
+    .unwrap();
+
+    // Get the raw API key to use as orak
+    let read_api_key_raw = match &collection_client.read_api_key {
+        ReadApiKey::ApiKey(key) => *key,
+        ReadApiKey::Claims(claims) => claims.orak,
+    };
+
+    // Create CustomerClaims with country="IT"
+    let mut extra = HashMap::new();
+    extra.insert("country".to_string(), Value::String("IT".to_string()));
+
+    let claims_read_api_key = ReadApiKey::Claims(CustomerClaims {
+        orak: read_api_key_raw,
+        extra,
+    });
+
+    // Create MCP service with JWT claims
+    let mcp_service = McpService::new(
+        test_context.reader.clone(),
+        collection_id,
+        claims_read_api_key,
+        "Test collection".to_string(),
+    )
+    .expect("Failed to create MCP service");
+
+    // Call search via MCP JSON-RPC interface
+    let jsonrpc_request = json!({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "tools/call",
+        "params": {
+            "name": "search",
+            "arguments": {
+                "term": "Document"
+            }
+        }
+    });
+
+    let response_str = mcp_service
+        .handle_jsonrpc(jsonrpc_request.to_string())
+        .expect("MCP JSON-RPC request failed");
+
+    let response: Value =
+        serde_json::from_str(&response_str).expect("Failed to parse JSON-RPC response");
+
+    // Extract the result from JSON-RPC response
+    let result = response
+        .get("result")
+        .expect("No result in JSON-RPC response");
+
+    // Parse the result - it's wrapped in MCP content format
+    // The result is: {"content": [{"type": "text", "text": "{...json...}"}]}
+    let content = result
+        .get("content")
+        .and_then(|c| c.as_array())
+        .and_then(|arr| arr.first())
+        .and_then(|item| item.get("text"))
+        .and_then(|t| t.as_str())
+        .expect("Invalid MCP result format");
+
+    let search_result: Value =
+        serde_json::from_str(content).expect("Failed to parse search result JSON");
+
+    // Should only get 1 document (the IT document) due to hook filtering
+    let count = search_result
+        .get("count")
+        .and_then(|c| c.as_u64())
+        .unwrap_or(0);
+    assert_eq!(count, 1, "Expected 1 document, got {count}");
+
+    // Verify it's the IT document
+    let hits = search_result.get("hits").and_then(|h| h.as_array());
+    assert!(hits.is_some(), "No hits in result");
+    let hits = hits.unwrap();
+    assert_eq!(hits.len(), 1, "Expected 1 hit");
+
+    // The document ID format is "index_id:doc_id"
+    let doc_id = hits[0]
+        .get("id")
+        .and_then(|id| id.as_str())
+        .expect("No document ID");
+    assert!(
+        doc_id.ends_with(":2"),
+        "Expected document 2 (IT), got {doc_id}"
+    );
+
+    drop(test_context);
+}
+
+/// Test that MCP search with plain API key passes null claims to the BeforeSearch hook.
+#[tokio::test(flavor = "multi_thread")]
+async fn test_mcp_search_with_plain_api_key() {
+    init_log();
+
+    let test_context = TestContext::new().await;
+    let collection_client = test_context.create_collection().await.unwrap();
+    let index_client = collection_client.create_index().await.unwrap();
+
+    // Insert documents
+    let documents: DocumentList = json!([
+        {"id": "1", "name": "Document A"},
+        {"id": "2", "name": "Document B"},
+        {"id": "3", "name": "Document C"}
+    ])
+    .try_into()
+    .unwrap();
+    index_client.insert_documents(documents).await.unwrap();
+
+    // Insert BeforeSearch hook that limits results to 1 when claim is null
+    collection_client
+        .insert_hook(
+            HookType::BeforeSearch,
+            r#"
+const beforeSearch = function(search_params, claim) {
+    if (claim === null) {
+        search_params.limit = 1;
+        return search_params;
+    }
+}
+export default { beforeSearch }
+"#
+            .to_string(),
+        )
+        .await
+        .unwrap();
+
+    // Wait for hook and documents
+    let collection_id = collection_client.collection_id;
+    let read_api_key = collection_client.read_api_key.clone();
+    wait_for(&test_context, |t| {
+        let reader = t.reader.clone();
+        let read_api_key = read_api_key.clone();
+        async move {
+            let stats = reader
+                .collection_stats(
+                    &read_api_key,
+                    collection_id,
+                    CollectionStatsRequest { with_keys: false },
+                )
+                .await
+                .context("stats failed")?;
+
+            if stats.hooks.is_empty() {
+                return Err(anyhow::anyhow!("hooks not arrived yet"));
+            }
+            if stats.document_count != 3 {
+                return Err(anyhow::anyhow!(
+                    "documents not arrived yet: {}",
+                    stats.document_count
+                ));
+            }
+
+            Ok(stats)
+        }
+        .boxed()
+    })
+    .await
+    .unwrap();
+
+    // Create MCP service with plain API key (not JWT claims)
+    let mcp_service = McpService::new(
+        test_context.reader.clone(),
+        collection_id,
+        collection_client.read_api_key.clone(),
+        "Test collection".to_string(),
+    )
+    .expect("Failed to create MCP service");
+
+    // Call search via MCP JSON-RPC interface
+    let jsonrpc_request = json!({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "tools/call",
+        "params": {
+            "name": "search",
+            "arguments": {
+                "term": "Document"
+            }
+        }
+    });
+
+    let response_str = mcp_service
+        .handle_jsonrpc(jsonrpc_request.to_string())
+        .expect("MCP JSON-RPC request failed");
+
+    let response: Value =
+        serde_json::from_str(&response_str).expect("Failed to parse JSON-RPC response");
+
+    // Extract the result from JSON-RPC response
+    let result = response
+        .get("result")
+        .expect("No result in JSON-RPC response");
+
+    // Parse the result
+    let content = result
+        .get("content")
+        .and_then(|c| c.as_array())
+        .and_then(|arr| arr.first())
+        .and_then(|item| item.get("text"))
+        .and_then(|t| t.as_str())
+        .expect("Invalid MCP result format");
+
+    let search_result: Value =
+        serde_json::from_str(content).expect("Failed to parse search result JSON");
+
+    // Should only get 1 hit due to hook limiting when claim is null
+    let hits = search_result
+        .get("hits")
+        .and_then(|h| h.as_array())
+        .expect("No hits in result");
+    assert_eq!(
+        hits.len(),
+        1,
+        "Expected 1 hit (limited by hook), got {}",
+        hits.len()
+    );
+
+    drop(test_context);
 }

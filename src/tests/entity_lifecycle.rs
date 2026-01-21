@@ -9,6 +9,7 @@ use crate::tests::utils::init_log;
 use crate::tests::utils::TestContext;
 use crate::types::CreateCollection;
 use crate::types::DocumentList;
+use crate::types::ReadApiKey;
 use crate::types::WriteApiKey;
 
 #[tokio::test(flavor = "multi_thread")]
@@ -25,7 +26,10 @@ async fn test_collection_id_already_exists() {
             test_context.master_api_key,
             CreateCollection {
                 id: collection_client.collection_id,
-                read_api_key: collection_client.read_api_key,
+                read_api_key: match collection_client.read_api_key.clone() {
+                    ReadApiKey::ApiKey(k) => k,
+                    _ => panic!(),
+                },
                 write_api_key: match collection_client.write_api_key {
                     WriteApiKey::ApiKey(k) => k,
                     _ => panic!(),
@@ -93,7 +97,7 @@ async fn test_delete_collection() {
 
     let collection_id = collection_client.collection_id;
     let write_api_key = collection_client.write_api_key;
-    let read_api_key = collection_client.read_api_key;
+    let read_api_key = collection_client.read_api_key.clone();
 
     let test_context = test_context.reload().await;
     let collection_client = test_context
@@ -243,7 +247,7 @@ async fn test_delete_index_committed() {
 
     let collection_id = collection_client.collection_id;
     let write_api_key = collection_client.write_api_key;
-    let read_api_key = collection_client.read_api_key;
+    let read_api_key = collection_client.read_api_key.clone();
 
     let test_context = test_context.reload().await;
     let collection_client = test_context
@@ -336,7 +340,7 @@ async fn test_index_promotion_with_committed_and_uncommitted_data() {
 
     let collection_id = collection_client.collection_id;
     let write_api_key = collection_client.write_api_key;
-    let read_api_key = collection_client.read_api_key;
+    let read_api_key = collection_client.read_api_key.clone();
     let test_context = test_context.reload().await;
 
     let collection_client = test_context
@@ -432,7 +436,7 @@ async fn test_unchanged_field_path_after_reload() {
 
     let collection_id = collection_client.collection_id;
     let write_api_key = collection_client.write_api_key;
-    let read_api_key = collection_client.read_api_key;
+    let read_api_key = collection_client.read_api_key.clone();
     // Reload
     let test_context = test_context.reload().await;
     let collection_client = test_context

@@ -3,7 +3,7 @@ pub mod conversions;
 
 use crate::ai::answer::{Answer, AnswerError};
 use crate::collection_manager::sides::read::ReadSide;
-use crate::types::{ApiKey, CollectionId};
+use crate::types::{CollectionId, ReadApiKey};
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::sse::Event;
@@ -24,7 +24,7 @@ use tracing::{debug, error, info};
 
 async fn openai_chat_completion_stream(
     collection_id: CollectionId,
-    api_key: ApiKey,
+    api_key: ReadApiKey,
     read_side: Arc<ReadSide>,
     request: OpenAIChatRequest,
 ) -> Result<Sse<impl Stream<Item = Result<Event, Infallible>>>, AnswerError> {
@@ -84,7 +84,7 @@ async fn openai_chat_completion_stream(
 
 async fn openai_chat_completion(
     collection_id: CollectionId,
-    api_key: ApiKey,
+    api_key: ReadApiKey,
     read_side: Arc<ReadSide>,
     request: OpenAIChatRequest,
 ) -> Result<Response, AnswerError> {
@@ -127,7 +127,7 @@ async fn openai_chat_completion(
 
 async fn openai_chat_completion_handler(
     Path(collection_id): Path<CollectionId>,
-    api_key: ApiKey,
+    api_key: ReadApiKey,
     State(read_side): State<Arc<ReadSide>>,
     Json(request): Json<OpenAIChatRequest>,
 ) -> Response {

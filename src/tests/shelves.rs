@@ -41,10 +41,10 @@ async fn test_shelf_insert_simple() {
     // Wait for the reader to receive the shelf message and verify it has the expected document IDs
     wait_for(&collection_client, |c| {
         let reader = c.reader;
-        let read_api_key = c.read_api_key;
+        let read_api_key = c.read_api_key.clone();
         let collection_id = c.collection_id;
         async move {
-            let collection = reader.get_collection(collection_id, read_api_key).await?;
+            let collection = reader.get_collection(collection_id, &read_api_key).await?;
             let shelf_id = oramacore_lib::shelves::ShelfId::try_new("bestsellers")?;
             let shelf = collection.get_shelf(shelf_id).await?;
 
@@ -209,28 +209,49 @@ async fn test_shelf_delete() {
         .unwrap();
 
     // Verify only one shelf remains
-    let collection = collection_client
-        .writer
-        .get_collection(
-            collection_client.collection_id,
-            collection_client.write_api_key,
-        )
-        .await
-        .unwrap();
-    let shelves = collection.list_shelves().await.unwrap();
-    assert_eq!(shelves.len(), 1, "expected 1 shelf in writer");
-    assert_eq!(
-        shelves.first().unwrap().id.as_str(),
-        "shelf-to-keep",
-        "expected 'shelf-to-keep' to be in writer"
-    );
-    drop(collection);
+    wait_for(&collection_client, |collection_client| {
+        async move {
+            let collection = collection_client
+                .writer
+                .get_collection(
+                    collection_client.collection_id,
+                    collection_client.write_api_key,
+                )
+                .await
+                .unwrap();
+            let shelves = collection.list_shelves().await.unwrap();
+            if shelves.len() != 1 {
+                bail!("Shelf not deleted in writer yet");
+            }
+
+            assert_eq!(shelves.len(), 1, "expected 1 shelf in writer");
+            assert_eq!(
+                shelves.first().unwrap().id.as_str(),
+                "shelf-to-keep",
+                "expected 'shelf-to-keep' to be in writer"
+            );
+            Ok(())
+        }
+        .boxed()
+    })
+    .await
+    .unwrap();
 
     // Verify getting the deleted shelf returns an error
-    let result = collection_client
-        .get_shelf_documents("shelf-to-delete".to_string())
-        .await;
-    assert!(result.is_err());
+    wait_for(&collection_client, |collection_client| {
+        async {
+            let result = collection_client
+                .get_shelf_documents("shelf-to-delete".to_string())
+                .await;
+            if result.is_ok() {
+                bail!("Expected error when getting deleted shelf");
+            }
+            Ok(())
+        }
+        .boxed()
+    })
+    .await
+    .unwrap();
 
     drop(test_context);
 }
@@ -298,7 +319,7 @@ async fn test_shelf_commit() {
 
     let collection_id = collection_client.collection_id;
     let write_api_key = collection_client.write_api_key;
-    let read_api_key = collection_client.read_api_key;
+    let read_api_key = collection_client.read_api_key.clone();
 
     // Now reload the system to verify shelves are loaded from disk
     let test_context = test_context.reload().await;
@@ -446,10 +467,10 @@ async fn test_shelf_update() {
     // Wait for reader to update
     wait_for(&collection_client, |c| {
         let reader = c.reader;
-        let read_api_key = c.read_api_key;
+        let read_api_key = c.read_api_key.clone();
         let collection_id = c.collection_id;
         async move {
-            let collection = reader.get_collection(collection_id, read_api_key).await?;
+            let collection = reader.get_collection(collection_id, &read_api_key).await?;
             let shelf_id = oramacore_lib::shelves::ShelfId::try_new(TEST_UPDATE_SHELF_ID)?;
             let shelf = collection.get_shelf(shelf_id).await?;
 
@@ -479,10 +500,10 @@ async fn test_shelf_update() {
     // Wait for reader to update
     wait_for(&collection_client, |c| {
         let reader = c.reader;
-        let read_api_key = c.read_api_key;
+        let read_api_key = c.read_api_key.clone();
         let collection_id = c.collection_id;
         async move {
-            let collection = reader.get_collection(collection_id, read_api_key).await?;
+            let collection = reader.get_collection(collection_id, &read_api_key).await?;
             let shelf_id = oramacore_lib::shelves::ShelfId::try_new(TEST_UPDATE_SHELF_ID)?;
             let shelf = collection.get_shelf(shelf_id).await?;
 
@@ -587,10 +608,10 @@ async fn test_shelf_get_documents() {
     // Wait for the reader to process
     wait_for(&collection_client, |c| {
         let reader = c.reader;
-        let read_api_key = c.read_api_key;
+        let read_api_key = c.read_api_key.clone();
         let collection_id = c.collection_id;
         async move {
-            let collection = reader.get_collection(collection_id, read_api_key).await?;
+            let collection = reader.get_collection(collection_id, &read_api_key).await?;
             let shelf_id = oramacore_lib::shelves::ShelfId::try_new("featured-products")?;
             let _shelf = collection.get_shelf(shelf_id).await?;
             Ok(())
@@ -691,10 +712,10 @@ async fn test_shelf_get_documents_with_missing_docs() {
     // Wait for the reader to process
     wait_for(&collection_client, |c| {
         let reader = c.reader;
-        let read_api_key = c.read_api_key;
+        let read_api_key = c.read_api_key.clone();
         let collection_id = c.collection_id;
         async move {
-            let collection = reader.get_collection(collection_id, read_api_key).await?;
+            let collection = reader.get_collection(collection_id, &read_api_key).await?;
             let shelf_id = oramacore_lib::shelves::ShelfId::try_new("mixed-shelf")?;
             let _shelf = collection.get_shelf(shelf_id).await?;
             Ok(())
@@ -875,10 +896,10 @@ async fn test_shelf_updated_when_document_id_changes() {
     // Verify initial shelf state in reader
     wait_for(&collection_client, |c| {
         let reader = c.reader;
-        let read_api_key = c.read_api_key;
+        let read_api_key = c.read_api_key.clone();
         let collection_id = c.collection_id;
         async move {
-            let collection = reader.get_collection(collection_id, read_api_key).await?;
+            let collection = reader.get_collection(collection_id, &read_api_key).await?;
             let shelf_id = oramacore_lib::shelves::ShelfId::try_new("featured")?;
             let shelf = collection.get_shelf(shelf_id).await?;
 
@@ -898,7 +919,7 @@ async fn test_shelf_updated_when_document_id_changes() {
         .reader
         .get_collection(
             collection_client.collection_id,
-            collection_client.read_api_key,
+            &collection_client.read_api_key,
         )
         .await
         .unwrap();
@@ -926,11 +947,11 @@ async fn test_shelf_updated_when_document_id_changes() {
     // Wait for the shelf to be updated in the reader
     wait_for(&collection_client, |c| {
         let reader = c.reader;
-        let read_api_key = c.read_api_key;
+        let read_api_key = c.read_api_key.clone();
         let collection_id = c.collection_id;
         let expected_doc_ids = doc_ids_before.clone();
         async move {
-            let collection = reader.get_collection(collection_id, read_api_key).await?;
+            let collection = reader.get_collection(collection_id, &read_api_key).await?;
             let shelf_id = oramacore_lib::shelves::ShelfId::try_new("featured")?;
             let shelf = collection.get_shelf(shelf_id).await?;
 
