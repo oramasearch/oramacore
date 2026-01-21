@@ -331,7 +331,7 @@ impl CommittedField for CommittedVectorField {
                         }
                     }
 
-                    brute_force.delete(&uncommitted_document_deletions);
+                    brute_force.delete(uncommitted_document_deletions);
 
                     if brute_force.len() >= MIN_HNSW_DOCS {
                         info!(
@@ -352,7 +352,7 @@ impl CommittedField for CommittedVectorField {
                                 })
                                 .flatten(),
                         )?;
-                        hnsw.delete_batch(&uncommitted_document_deletions);
+                        hnsw.delete_batch(uncommitted_document_deletions);
                         hnsw.build()?;
 
                         *layout = VectorLayout::Hnsw(Box::new(hnsw));
@@ -371,7 +371,7 @@ impl CommittedField for CommittedVectorField {
                             })
                             .flatten(),
                     )?;
-                    hnsw.delete_batch(&uncommitted_document_deletions);
+                    hnsw.delete_batch(uncommitted_document_deletions);
 
                     hnsw.build()?;
                     hnsw.rebuild()?;
