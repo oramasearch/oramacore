@@ -14,12 +14,13 @@ use oramacore_lib::{
     fs::{create_if_not_exists, BufferedFile},
 };
 use serde::{Deserialize, Serialize};
+use tracing::info;
 
 use crate::{
     collection_manager::sides::read::{
         index::{
             committed_field::offload_utils::{
-                create_counter, should_offload, update_invocation_counter, Cow,
+                create_counter, should_offload, update_invocation_counter, MutRef,
             },
             merge::{CommittedField, CommittedFieldMetadata, Field},
             uncommitted_field::UncommittedVectorField,
@@ -35,6 +36,7 @@ use crate::{
 const MIN_HNSW_DOCS: usize = 10_000;
 const BRUTE_FORCE_INDEX_FILE_NAME: &str = "index.vec";
 const HNSW_INDEX_FILE_NAME: &str = "index.hnsw";
+const HNSW_INDEX_2_FILE_NAME: &str = "index.hnsw2";
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct CommittedVectorFieldStats {
@@ -55,7 +57,7 @@ impl Clone for CommittedVectorFieldStats {
     }
 }
 
-#[derive(Clone, Copy, Serialize, Deserialize, Debug)]
+#[derive(Clone, Copy, Serialize, Deserialize, Debug, PartialEq, Eq)]
 pub enum VectorLayoutType {
     #[serde(rename = "hnsw")]
     Hnsw,
@@ -94,41 +96,11 @@ impl VectorLayout {
             VectorLayout::BruteForce(index) => index.dim(),
         }
     }
-    fn add(&mut self, vector: &[f32], doc_id: DocumentId) -> Result<()> {
-        match self {
-            VectorLayout::Hnsw(index) => {
-                index.add(vector, doc_id).context("Cannot add vector")?;
-            }
-            VectorLayout::BruteForce(index) => {
-                index.add_owned(vector.to_vec(), doc_id);
-            }
-        }
-        Ok(())
-    }
-    fn add_owned(&mut self, vector: Vec<f32>, doc_id: DocumentId) -> Result<()> {
-        match self {
-            VectorLayout::Hnsw(index) => {
-                index
-                    .add_owned(vector, doc_id)
-                    .context("Cannot add vector")?;
-            }
-            VectorLayout::BruteForce(index) => {
-                index.add_owned(vector, doc_id);
-            }
-        }
-        Ok(())
-    }
-    fn get_data(&self) -> Box<dyn Iterator<Item = (DocumentId, &[f32])> + '_> {
-        match self {
-            VectorLayout::Hnsw(index) => Box::new(index.get_data()),
-            VectorLayout::BruteForce(index) => Box::new(index.get_data()),
-        }
-    }
     fn save(&self, data_dir: &PathBuf) -> Result<()> {
         create_if_not_exists(data_dir).context("Cannot create data directory")?;
         match self {
             Self::Hnsw(index) => {
-                let dump_file_path = data_dir.join(HNSW_INDEX_FILE_NAME);
+                let dump_file_path = data_dir.join(HNSW_INDEX_2_FILE_NAME);
                 BufferedFile::create_or_overwrite(dump_file_path)
                     .context("Cannot create hnsw file")?
                     .write_bincode_data(&index)
@@ -288,7 +260,7 @@ impl CommittedField for CommittedVectorField {
 
             VectorLayout::BruteForce(new_index)
         } else {
-            let mut new_index = HNSW2Index::new(uncommitted.dimension);
+            let mut new_index = HNSW2Index::new_with_deletion(uncommitted.dimension);
             for (id, vectors) in iter {
                 if uncommitted_document_deletions.contains(&id) {
                     continue;
@@ -335,70 +307,89 @@ impl CommittedField for CommittedVectorField {
         uncommitted_document_deletions: &HashSet<DocumentId>,
         offload_config: OffloadFieldConfig,
     ) -> Result<Self> {
-        debug_assert_eq!(uncommitted.dimension, self.stats.dimensions,);
-        debug_assert_eq!(uncommitted.get_model(), self.metadata.model,);
+        debug_assert_eq!(uncommitted.dimension, self.stats.dimensions);
+        debug_assert_eq!(uncommitted.get_model(), self.metadata.model);
 
-        let dim = self.stats.dimensions;
+        let mut new_field = Self::try_load(self.metadata.clone(), offload_config)?;
+        new_field.metadata.data_dir = data_dir.clone();
 
-        let total_docs = uncommitted.len() + self.stats.vector_count;
-        let mut new_layout = if total_docs < MIN_HNSW_DOCS {
-            let mut brute_force = VectorBruteForce::new(dim);
-            brute_force.set_capacity(total_docs);
-            VectorLayout::BruteForce(brute_force)
-        } else {
-            let hnsw = HNSW2Index::new(dim);
-            VectorLayout::Hnsw(Box::new(hnsw))
-        };
+        {
+            let mut a = new_field.status.write("").unwrap();
+            let a = &mut **a;
+            let mut layout = match a {
+                VectorStatus::Unloaded => MutRef::Owned(load_layout(&self.metadata.data_dir)?),
+                VectorStatus::Loaded(layout) => MutRef::Borrowed(layout),
+            };
+            match &mut *layout {
+                VectorLayout::BruteForce(brute_force) => {
+                    for (doc, vec) in uncommitted.iter() {
+                        if uncommitted_document_deletions.contains(&doc) {
+                            continue;
+                        }
+                        for vector in vec {
+                            brute_force.add_owned(vector, doc);
+                        }
+                    }
 
-        let lock = self.status.read("commit").unwrap();
-        let vector_status = &**lock;
-        let current_layout = match vector_status {
-            VectorStatus::Loaded(layout) => Cow::Borrowed(layout),
-            VectorStatus::Unloaded => Cow::Owned(load_layout(&self.metadata.data_dir)?),
-        };
+                    brute_force.delete(uncommitted_document_deletions);
 
-        let old_data = current_layout.get_data();
-        for (doc_id, vector) in old_data {
-            if uncommitted_document_deletions.contains(&doc_id) {
-                continue;
-            }
-            new_layout
-                .add(vector, doc_id)
-                .context("Cannot add vector")?;
-        }
+                    if brute_force.len() >= MIN_HNSW_DOCS {
+                        info!(
+                            "Upgrading vector field {:?} from brute-force to HNSW layout",
+                            self.metadata.field_path
+                        );
+                        let mut hnsw = HNSW2Index::new_with_deletion(uncommitted.dimension);
 
-        for (doc_id, vectors) in uncommitted.iter() {
-            if uncommitted_document_deletions.contains(&doc_id) {
-                continue;
-            }
-            for vector in vectors {
-                new_layout
-                    .add_owned(vector, doc_id)
-                    .context("Cannot add vector")?;
-            }
-        }
-        if let VectorLayout::Hnsw(hnsw) = &mut new_layout {
-            hnsw.build().context("Cannot build hnsw index")?;
-        }
+                        hnsw.batch_add(
+                            uncommitted
+                                .iter()
+                                .filter_map(|(doc, vecs)| {
+                                    if uncommitted_document_deletions.contains(&doc) {
+                                        None
+                                    } else {
+                                        Some(vecs.into_iter().map(move |v| (v, doc)))
+                                    }
+                                })
+                                .flatten(),
+                        )?;
+                        hnsw.delete_batch(uncommitted_document_deletions);
+                        hnsw.build()?;
 
-        new_layout.save(&data_dir)?;
+                        *layout = VectorLayout::Hnsw(Box::new(hnsw));
+                    }
+                }
+                VectorLayout::Hnsw(hnsw) => {
+                    hnsw.batch_add(
+                        uncommitted
+                            .iter()
+                            .filter_map(|(doc, vecs)| {
+                                if uncommitted_document_deletions.contains(&doc) {
+                                    None
+                                } else {
+                                    Some(vecs.into_iter().map(move |v| (v, doc)))
+                                }
+                            })
+                            .flatten(),
+                    )?;
+                    hnsw.delete_batch(uncommitted_document_deletions);
 
-        Ok(Self {
-            metadata: VectorFieldInfo {
-                field_path: self.metadata.field_path.clone(),
-                data_dir,
-                model: self.metadata.model,
-            },
-            stats: CommittedVectorFieldStats {
-                dimensions: self.stats.dimensions,
-                vector_count: new_layout.len(),
+                    hnsw.build()?;
+                    hnsw.rebuild()?;
+                }
+            };
+
+            layout.save(&data_dir)?;
+
+            // Update stats to reflect the current layout state after potential upgrade
+            new_field.stats = CommittedVectorFieldStats {
+                dimensions: layout.dim(),
+                vector_count: layout.len(),
                 loaded: AtomicBool::new(true),
-                layout: new_layout.as_layout_type(),
-            },
-            status: OramaSyncLock::new("vector_inner", VectorStatus::Loaded(new_layout)),
-            invocation_counter: create_counter(offload_config),
-            unload_window: offload_config.unload_window.into(),
-        })
+                layout: layout.as_layout_type(),
+            };
+        }
+
+        Ok(new_field)
     }
 
     fn metadata(&self) -> VectorFieldInfo {
@@ -485,13 +476,25 @@ impl CommittedVectorField {
 
 fn load_layout(data_dir: &Path) -> Result<VectorLayout> {
     let is_hnsw = std::fs::exists(data_dir.join(HNSW_INDEX_FILE_NAME))?;
+    let is_hnsw = is_hnsw || std::fs::exists(data_dir.join(HNSW_INDEX_2_FILE_NAME))?;
     if is_hnsw {
         let dump_file_path = data_dir.join(HNSW_INDEX_FILE_NAME);
-        let inner: HNSW2Index<DocumentId> = BufferedFile::open(dump_file_path)
-            .map_err(|e| anyhow!("Cannot open hnsw file: {e}"))?
-            .read_bincode_data()
-            .map_err(|e| anyhow!("Cannot read hnsw file: {e}"))?;
-        Ok(VectorLayout::Hnsw(Box::new(inner)))
+        if std::fs::exists(&dump_file_path).unwrap_or(false) {
+            let inner = BufferedFile::open(dump_file_path)
+                .map_err(|e| anyhow!("Cannot open hnsw file: {e}"))?
+                .read_as_vec()
+                .map_err(|e| anyhow!("Cannot read hnsw file: {e}"))?;
+            let inner = HNSW2Index::deserialize_bincode_compat(&inner)
+                .map_err(|e| anyhow!("Cannot deserialize hnsw file: {e}"))?;
+            Ok(VectorLayout::Hnsw(Box::new(inner)))
+        } else {
+            let dump_file_path = data_dir.join(HNSW_INDEX_2_FILE_NAME);
+            let inner: HNSW2Index<DocumentId> = BufferedFile::open(dump_file_path)
+                .map_err(|e| anyhow!("Cannot open hnsw2 file: {e}"))?
+                .read_bincode_data()
+                .map_err(|e| anyhow!("Cannot read hnsw2 file: {e}"))?;
+            Ok(VectorLayout::Hnsw(Box::new(inner)))
+        }
     } else {
         let dump_file_path = data_dir.join(BRUTE_FORCE_INDEX_FILE_NAME);
         let inner: VectorBruteForce<DocumentId> = BufferedFile::open(dump_file_path)
@@ -519,5 +522,96 @@ impl CommittedFieldMetadata for VectorFieldInfo {
     }
     fn field_path(&self) -> &[String] {
         self.field_path.as_ref()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use duration_string::DurationString;
+    use rand::Rng;
+
+    use super::*;
+    use crate::tests::utils::*;
+
+    #[test]
+    fn test_from_brute_force_to_hnsw() {
+        init_log();
+
+        let data_dir = generate_new_path();
+        let first_data_dir = data_dir.join("first");
+        let second_data_dir = data_dir.join("second");
+
+        std::fs::create_dir_all(&first_data_dir).unwrap();
+        std::fs::create_dir_all(&second_data_dir).unwrap();
+
+        let offload_config = OffloadFieldConfig {
+            unload_window: DurationString::from_string("12h".to_string()).unwrap(),
+            slot_count_exp: 10,
+            slot_size_exp: 8,
+        };
+
+        let model = Model::BGESmall;
+
+        // Use random vectors instead of zero vectors to avoid pathological behavior
+        // in HNSW construction where all identical vectors cause excessive computation.
+        let mut rng = rand::rng();
+
+        let mut uncommitted =
+            UncommittedVectorField::empty(Box::new(["field_path".to_string()]), model);
+        for doc_id in 1..=(MIN_HNSW_DOCS - 1) {
+            let vectors = vec![(0..model.dimensions())
+                .map(|_| rng.random::<f32>())
+                .collect::<Vec<_>>()];
+            uncommitted
+                .insert(DocumentId(doc_id as u64), vectors)
+                .unwrap();
+        }
+
+        let committed = CommittedVectorField::from_uncommitted(
+            &uncommitted,
+            first_data_dir,
+            &HashSet::new(),
+            offload_config,
+        )
+        .unwrap();
+
+        assert_eq!(committed.stats.layout, VectorLayoutType::Plain);
+
+        let mut uncommitted =
+            UncommittedVectorField::empty(Box::new(["field_path".to_string()]), model);
+        for doc_id in (MIN_HNSW_DOCS - 1)..=(MIN_HNSW_DOCS + 10) {
+            let vectors = vec![(0..model.dimensions())
+                .map(|_| rng.random::<f32>())
+                .collect::<Vec<_>>()];
+            uncommitted
+                .insert(DocumentId(doc_id as u64), vectors)
+                .unwrap();
+        }
+
+        let new_committed = committed
+            .add_uncommitted(
+                &uncommitted,
+                second_data_dir,
+                &HashSet::new(),
+                offload_config,
+            )
+            .unwrap();
+
+        assert_eq!(new_committed.stats.layout, VectorLayoutType::Hnsw);
+
+        let target = (0..model.dimensions())
+            .map(|_| rng.random::<f32>())
+            .collect::<Vec<_>>();
+
+        let mut output = HashMap::new();
+        let params = VectorSearchParams {
+            target: &target,
+            similarity: 0.0,
+            limit: 5,
+            filtered_doc_ids: None,
+        };
+        new_committed.search(&params, &mut output).unwrap();
+
+        assert!(!output.is_empty());
     }
 }

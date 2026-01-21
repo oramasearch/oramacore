@@ -67,9 +67,11 @@ pub fn init_log() {
     LOG_INIT.call_once(|| {
         if let Ok(a) = std::env::var("LOG") {
             if a == "info" {
-                unsafe { std::env::set_var("RUST_LOG", "oramacore=info,warn") };
+                unsafe { std::env::set_var("RUST_LOG", "oramacore=info,oramacore_lib=info,warn") };
             } else {
-                unsafe { std::env::set_var("RUST_LOG", "oramacore=trace,warn") };
+                unsafe {
+                    std::env::set_var("RUST_LOG", "oramacore=trace,oramacore_lib=trace,warn")
+                };
             }
         }
         let _ = tracing_subscriber::fmt::try_init();
