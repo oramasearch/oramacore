@@ -50,14 +50,13 @@ async fn run_hook_with_fallback<
     let content = hook_reader.get_hook_content(hook_type)?;
     if let Some(code) = content {
         info!("Running hook: {:?}", hook_type);
-        let mut a: JSExecutor<Params, Option<Params>> = JSExecutor::try_new(
-            code,
-            Some(vec![]),
-            Duration::from_millis(200),
-            true,
-            hook_type.get_function_name().to_string(),
-        )
-        .await?;
+        let mut a: JSExecutor<Params, Option<Params>> =
+            JSExecutor::builder(code, hook_type.get_function_name().to_string())
+                .allowed_hosts(vec![])
+                .timeout(Duration::from_millis(200))
+                .is_async(true)
+                .build()
+                .await?;
 
         let output: Option<Params> = a.exec(input.clone(), log_sender, exec_option).await?;
         info!("Hook change something {:?}", output.is_some());

@@ -276,15 +276,15 @@ impl ToolsRuntime {
                             })?;
 
                         let function_name = full_tool.id.clone();
-                        let mut executor = JSExecutor::try_new(
-                            code,
-                            Some(vec![]),
-                            Duration::from_millis(500), // @todo: make this configurable
-                            true,
-                            function_name.clone(),
-                        )
-                        .await
-                        .map_err(|e| ToolError::ExecutionError(collection_id, function_name, e))?;
+                        let mut executor = JSExecutor::builder(code, function_name.clone())
+                            .allowed_hosts(vec![])
+                            .timeout(Duration::from_millis(500))
+                            .is_async(true)
+                            .build()
+                            .await
+                            .map_err(|e| {
+                                ToolError::ExecutionError(collection_id, function_name, e)
+                            })?;
 
                         // The JSExecutor call can easily fail under different circumstances.
                         // We need to handle this error and send it back to the main thread.

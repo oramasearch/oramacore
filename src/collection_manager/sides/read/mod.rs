@@ -571,13 +571,14 @@ impl ReadSide {
             let mut js_executor: JSExecutor<
                 (SearchParams, Option<HashMap<String, Value>>),
                 Option<SearchParams>,
-            > = JSExecutor::try_new(
+            > = JSExecutor::builder(
                 hook_code,
-                Some(vec![]),
-                Duration::from_millis(200),
-                true,
                 HookType::BeforeSearch.get_function_name().to_string(),
             )
+            .allowed_hosts(vec![])
+            .timeout(Duration::from_millis(200))
+            .is_async(true)
+            .build()
             .await
             .map_err(|e| {
                 ReadError::Generic(anyhow::anyhow!("Failed to create JS executor: {e}"))
