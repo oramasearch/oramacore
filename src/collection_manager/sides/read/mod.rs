@@ -58,7 +58,7 @@ use crate::metrics::Empty;
 use crate::python::PythonService;
 use crate::types::{
     ApiKey, CollectionStatsRequest, CustomerClaims, Document, InteractionLLMConfig, ReadApiKey,
-    SearchMode, SearchModeResult, SearchResult,
+    SearchMode, SearchModeResult, SearchResult, SearchResultHit,
 };
 use crate::types::{CollectionId, SearchParams};
 use crate::types::{IndexId, NLPSearchRequest};
@@ -563,8 +563,12 @@ impl ReadSide {
 
         let storage = collection.get_hook_storage();
         let storage = storage.read("run_before_search").await;
-        let hook_content = storage.get_hook_content(HookType::BeforeSearch)?;
-        if let Some(hook_code) = hook_content {
+        let hook_before_search = storage.get_hook_content(HookType::BeforeSearch)?;
+        let hook_transform_after_search =
+            storage.get_hook_content(HookType::TransformDocumentAfterSearch)?;
+        drop(storage);
+
+        if let Some(hook_code) = hook_before_search {
             // Hook signature: function beforeSearch(search_params, claim)
             // - search_params: the search parameters that can be modified
             // - claim: the extra JWT claims (object) or null if using plain API key
@@ -617,7 +621,56 @@ impl ReadSide {
             request,
         );
 
-        search.execute().await
+        let mut search_result = search.execute().await?;
+
+        if let Some(hook_code) = hook_transform_after_search {
+            // Hook signature: function transformDocumentAfterSearch(documents)
+            // - documents: the search hit documents
+            let mut js_executor: JSExecutor<Vec<SearchResultHit>, Option<Vec<SearchResultHit>>> =
+                JSExecutor::builder(
+                    hook_code,
+                    HookType::TransformDocumentAfterSearch
+                        .get_function_name()
+                        .to_string(),
+                )
+                .allowed_hosts(vec![])
+                .timeout(Duration::from_millis(200))
+                .is_async(true)
+                .build()
+                .await
+                .map_err(|e| {
+                    ReadError::Generic(anyhow::anyhow!("Failed to create JS executor: {e}"))
+                })?;
+
+            let logs = self.get_hook_logs();
+            let log_sender = logs.get_sender(&collection_id);
+
+            let hook_input = search_result.hits;
+            let output: Option<Vec<SearchResultHit>> = js_executor
+                .exec(
+                    hook_input,
+                    log_sender,
+                    ExecOption {
+                        timeout: Duration::from_millis(1000),
+                        allowed_hosts: Some(Vec::new()),
+                    },
+                )
+                .await
+                .map_err(|e| {
+                    ReadError::Generic(anyhow::anyhow!(
+                        "TransformDocumentAfterSearch hook failed: {e}"
+                    ))
+                })?;
+
+            drop(js_executor);
+
+            if let Some(modified_documents) = output {
+                info!("Search results document modified by hook");
+                search_result.hits = modified_documents;
+            }
+        }
+
+        Ok(search_result)
     }
 
     pub async fn nlp_search(
