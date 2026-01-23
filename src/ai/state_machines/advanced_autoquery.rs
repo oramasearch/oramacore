@@ -1565,14 +1565,16 @@ impl AdvancedAutoqueryStateMachine {
             .map_err(|e| AdvancedAutoqueryError::ExecuteBeforeRetrievalHookError(e.to_string()))?;
 
         let lock = hook_storage.read("run_before_retrieval").await;
+        let hooks_config = read_side.get_hooks_config();
         let processed_search_params = run_before_retrieval(
             &lock,
             search_params.clone(),
             None, // log_sender
             ExecOption {
-                allowed_hosts: Some(vec![]),
-                timeout: Duration::from_millis(500),
+                allowed_hosts: Some(hooks_config.allowed_hosts.clone()),
+                timeout: Duration::from_millis(hooks_config.execution_timeout_ms),
             },
+            hooks_config,
         )
         .await
         .map_err(|e| AdvancedAutoqueryError::ExecuteBeforeRetrievalHookError(e.to_string()))?;

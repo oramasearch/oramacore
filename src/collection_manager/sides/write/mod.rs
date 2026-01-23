@@ -259,7 +259,7 @@ impl WriteSide {
         .context("Cannot load KV")?;
         let kv = Arc::new(kv);
         let system_prompts = SystemPromptInterface::new(kv.clone(), context.llm_service.clone());
-        let tools = ToolsRuntime::new(kv.clone(), context.llm_service.clone());
+        let tools = ToolsRuntime::new(kv.clone(), context.llm_service.clone(), hooks_config.clone());
 
         let collections_writer =
             CollectionsWriter::try_load(collections_writer_config, context.clone())

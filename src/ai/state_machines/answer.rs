@@ -1420,14 +1420,16 @@ impl AnswerStateMachine {
                 .await
                 .map_err(|e| AnswerError::HookError(e.to_string()))?;
             let lock = hook_storage.read("run_before_retrieval").await;
+            let hooks_config = self.read_side.get_hooks_config();
             let params = run_before_retrieval(
                 &lock,
                 params.clone(),
                 None, // log_sender
                 ExecOption {
-                    allowed_hosts: Some(vec![]),
-                    timeout: self.config.hook_timeout,
+                    allowed_hosts: Some(hooks_config.allowed_hosts.clone()),
+                    timeout: Duration::from_millis(hooks_config.execution_timeout_ms),
                 },
+                hooks_config,
             )
             .await
             .map_err(|e| AnswerError::BeforeRetrievalHookError(e.to_string()))?;
@@ -1475,14 +1477,16 @@ impl AnswerStateMachine {
             .await
             .map_err(|e| AnswerError::HookError(e.to_string()))?;
         let lock = hook_storage.read("run_before_answer").await;
+        let hooks_config = self.read_side.get_hooks_config();
         let (variables, system_prompt) = run_before_answer(
             &lock,
             (variables, system_prompt),
             log_sender,
             ExecOption {
-                allowed_hosts: Some(vec![]),
-                timeout: self.config.hook_timeout,
+                allowed_hosts: Some(hooks_config.allowed_hosts.clone()),
+                timeout: Duration::from_millis(hooks_config.execution_timeout_ms),
             },
+            hooks_config,
         )
         .await
         .map_err(|e| AnswerError::BeforeAnswerHookError(e.to_string()))?;

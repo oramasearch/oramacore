@@ -636,14 +636,16 @@ impl AdvancedAutoQuery {
                     .get_hook_storage(read_api_key, collection_id)
                     .await?;
                 let lock = hook_storage.read("execute_mapped_searches").await;
+                let hooks_config = read_side.get_hooks_config();
                 let search_params = run_before_retrieval(
                     &lock,
                     search_params.clone(),
                     log_sender,
                     ExecOption {
-                        allowed_hosts: Some(vec![]),
-                        timeout: Duration::from_millis(500),
+                        allowed_hosts: Some(hooks_config.allowed_hosts.clone()),
+                        timeout: Duration::from_millis(hooks_config.execution_timeout_ms),
                     },
+                    hooks_config,
                 )
                 .await?;
                 drop(lock);

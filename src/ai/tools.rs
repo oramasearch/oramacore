@@ -93,11 +93,12 @@ impl Tool {
 pub struct ToolsRuntime {
     pub kv: Arc<KV>,
     pub llm_service: Arc<LLMService>,
+    pub hooks_config: crate::HooksConfig,
 }
 
 impl ToolsRuntime {
-    pub fn new(kv: Arc<KV>, llm_service: Arc<LLMService>) -> Self {
-        ToolsRuntime { kv, llm_service }
+    pub fn new(kv: Arc<KV>, llm_service: Arc<LLMService>, hooks_config: crate::HooksConfig) -> Self {
+        ToolsRuntime { kv, llm_service, hooks_config }
     }
 
     pub async fn insert(&self, collection_id: CollectionId, tool: Tool) -> Result<(), ToolError> {
@@ -277,8 +278,8 @@ impl ToolsRuntime {
 
                         let function_name = full_tool.id.clone();
                         let mut executor = JSExecutor::builder(code, function_name.clone())
-                            .allowed_hosts(vec![])
-                            .timeout(Duration::from_millis(500))
+                            .allowed_hosts(self.hooks_config.allowed_hosts.clone())
+                            .timeout(Duration::from_millis(self.hooks_config.builder_timeout_ms))
                             .is_async(true)
                             .build()
                             .await
@@ -293,8 +294,8 @@ impl ToolsRuntime {
                                 arguments_as_json_value,
                                 None,
                                 ExecOption {
-                                    timeout: Duration::from_secs(3), // @todo: make this configurable
-                                    allowed_hosts: Some(vec![]), // @todo: make this configurable
+                                    timeout: Duration::from_millis(self.hooks_config.execution_timeout_ms),
+                                    allowed_hosts: Some(self.hooks_config.allowed_hosts.clone()),
                                 },
                             )
                             .await;
