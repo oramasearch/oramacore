@@ -1173,7 +1173,7 @@ impl WriteSide {
                 collection_document_storage
                     .insert_many(&docs)
                     .await
-                    .context("Cannot inser document into document storage")?;
+                    .context("Cannot insert document into document storage")?;
                 docs.clear();
 
                 insert_document_batch.push(WriteOperation::Collection(
