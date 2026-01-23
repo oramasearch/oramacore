@@ -645,7 +645,7 @@ impl ReadSide {
             let logs = self.get_hook_logs();
             let log_sender = logs.get_sender(&collection_id);
 
-            let hook_input = search_result.hits;
+            let hook_input = search_result.hits.clone();
             let output: Option<Vec<SearchResultHit>> = js_executor
                 .exec(
                     hook_input,

@@ -299,7 +299,7 @@ impl FlattenDocument {
     }
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DocumentList(pub Vec<Document>);
 impl DocumentList {
     #[inline]
@@ -1468,7 +1468,7 @@ fn default_group_by_max_results() -> usize {
     1
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Deserialize)]
 #[cfg_attr(test, derive(PartialEq))]
 pub struct SearchResultHit {
     pub id: String,
