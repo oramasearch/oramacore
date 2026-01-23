@@ -804,7 +804,9 @@ impl WriteSide {
                     WriteError::Generic(anyhow::anyhow!("Failed to create JS executor: {e}"))
                 })?;
 
-            // Clone document_to_store before passing to hook (JSExecutor consumes the input)
+            // Clone for hook input, we need to preserve document_to_store in case:
+            // 1. Hook returns None (no transformation), we use original for storage
+            // 2. Hook modifies documents, we use modified for storage, original for indexing
             let hook_input = document_to_store.clone();
             let output: Option<DocumentList> = js_executor
                 .exec(
