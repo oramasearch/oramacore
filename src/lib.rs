@@ -13,7 +13,7 @@ use collection_manager::sides::{
 };
 use metrics_exporter_prometheus::PrometheusBuilder;
 use oramacore_lib::nlp;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use tracing::level_filters::LevelFilter;
 #[allow(unused_imports)]
 use tracing::{info, warn};
@@ -70,6 +70,46 @@ where
 
     Ok(ret)
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HooksConfig {
+    /// List of allowed hosts for external HTTP calls from hooks
+    /// Examples: ["s3.amazonaws.com", "*.googleapis.com", "api.example.com"]
+    /// Default: empty list (no external HTTP access allowed)
+    #[serde(default)]
+    pub allowed_hosts: Vec<String>,
+
+    /// Timeout for hook initialization/builder in milliseconds
+    /// This is the timeout for JSExecutor::try_new() - how long to wait for the JS runtime to initialize
+    /// Default: 200ms
+    #[serde(default = "default_hook_builder_timeout")]
+    pub builder_timeout_ms: u64,
+
+    /// Timeout for hook execution in milliseconds
+    /// This is the timeout for the actual hook code execution
+    /// Default: 1000ms (1 second)
+    #[serde(default = "default_hook_execution_timeout")]
+    pub execution_timeout_ms: u64,
+}
+
+fn default_hook_builder_timeout() -> u64 {
+    200 
+}
+
+fn default_hook_execution_timeout() -> u64 {
+    1000 
+}
+
+impl Default for HooksConfig {
+    fn default() -> Self {
+        Self {
+            allowed_hosts: vec![],
+            builder_timeout_ms: 200,
+            execution_timeout_ms: 1000,
+        }
+    }
+}
+
 
 #[derive(Deserialize, Clone)]
 pub struct OramacoreConfig {

@@ -72,6 +72,7 @@ use crate::{
         IndexEmbeddingsCalculation, IndexId, InsertDocumentsResult, LanguageDTO,
         ReplaceIndexRequest, UpdateDocumentRequest, UpdateDocumentsResult, WriteApiKey,
     },
+    HooksConfig,
 };
 use oramacore_lib::fs::BufferedFile;
 use oramacore_lib::generic_kv::{KVConfig, KVWriteOperation, KV};
@@ -137,7 +138,8 @@ pub struct CollectionsWriterConfig {
 #[derive(Deserialize, Clone)]
 pub struct WriteSideConfig {
     pub master_api_key: ApiKey,
-    // pub hooks: HooksRuntimeConfig,
+    #[serde(default)]
+    pub hooks: HooksConfig,
     pub output: OutputSideChannelType,
     pub config: CollectionsWriterConfig,
     pub jwt: Option<JwtConfig>,
@@ -161,6 +163,8 @@ pub struct WriteSide {
     context: WriteSideContext,
 
     hook_logs: HookLogs,
+
+    hooks_config: HooksConfig,
 
     stop_sender: tokio::sync::broadcast::Sender<()>,
     stop_done_receiver: OramaAsyncLock<tokio::sync::mpsc::Receiver<()>>,
@@ -194,6 +198,7 @@ impl WriteSide {
         python_service: Arc<PythonService>,
     ) -> Result<Arc<Self>> {
         let master_api_key = config.master_api_key;
+        let hooks_config = config.hooks;
         let collections_writer_config = config.config;
         let data_dir = collections_writer_config.data_dir.clone();
 
@@ -287,6 +292,7 @@ impl WriteSide {
             kv,
             context: context.clone(),
             hook_logs: HookLogs::new(),
+            hooks_config,
             stop_sender,
             stop_done_receiver: OramaAsyncLock::new("stop_done_receiver", stop_done_receiver),
             write_operation_counter: AtomicU32::new(0),
@@ -791,6 +797,7 @@ impl WriteSide {
         if let Some(hook_code) = hook_transform_before_save {
             // Hook signature: function transformDocumentBeforeSave(documents)
             // - documents: the list of document to be inserted
+            let hooks_config = self.get_hooks_config();
             let mut js_executor: JSExecutor<[DocumentList; 1], Option<DocumentList>> =
                 JSExecutor::builder(
                     hook_code,
@@ -798,8 +805,8 @@ impl WriteSide {
                         .get_function_name()
                         .to_string(),
                 )
-                .allowed_hosts(vec![])
-                .timeout(Duration::from_millis(200))
+                .allowed_hosts(hooks_config.allowed_hosts.clone())
+                .timeout(Duration::from_millis(hooks_config.builder_timeout_ms))
                 .is_async(true)
                 .build()
                 .await
@@ -820,8 +827,8 @@ impl WriteSide {
                     [hook_input],
                     log_sender,
                     ExecOption {
-                        timeout: Duration::from_millis(1000),
-                        allowed_hosts: Some(vec![]),
+                        timeout: Duration::from_millis(hooks_config.execution_timeout_ms),
+                        allowed_hosts: Some(hooks_config.allowed_hosts.clone()),
                     },
                 )
                 .await
@@ -1007,6 +1014,7 @@ impl WriteSide {
         let mut index_operation_batch = Vec::with_capacity(document_count * 10);
         let mut docs_to_remove = Vec::with_capacity(document_count);
 
+        let hooks_config = self.get_hooks_config();
         let mut js_executor: Option<JSExecutor<[DocumentList; 1], Option<DocumentList>>> = None;
         if let Some(ref hook_code) = hook_transform_before_save {
             // Hook signature: function transformDocumentBeforeSave(documents)
@@ -1018,8 +1026,8 @@ impl WriteSide {
                         .get_function_name()
                         .to_string(),
                 )
-                .allowed_hosts(vec![])
-                .timeout(Duration::from_millis(200))
+                .allowed_hosts(hooks_config.allowed_hosts.clone())
+                .timeout(Duration::from_millis(hooks_config.builder_timeout_ms))
                 .is_async(true)
                 .build()
                 .await
@@ -1092,8 +1100,8 @@ impl WriteSide {
                                     [document_list],
                                     log_sender.clone(),
                                     ExecOption {
-                                        timeout: Duration::from_millis(1000),
-                                        allowed_hosts: Some(vec![]),
+                                        timeout: Duration::from_millis(hooks_config.execution_timeout_ms),
+                                        allowed_hosts: Some(hooks_config.allowed_hosts.clone()),
                                     },
                                 )
                                 .await
@@ -1313,6 +1321,10 @@ impl WriteSide {
 
     pub fn get_hook_logs(&self) -> &HookLogs {
         &self.hook_logs
+    }
+
+    pub fn get_hooks_config(&self) -> &HooksConfig {
+        &self.hooks_config
     }
 
     /// Validates that the hook output maintains document integrity

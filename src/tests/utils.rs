@@ -37,6 +37,7 @@ use crate::{
         InputSideChannelType, OutputSideChannelType, ReplaceIndexReason,
     },
     python::embeddings::Model,
+    HooksConfig,
     types::{
         ApiKey, CollectionId, CollectionStatsRequest, CreateCollection, CreateIndexRequest,
         DescribeCollectionResponse, Document, DocumentList, IndexId, InsertDocumentsResult,
@@ -117,7 +118,7 @@ pub fn create_oramacore_config() -> OramacoreConfig {
         writer_side: WriteSideConfig {
             master_api_key: ApiKey::try_new("my-master-api-key").unwrap(),
             output: OutputSideChannelType::InMemory { capacity: 100 },
-            // hooks: hooks_runtime_config(),
+            hooks: HooksConfig::default(),
             config: CollectionsWriterConfig {
                 data_dir: generate_new_path(),
                 embedding_queue_limit: 50,
@@ -157,6 +158,7 @@ pub fn create_oramacore_config() -> OramacoreConfig {
                 },
                 force_commit: u32::MAX,
             },
+            hooks: HooksConfig::default(),
             analytics: None,
             jwt: None,
         },

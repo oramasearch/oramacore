@@ -61,6 +61,7 @@ use crate::types::{
 };
 use crate::types::{CollectionId, SearchParams};
 use crate::types::{IndexId, NLPSearchRequest};
+use crate::HooksConfig;
 use oramacore_lib::fs::BufferedFile;
 use oramacore_lib::generic_kv::{KVConfig, KV};
 use oramacore_lib::nlp::NLPService;
@@ -79,7 +80,8 @@ pub struct ReadSideConfig {
     pub analytics: Option<OramaCoreAnalyticConfig>,
     pub input: InputSideChannelType,
     pub config: IndexesConfig,
-
+    #[serde(default)]
+    pub hooks: HooksConfig,
     pub jwt: Option<JwtConfig>,
 }
 
@@ -170,6 +172,8 @@ pub struct ReadSide {
 
     hook_logs: HookLogs,
 
+    hooks_config: HooksConfig,
+
     analytics_storage: Option<OramaCoreAnalytics>,
 
     // Handle to stop the read side
@@ -199,6 +203,7 @@ impl ReadSide {
         .context("Cannot create document storage")?;
         let global_document_storage = Arc::new(document_storage);
 
+        let hooks_config = config.hooks;
         let insert_batch_commit_size = config.config.insert_batch_commit_size;
         let commit_interval = config.config.commit_interval;
         let force_commit = config.config.force_commit;
@@ -278,6 +283,7 @@ impl ReadSide {
             local_gpu_manager,
 
             hook_logs: HookLogs::new(),
+            hooks_config,
             analytics_storage,
 
             data_dir,
@@ -571,6 +577,7 @@ impl ReadSide {
             // Hook signature: function beforeSearch(search_params, claim)
             // - search_params: the search parameters that can be modified
             // - claim: the extra JWT claims (object) or null if using plain API key
+            let hooks_config = self.get_hooks_config();
             let mut js_executor: JSExecutor<
                 (SearchParams, Option<HashMap<String, Value>>),
                 Option<SearchParams>,
@@ -578,8 +585,8 @@ impl ReadSide {
                 hook_code,
                 HookType::BeforeSearch.get_function_name().to_string(),
             )
-            .allowed_hosts(vec![])
-            .timeout(Duration::from_millis(200))
+            .allowed_hosts(hooks_config.allowed_hosts.clone())
+            .timeout(Duration::from_millis(hooks_config.builder_timeout_ms))
             .is_async(true)
             .build()
             .await
@@ -596,8 +603,8 @@ impl ReadSide {
                     hook_input,
                     log_sender,
                     ExecOption {
-                        timeout: Duration::from_millis(1000),
-                        allowed_hosts: Some(Vec::new()),
+                        timeout: Duration::from_millis(hooks_config.execution_timeout_ms),
+                        allowed_hosts: Some(hooks_config.allowed_hosts.clone()),
                     },
                 )
                 .await
@@ -625,6 +632,7 @@ impl ReadSide {
         if let Some(hook_code) = hook_transform_after_search {
             // Hook signature: function transformDocumentAfterSearch(documents)
             // - documents: the search hit documents
+            let hooks_config = self.get_hooks_config();
             let mut js_executor: JSExecutor<
                 [Vec<SearchResultHit>; 1],
                 Option<Vec<SearchResultHit>>,
@@ -634,8 +642,8 @@ impl ReadSide {
                     .get_function_name()
                     .to_string(),
             )
-            .allowed_hosts(vec![])
-            .timeout(Duration::from_millis(200))
+            .allowed_hosts(hooks_config.allowed_hosts.clone())
+            .timeout(Duration::from_millis(hooks_config.builder_timeout_ms))
             .is_async(true)
             .build()
             .await
@@ -654,8 +662,8 @@ impl ReadSide {
                     [hook_input],
                     log_sender,
                     ExecOption {
-                        timeout: Duration::from_millis(1000),
-                        allowed_hosts: Some(Vec::new()),
+                        timeout: Duration::from_millis(hooks_config.execution_timeout_ms),
+                        allowed_hosts: Some(hooks_config.allowed_hosts.clone()),
                     },
                 )
                 .await
@@ -911,6 +919,10 @@ impl ReadSide {
 
     pub fn get_hook_logs(&self) -> &HookLogs {
         &self.hook_logs
+    }
+
+    pub fn get_hooks_config(&self) -> &HooksConfig {
+        &self.hooks_config
     }
 
     pub fn get_analytics_logs(&self) -> Option<OramaCoreAnalytics> {

@@ -24,13 +24,16 @@ writer_side:
         # producer_name: write
 
     hooks:
-        select_embeddings_properties:
-            check_interval: 60s
-            max_idle_time: 20s
-            instances_count_per_code: 3
-            queue_capacity: 100
-            max_execution_time: 1s
-            max_startup_time: 100ms
+        # List of allowed hosts for external HTTP calls from hooks
+        # Examples: ["s3.amazonaws.com", "*.s3.amazonaws.com", "storage.googleapis.com"]
+        # Empty list (default) means no external HTTP access is allowed
+        allowed_hosts: []
+        # Timeout for hook initialization (JSExecutor builder) in milliseconds
+        # This is how long to wait for the JavaScript runtime to initialize
+        builder_timeout_ms: 200
+        # Timeout for hook execution in milliseconds
+        # This is how long the actual hook code can run (including HTTP calls)
+        execution_timeout_ms: 1000
 
     # Replace the following value with your own API key
     master_api_key: my-master-api-key
@@ -118,6 +121,17 @@ reader_side:
             # group by 2 ^ 4 seconds
             slot_size_exp: 4
 
+    hooks:
+        # List of allowed hosts for external HTTP calls from hooks
+        # Examples: ["s3.amazonaws.com", "*.s3.amazonaws.com", "storage.googleapis.com"]
+        # Empty list (default) means no external HTTP access is allowed
+        allowed_hosts: []
+        # Timeout for hook initialization (JSExecutor builder) in milliseconds
+        # This is how long to wait for the JavaScript runtime to initialize
+        builder_timeout_ms: 200
+        # Timeout for hook execution in milliseconds
+        # This is how long the actual hook code can run (including HTTP calls)
+        execution_timeout_ms: 1000
 
     # Uncomment to allow analytics
     analytics:
