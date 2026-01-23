@@ -965,6 +965,11 @@ impl WriteSide {
         let document_ids: Vec<_> = document_ids_map.keys().copied().collect();
         drop(document_id_storage);
 
+        // Get the hook for transforming documents before save
+        let hooks = collection.get_hook_storage();
+        let hook_transform_before_save =
+            hooks.get_hook_content(HookType::TransformDocumentBeforeSave)?;
+
         // Prepare documents with IDs
         let mut documents: HashMap<String, Document> = update_document_request
             .documents
@@ -1040,11 +1045,70 @@ impl WriteSide {
             if let Some(doc_id_str) = document_ids_map.get(&doc_id) {
                 if let Ok(v) = serde_json::from_str(doc.inner.get()) {
                     if let Some(delta) = documents.remove(doc_id_str) {
-                        let new_document = merge(v, delta);
+                        let mut document_for_storage = merge(v, delta);
+                        let document_for_indexing = document_for_storage.clone();
+
+                        // Apply transformDocumentBeforeSave hook if present
+                        if let Some(ref hook_code) = hook_transform_before_save {
+                            // Hook signature: function transformDocumentBeforeSave(documents)
+                            // - documents: the list of document to be saved
+                            let document_list = DocumentList(vec![document_for_storage.clone()]);
+                            let mut js_executor: JSExecutor<
+                                [DocumentList; 1],
+                                Option<DocumentList>,
+                            > = JSExecutor::builder(
+                                hook_code.clone(),
+                                HookType::TransformDocumentBeforeSave
+                                    .get_function_name()
+                                    .to_string(),
+                            )
+                            .allowed_hosts(vec![])
+                            .timeout(Duration::from_millis(200))
+                            .is_async(true)
+                            .build()
+                            .await
+                            .map_err(|e| {
+                                WriteError::Generic(anyhow::anyhow!(
+                                    "Failed to create JS executor: {e}"
+                                ))
+                            })?;
+
+                            let output: Option<DocumentList> = js_executor
+                                .exec(
+                                    [document_list],
+                                    None,
+                                    ExecOption {
+                                        timeout: Duration::from_millis(1000),
+                                        allowed_hosts: Some(vec![]),
+                                    },
+                                )
+                                .await
+                                .map_err(|e| {
+                                    WriteError::Generic(anyhow::anyhow!(
+                                        "TransformDocumentBeforeSave hook failed: {e}"
+                                    ))
+                                })?;
+
+                            drop(js_executor);
+
+                            if let Some(mut modified_documents) = output {
+                                // Validate that the hook didn't break document integrity
+                                Self::validate_hook_transform_before_save_output(
+                                    &modified_documents,
+                                    &[doc_id_str.clone()],
+                                )?;
+
+                                if !modified_documents.is_empty() {
+                                    document_for_storage = modified_documents.0.remove(0);
+                                    info!("Document modified by hook and validated");
+                                }
+                            }
+                        }
 
                         let doc_id = collection_document_storage.get_next_document_id();
 
-                        let doc_str = serde_json::to_string(&doc.inner)
+                        // Serialize the hook-modified document for storage
+                        let doc_str = serde_json::to_string(&document_for_storage)
                             .context("Cannot serialize document")?;
                         collection_document_storage
                             .insert_many(&[(
@@ -1062,7 +1126,7 @@ impl WriteSide {
                                         doc_id,
                                         doc_id_str: doc_id_str.clone(),
                                         doc: DocumentToInsert(
-                                            new_document
+                                            document_for_storage
                                                 .clone()
                                                 .into_raw(format!("{target_index_id}:{doc_id_str}"))
                                                 .expect("Cannot get raw document"),
@@ -1073,7 +1137,7 @@ impl WriteSide {
                             .await
                             .context("Cannot send document storage operation")?;
 
-                        let doc_id_str = new_document
+                        let doc_id_str = document_for_indexing
                             .inner
                             .get("id")
                             .context("Document does not have an id")?
@@ -1085,7 +1149,7 @@ impl WriteSide {
                             .process_new_document(
                                 doc_id,
                                 doc_id_str,
-                                new_document,
+                                document_for_indexing,
                                 &mut index_operation_batch,
                             )
                             .await
