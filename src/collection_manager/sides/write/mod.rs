@@ -1068,11 +1068,13 @@ impl WriteSide {
                 if let Ok(v) = serde_json::from_str(doc.inner.get()) {
                     if let Some(delta) = documents.remove(doc_id_str) {
                         let mut document_for_storage = merge(v, delta);
-                        let document_for_indexing = document_for_storage.clone();
 
                         // Apply transformDocumentBeforeSave hook if present
+                        let mut document_for_indexing: Option<Document> = None;
                         if let Some(ref mut js_executor) = js_executor {
-                            let document_list = DocumentList(vec![document_for_storage.clone()]);
+                            // Clone for hook input (JSExecutor consumes the input)
+                            let hook_input = document_for_storage.clone();
+                            let document_list = DocumentList(vec![hook_input]);
                             let output: Option<DocumentList> = js_executor
                                 .exec(
                                     [document_list],
@@ -1097,11 +1099,17 @@ impl WriteSide {
                                 )?;
 
                                 if !modified_documents.is_empty() {
-                                    document_for_storage = modified_documents.0.remove(0);
                                     info!("Document modified by hook and validated");
+                                    let doc = document_for_storage;
+                                    document_for_storage = modified_documents.0.remove(0);
+                                    document_for_indexing = Some(doc);
                                 }
                             }
-                        }
+                        };
+
+                        // If hook didn't modify the document (or no hook), clone for indexing
+                        let document_for_indexing =
+                            document_for_indexing.unwrap_or_else(|| document_for_storage.clone());
 
                         let doc_id = collection_document_storage.get_next_document_id();
 
