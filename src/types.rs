@@ -67,15 +67,16 @@ impl<'de> Deserialize<'de> for RawJSONDocument {
     {
         #[derive(Deserialize)]
         struct WithId {
-            id: String,
+            id: Option<String>,
         }
 
-        Box::<serde_json::value::RawValue>::deserialize(deserializer).map(|inner| {
-            let parsed = serde_json::from_str::<WithId>(inner.get()).unwrap();
-            RawJSONDocument {
+        Box::<serde_json::value::RawValue>::deserialize(deserializer).and_then(|inner| {
+            let parsed = serde_json::from_str::<WithId>(inner.get())
+                .map_err(|e| D::Error::custom(format!("Failed to parse document: {e}")))?;
+            Ok(RawJSONDocument {
                 inner,
-                id: Some(parsed.id),
-            }
+                id: parsed.id,
+            })
         })
     }
 }
