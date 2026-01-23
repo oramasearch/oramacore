@@ -626,21 +626,23 @@ impl ReadSide {
         if let Some(hook_code) = hook_transform_after_search {
             // Hook signature: function transformDocumentAfterSearch(documents)
             // - documents: the search hit documents
-            let mut js_executor: JSExecutor<Vec<SearchResultHit>, Option<Vec<SearchResultHit>>> =
-                JSExecutor::builder(
-                    hook_code,
-                    HookType::TransformDocumentAfterSearch
-                        .get_function_name()
-                        .to_string(),
-                )
-                .allowed_hosts(vec![])
-                .timeout(Duration::from_millis(200))
-                .is_async(true)
-                .build()
-                .await
-                .map_err(|e| {
-                    ReadError::Generic(anyhow::anyhow!("Failed to create JS executor: {e}"))
-                })?;
+            let mut js_executor: JSExecutor<
+                [Vec<SearchResultHit>; 1],
+                Option<Vec<SearchResultHit>>,
+            > = JSExecutor::builder(
+                hook_code,
+                HookType::TransformDocumentAfterSearch
+                    .get_function_name()
+                    .to_string(),
+            )
+            .allowed_hosts(vec![])
+            .timeout(Duration::from_millis(200))
+            .is_async(true)
+            .build()
+            .await
+            .map_err(|e| {
+                ReadError::Generic(anyhow::anyhow!("Failed to create JS executor: {e}"))
+            })?;
 
             let logs = self.get_hook_logs();
             let log_sender = logs.get_sender(&collection_id);
@@ -648,7 +650,7 @@ impl ReadSide {
             let hook_input = search_result.hits.clone();
             let output: Option<Vec<SearchResultHit>> = js_executor
                 .exec(
-                    hook_input,
+                    [hook_input],
                     log_sender,
                     ExecOption {
                         timeout: Duration::from_millis(1000),

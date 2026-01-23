@@ -788,7 +788,7 @@ impl WriteSide {
         if let Some(hook_code) = hook_transform_before_save {
             // Hook signature: function transformDocumentBeforeSave(documents)
             // - documents: the list of document to be inserted
-            let mut js_executor: JSExecutor<DocumentList, Option<DocumentList>> =
+            let mut js_executor: JSExecutor<[DocumentList; 1], Option<DocumentList>> =
                 JSExecutor::builder(
                     hook_code,
                     HookType::TransformDocumentBeforeSave
@@ -808,11 +808,11 @@ impl WriteSide {
             let hook_input = document_to_store.clone();
             let output: Option<DocumentList> = js_executor
                 .exec(
-                    hook_input,
+                    [hook_input],
                     None,
                     ExecOption {
                         timeout: Duration::from_millis(1000),
-                        allowed_hosts: Some(Vec::new()),
+                        allowed_hosts: Some(vec![]),
                     },
                 )
                 .await
