@@ -668,6 +668,7 @@ impl ReadSide {
 
             if let Some(modified_documents) = output {
                 info!("Search results document modified by hook");
+                search_result.count = modified_documents.len();
                 search_result.hits = modified_documents;
             }
         }

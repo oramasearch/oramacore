@@ -97,7 +97,7 @@ pub enum WriteError {
     IndexNotFound(CollectionId, IndexId),
     #[error("Temp index {1} doesn't exist in collection {0}")]
     TempIndexNotFound(CollectionId, IndexId),
-    #[error("Error in hook")]
+    #[error("Error in hook: {0}")]
     HookWriterError(#[from] HookWriterError),
     #[error("Error in pin rule")]
     PinRulesError(#[from] PinRulesWriterError),
