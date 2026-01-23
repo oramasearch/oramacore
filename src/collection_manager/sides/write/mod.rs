@@ -25,8 +25,8 @@ use std::{
 };
 
 use super::{
-    system_prompts::SystemPromptInterface, Offset, OperationSender, OperationSenderCreator,
-    OutputSideChannelType,
+    logs::HookLogs, system_prompts::SystemPromptInterface, Offset, OperationSender,
+    OperationSenderCreator, OutputSideChannelType,
 };
 
 use anyhow::{Context, Result};
@@ -160,6 +160,8 @@ pub struct WriteSide {
 
     context: WriteSideContext,
 
+    hook_logs: HookLogs,
+
     stop_sender: tokio::sync::broadcast::Sender<()>,
     stop_done_receiver: OramaAsyncLock<tokio::sync::mpsc::Receiver<()>>,
 
@@ -284,6 +286,7 @@ impl WriteSide {
             tools,
             kv,
             context: context.clone(),
+            hook_logs: HookLogs::new(),
             stop_sender,
             stop_done_receiver: OramaAsyncLock::new("stop_done_receiver", stop_done_receiver),
             write_operation_counter: AtomicU32::new(0),
@@ -808,10 +811,14 @@ impl WriteSide {
             // 1. Hook returns None (no transformation), we use original for storage
             // 2. Hook modifies documents, we use modified for storage, original for indexing
             let hook_input = document_to_store.clone();
+
+            let logs = self.get_hook_logs();
+            let log_sender = logs.get_sender(&collection_id);
+
             let output: Option<DocumentList> = js_executor
                 .exec(
                     [hook_input],
-                    None,
+                    log_sender,
                     ExecOption {
                         timeout: Duration::from_millis(1000),
                         allowed_hosts: Some(vec![]),
@@ -1022,6 +1029,9 @@ impl WriteSide {
             );
         }
 
+        let logs = self.get_hook_logs();
+        let log_sender = logs.get_sender(&collection_id);
+
         let mut doc_stream = collection_document_storage
             .stream_documents(document_ids)
             .await;
@@ -1080,7 +1090,7 @@ impl WriteSide {
                             let output: Option<DocumentList> = js_executor
                                 .exec(
                                     [document_list],
-                                    None,
+                                    log_sender.clone(),
                                     ExecOption {
                                         timeout: Duration::from_millis(1000),
                                         allowed_hosts: Some(vec![]),
@@ -1299,6 +1309,10 @@ impl WriteSide {
             None => return Err(WriteError::CollectionNotFound(collection_id)),
         };
         Ok(collection.as_dto().await)
+    }
+
+    pub fn get_hook_logs(&self) -> &HookLogs {
+        &self.hook_logs
     }
 
     /// Validates that the hook output maintains document integrity
