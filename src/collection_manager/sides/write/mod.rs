@@ -1095,7 +1095,7 @@ impl WriteSide {
                                 // Validate that the hook didn't break document integrity
                                 Self::validate_hook_transform_before_save_output(
                                     &modified_documents,
-                                    &[doc_id_str.clone()],
+                                    &[doc_id_str.as_str()],
                                 )?;
 
                                 if !modified_documents.is_empty() {
@@ -1302,9 +1302,9 @@ impl WriteSide {
     /// Validates that the hook output maintains document integrity
     /// - Same number of documents
     /// - All document IDs are preserved and in the same order
-    fn validate_hook_transform_before_save_output(
+    fn validate_hook_transform_before_save_output<S: AsRef<str>>(
         modified_docs: &DocumentList,
-        original_ids: &[String],
+        original_ids: &[S],
     ) -> Result<(), WriteError> {
         if modified_docs.len() != original_ids.len() {
             return Err(WriteError::HookWriterError(HookWriterError::Generic(
@@ -1325,10 +1325,11 @@ impl WriteSide {
                 )))
             })?;
 
-            if actual_id != expected_id {
+            if actual_id != expected_id.as_ref() {
                 return Err(WriteError::HookWriterError(HookWriterError::Generic(
                     anyhow::anyhow!(
-                        "Hook modified document ID at index {index}. Expected '{expected_id}' but got '{actual_id}'. Document IDs must not be modified.",
+                        "Hook modified document ID at index {index}. Expected '{}' but got '{actual_id}'. Document IDs must not be modified.",
+                        expected_id.as_ref()
                     )
                 )));
             }
