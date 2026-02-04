@@ -1,19 +1,20 @@
 pub mod collection;
 pub mod collection_document_storage;
 mod collections;
+mod delete;
 pub mod document_storage;
 mod embedding;
+mod helpers;
 pub mod index;
+mod insert;
+mod update;
 use oramacore_lib::hook_storage::{HookWriter, HookWriterError};
 use oramacore_lib::nlp::NLPService;
 use oramacore_lib::shelves::ShelvesWriterError;
 use thiserror::Error;
 mod context;
 
-use std::borrow::Cow;
-use std::collections::HashSet;
 use std::{
-    collections::HashMap,
     ops::Deref,
     path::PathBuf,
     sync::{
@@ -34,9 +35,9 @@ use duration_str::deserialize_duration;
 use futures::FutureExt;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
-use tokio::time::{sleep, Instant, MissedTickBehavior};
+use tokio::time::MissedTickBehavior;
 use tokio_stream::StreamExt;
-use tracing::{debug, error, info, trace, warn};
+use tracing::{error, info, trace};
 
 pub use collections::CollectionReadLock;
 use collections::CollectionsWriter;
@@ -44,8 +45,6 @@ use embedding::{start_calculate_embedding_loop, MultiEmbeddingCalculationRequest
 
 pub use context::WriteSideContext;
 
-use crate::collection_manager::sides::write::collection_document_storage::CollectionDocumentStorage;
-use crate::collection_manager::sides::write::document_storage::ZeboDocument;
 use crate::collection_manager::sides::{CollectionWriteOperation, DocumentStorageWriteOperation};
 use crate::lock::OramaAsyncLock;
 use crate::metrics::CollectionLabels;
@@ -61,13 +60,12 @@ use crate::{
     },
     auth::{JwtConfig, JwtManager},
     collection_manager::sides::{
-        system_prompts::CollectionSystemPromptsInterface, DocumentToInsert, ReplaceIndexReason,
-        WriteOperation,
+        system_prompts::CollectionSystemPromptsInterface, ReplaceIndexReason, WriteOperation,
     },
     metrics::document_insertion::DOCUMENTS_INSERTION_TIME,
     types::{
         ApiKey, CollectionCreated, CollectionId, CreateCollection, CreateIndexRequest,
-        DeleteDocuments, DescribeCollectionResponse, Document, DocumentId, DocumentList,
+        DeleteDocuments, DescribeCollectionResponse, Document, DocumentList,
         IndexEmbeddingsCalculation, IndexId, InsertDocumentsResult, LanguageDTO,
         ReplaceIndexRequest, UpdateDocumentRequest, UpdateDocumentsResult, WriteApiKey,
     },
@@ -512,7 +510,9 @@ impl WriteSide {
                     drop(new_index);
                     drop(collection);
 
-                    self.wait_for_pending_write_operations().await?;
+                    helpers::WriteYieldGuard::new(&self.write_operation_counter, &self.collections)
+                        .wait_for_pending_operations()
+                        .await?;
 
                     collection = match self.collections.get_collection(collection_id).await {
                         Some(collection) => collection,
@@ -712,80 +712,33 @@ impl WriteSide {
         write_api_key: WriteApiKey,
         collection_id: CollectionId,
         index_id: IndexId,
-        mut document_list: DocumentList,
+        document_list: DocumentList,
     ) -> Result<InsertDocumentsResult, WriteError> {
         let document_count = document_list.len();
-        info!(?document_count, "Inserting batch of documents");
-
-        let collection = self.get_collection(collection_id, write_api_key).await?;
-
-        let index = collection
-            .get_index(index_id)
-            .await
-            .ok_or_else(|| WriteError::IndexNotFound(collection_id, index_id))?;
-
-        // Constraint checks
-        if index.is_runtime() {
-            collection
-                .check_claim_limitations(write_api_key, document_list.len(), 0)
-                .await?;
-        } else {
-            // Temp index: check against linked runtime index
-            // The formula: temp_docs + all_runtime_indexes - linked_runtime_index <= max_doc_count
-            let linked_runtime_id = index
-                .get_runtime_index_id()
-                .expect("Temp index must have a linked runtime index");
-            collection
-                .check_claim_limitations_for_temp_index(
-                    write_api_key,
-                    index_id,
-                    linked_runtime_id,
-                    document_list.len(),
-                )
-                .await?;
-        }
-
-        // The doc_id_str is the composition of index_id + document_id
-        // Anyway, for temp indexes, instead of using the temp index id,
-        // we use the original index id
-        let target_index_id = index.get_runtime_index_id().unwrap_or(index_id);
 
         let metric = DOCUMENTS_INSERTION_TIME.create(CollectionLabels {
             collection: collection_id.to_string(),
         });
 
-        debug!("Inserting documents {}", document_count);
-        let collection_document_storage = collection.get_document_storage();
-        let doc_ids = self
-            .add_documents_to_storage(
-                collection_document_storage,
-                &mut document_list,
-                collection_id,
-                target_index_id,
-            )
-            .await
-            .context("Cannot insert documents into document storage")?;
-        debug!("Document inserted");
+        let request = insert::InsertDocumentsRequest {
+            collection_id,
+            index_id,
+            documents: document_list,
+            write_api_key,
+        };
 
-        debug!("Looking for new fields...");
-        index
-            .add_fields_if_needed(&document_list)
-            .await
-            .context("Cannot add fields if needed")?;
-        debug!("Done");
+        let context = helpers::WriteOperationContext {
+            op_sender: &self.op_sender,
+            collections: &self.collections,
+            write_operation_counter: &self.write_operation_counter,
+        };
 
-        drop(index);
-        drop(collection);
-
-        debug!("Processing documents {}", document_count);
-        let result = self
-            .inner_process_documents(collection_id, index_id, document_list, doc_ids)
-            .await
-            .context("Cannot process documents")?;
-        info!("All documents are inserted: {}", document_count);
+        let op = insert::InsertDocuments::new(context, request).await?;
+        let result = op.execute().await?;
 
         drop(metric);
 
+        // Check if we should commit based on document count
         let mut lock = self.operation_counter.write("insert_doc").await;
         **lock += document_count as u64;
         let should_commit = if **lock >= self.insert_batch_commit_size {
@@ -812,22 +765,15 @@ impl WriteSide {
         document_ids_to_delete: DeleteDocuments,
     ) -> Result<(), WriteError> {
         let collection = self.get_collection(collection_id, write_api_key).await?;
-        let index = collection
-            .get_index(index_id)
-            .await
-            .ok_or_else(|| WriteError::IndexNotFound(collection_id, index_id))?;
 
-        let doc_id_pairs = index.delete_documents(document_ids_to_delete).await?;
+        let request = delete::DeleteDocumentsRequest {
+            collection_id,
+            index_id,
+            document_ids: document_ids_to_delete,
+        };
 
-        // Extract DocumentIds for removal (split will happen in collection_document_storage)
-        let doc_ids: Vec<DocumentId> = doc_id_pairs.iter().map(|(doc_id, _)| *doc_id).collect();
-        collection
-            .get_document_storage()
-            .remove(doc_ids)
-            .await
-            .context("Cannot remove deleted documents")?;
-
-        Ok(())
+        let op = delete::DeleteDocumentsOp::new(collection, request);
+        op.execute().await
     }
 
     pub async fn update_documents(
@@ -837,233 +783,21 @@ impl WriteSide {
         index_id: IndexId,
         update_document_request: UpdateDocumentRequest,
     ) -> Result<UpdateDocumentsResult, WriteError> {
-        let mut collection = self.get_collection(collection_id, write_api_key).await?;
-        let document_count = update_document_request.documents.len();
-
-        let mut index = collection
-            .get_index(index_id)
-            .await
-            .ok_or_else(|| WriteError::IndexNotFound(collection_id, index_id))?;
-
-        // Constraint checks
-        if index.is_runtime() {
-            collection
-                .check_claim_limitations(write_api_key, document_count, 0)
-                .await?;
-        }
-
-        let mut collection_document_storage = collection.get_document_storage();
-
-        let target_index_id = index.get_runtime_index_id().unwrap_or(index_id);
-
-        // Prepare document ID mapping
-        let document_id_storage = index.get_document_id_storage().await;
-        let document_ids_map: HashMap<_, _> = update_document_request
-            .documents
-            .0
-            .iter()
-            .filter_map(|d| {
-                d.get("id")
-                    .and_then(|v| v.as_str())
-                    .and_then(|s| document_id_storage.get(s).map(|id| (id, s.to_string())))
-            })
-            .collect();
-        let document_ids: Vec<_> = document_ids_map.keys().copied().collect();
-        drop(document_id_storage);
-
-        // Prepare documents with IDs
-        let mut documents: HashMap<String, Document> = update_document_request
-            .documents
-            .into_iter()
-            .map(|mut doc| {
-                let doc_id_str = doc.get("id").and_then(|v| v.as_str());
-                let doc_id_str = if let Some(doc_id_str) = doc_id_str {
-                    if doc_id_str.is_empty() {
-                        cuid2::create_id()
-                    } else {
-                        doc_id_str.to_string()
-                    }
-                } else {
-                    cuid2::create_id()
-                };
-                // Ensure the document contains a valid id
-                // NB: this overwrite the previous id if it is not a string
-                // TODO: is it correct?
-                doc.inner.insert(
-                    "id".to_string(),
-                    serde_json::Value::String(doc_id_str.clone()),
-                );
-
-                (doc_id_str, doc)
-            })
-            .collect();
-
-        let mut pin_rules_writer = collection.get_pin_rule_writer("update_documents").await;
-        let mut pin_rules_touched = HashSet::new();
-
-        let mut shelves_writer = collection.get_shelves_writer("update_documents").await;
-        let mut shelves_touched = HashSet::new();
-
-        let mut result = UpdateDocumentsResult {
-            inserted: 0,
-            updated: 0,
-            failed: 0,
+        let request = update::UpdateDocumentsRequest {
+            collection_id,
+            index_id,
+            documents: update_document_request,
+            write_api_key,
         };
 
-        let mut index_operation_batch = Vec::with_capacity(document_count * 10);
-        let mut docs_to_remove = Vec::with_capacity(document_count);
+        let context = helpers::WriteOperationContext {
+            op_sender: &self.op_sender,
+            collections: &self.collections,
+            write_operation_counter: &self.write_operation_counter,
+        };
 
-        let mut doc_stream = collection_document_storage
-            .stream_documents(document_ids)
-            .await;
-        let mut processed_count = -1;
-
-        while let Some((doc_id, doc)) = doc_stream.next().await {
-            processed_count += 1;
-            if processed_count % 100 == 0 {
-                trace!("Processing document {}/{}", processed_count, document_count);
-            }
-
-            if index_operation_batch.len() > 200 {
-                trace!("Sending operations");
-                self.op_sender
-                    .send_batch(index_operation_batch)
-                    .await
-                    .context("Cannot send index operation")?;
-                trace!("Operations sent");
-                index_operation_batch = Vec::with_capacity(document_count * 10);
-            }
-
-            // Check for pending write operations and yield if needed
-            if self.write_operation_counter.load(Ordering::Relaxed) > 0 {
-                drop(shelves_writer);
-                drop(pin_rules_writer);
-                let _ = collection_document_storage;
-                drop(index);
-                drop(collection);
-
-                self.wait_for_pending_write_operations().await?;
-
-                collection = match self.collections.get_collection(collection_id).await {
-                    Some(collection) => collection,
-                    None => return Err(WriteError::CollectionNotFound(collection_id)),
-                };
-                index = match collection.get_index(index_id).await {
-                    Some(index) => index,
-                    None => return Err(WriteError::IndexNotFound(collection_id, index_id)),
-                };
-                collection_document_storage = collection.get_document_storage();
-                pin_rules_writer = collection.get_pin_rule_writer("update_documents").await;
-                shelves_writer = collection.get_shelves_writer("update_documents").await;
-            }
-
-            if let Some(doc_id_str) = document_ids_map.get(&doc_id) {
-                if let Ok(v) = serde_json::from_str(doc.inner.get()) {
-                    if let Some(delta) = documents.remove(doc_id_str) {
-                        let new_document = merge(v, delta);
-
-                        let doc_id = collection_document_storage.get_next_document_id();
-
-                        let doc_str = serde_json::to_string(&doc.inner)
-                            .context("Cannot serialize document")?;
-                        collection_document_storage
-                            .insert_many(&[(
-                                doc_id,
-                                ZeboDocument::new(Cow::Borrowed(doc_id_str), Cow::Owned(doc_str)),
-                            )])
-                            .await
-                            .context("Cannot insert document into document storage")?;
-
-                        self.op_sender
-                            .send(WriteOperation::Collection(
-                                collection_id,
-                                CollectionWriteOperation::DocumentStorage(
-                                    DocumentStorageWriteOperation::InsertDocumentWithDocIdStr {
-                                        doc_id,
-                                        doc_id_str: doc_id_str.clone(),
-                                        doc: DocumentToInsert(
-                                            new_document
-                                                .clone()
-                                                .into_raw(format!("{target_index_id}:{doc_id_str}"))
-                                                .expect("Cannot get raw document"),
-                                        ),
-                                    },
-                                ),
-                            ))
-                            .await
-                            .context("Cannot send document storage operation")?;
-
-                        let doc_id_str = new_document
-                            .inner
-                            .get("id")
-                            .context("Document does not have an id")?
-                            .as_str()
-                            .context("Document id is not a string")?
-                            .to_string();
-
-                        match index
-                            .process_new_document(
-                                doc_id,
-                                doc_id_str,
-                                new_document,
-                                &mut index_operation_batch,
-                            )
-                            .await
-                            .context("Cannot process document")
-                        {
-                            Ok(Some(old_doc_id)) => {
-                                docs_to_remove.push(old_doc_id);
-                                result.updated += 1;
-                            }
-                            Ok(None) => {
-                                result.inserted += 1;
-                            }
-                            Err(e) => {
-                                // If the document cannot be processed, we should remove it from the document storage
-                                // and from the read side
-                                // NB: check if the error handling is correct
-                                collection_document_storage
-                                    .remove(vec![doc_id])
-                                    .await
-                                    .context("Cannot remove document after failed processing")?;
-
-                                tracing::error!(error = ?e, "Cannot process document");
-                                result.failed += 1;
-                            }
-                        };
-                    }
-                }
-
-                pin_rules_touched.extend(pin_rules_writer.get_matching_rules_ids(doc_id_str));
-                shelves_touched.extend(shelves_writer.get_matching_shelves_ids(doc_id_str));
-            }
-        }
-
-        collection
-            .update_pin_rules(pin_rules_touched, &mut index_operation_batch)
-            .await;
-
-        collection
-            .update_shelves(shelves_touched, &mut index_operation_batch)
-            .await;
-
-        if !index_operation_batch.is_empty() {
-            trace!("Sending operations");
-            self.op_sender
-                .send_batch(index_operation_batch)
-                .await
-                .context("Cannot send index operation")?;
-            trace!("Operations sent");
-        }
-
-        collection_document_storage
-            .remove(docs_to_remove)
-            .await
-            .context("Cannot remove replaced documents")?;
-
-        debug!("All documents");
-
-        Ok(result)
+        let op = update::UpdateDocuments::new(context, request);
+        op.execute().await
     }
 
     pub async fn delete_collection(
@@ -1147,244 +881,6 @@ impl WriteSide {
             None => return Err(WriteError::CollectionNotFound(collection_id)),
         };
         Ok(collection.as_dto().await)
-    }
-
-    async fn add_documents_to_storage(
-        self: &WriteSide,
-        collection_document_storage: &CollectionDocumentStorage,
-        document_list: &mut DocumentList,
-        collection_id: CollectionId,
-        target_index_id: IndexId,
-    ) -> Result<Vec<DocumentId>> {
-        let document_count = document_list.len();
-
-        let batch_size = document_list.0.len().min(200);
-        let mut batch = Vec::with_capacity(batch_size);
-
-        let mut insert_document_batch = Vec::with_capacity(document_count);
-        let mut doc_ids = Vec::with_capacity(document_count);
-        let mut docs = Vec::with_capacity(batch_size);
-        for (index, doc) in document_list.0.iter_mut().enumerate() {
-            if index % 100 == 0 {
-                trace!("Processing document {}/{}", index, document_count);
-            }
-
-            if index % batch_size == 0 && !batch.is_empty() {
-                collection_document_storage
-                    .insert_many(&docs)
-                    .await
-                    .context("Cannot inser document into document storage")?;
-                docs.clear();
-
-                insert_document_batch.push(WriteOperation::Collection(
-                    collection_id,
-                    CollectionWriteOperation::DocumentStorage(
-                        DocumentStorageWriteOperation::InsertDocumentsWithDocIdStr(batch),
-                    ),
-                ));
-                batch = Vec::with_capacity(batch_size);
-            }
-
-            // We try to guess the document id from the document
-            // Eventually, we generate a new one
-            let doc_id_str = doc.get("id").and_then(|v| v.as_str());
-            let doc_id_str = if let Some(doc_id_str) = doc_id_str {
-                if doc_id_str.is_empty() {
-                    cuid2::create_id()
-                } else {
-                    doc_id_str.to_string()
-                }
-            } else {
-                cuid2::create_id()
-            };
-            // Ensure the document contains a valid id
-            // NB: this overwrite the previous id if it is not a string
-            // TODO: is it correct?
-            doc.inner.insert(
-                "id".to_string(),
-                serde_json::Value::String(doc_id_str.clone()),
-            );
-
-            let doc_id = collection_document_storage.get_next_document_id();
-            doc_ids.push(doc_id);
-
-            batch.push((
-                doc_id,
-                doc_id_str.clone(),
-                DocumentToInsert(
-                    doc.clone()
-                        .into_raw(format!("{target_index_id}:{doc_id_str}"))
-                        .expect("Cannot get raw document"),
-                ),
-            ));
-
-            let doc_str = serde_json::to_string(&doc.inner).context("Cannot serialize document")?;
-            docs.push((
-                doc_id,
-                ZeboDocument::new(Cow::Owned(doc_id_str), Cow::Owned(doc_str)),
-            ));
-        }
-
-        if !batch.is_empty() {
-            insert_document_batch.push(WriteOperation::Collection(
-                collection_id,
-                CollectionWriteOperation::DocumentStorage(
-                    DocumentStorageWriteOperation::InsertDocumentsWithDocIdStr(batch),
-                ),
-            ));
-
-            collection_document_storage
-                .insert_many(&docs)
-                .await
-                .context("Cannot inser document into document storage")?;
-        }
-
-        trace!("Sending documents");
-        self.op_sender
-            .send_batch(insert_document_batch)
-            .await
-            .context("Cannot send document storage operation")?;
-        trace!("Documents sent");
-
-        Ok(doc_ids)
-    }
-
-    async fn inner_process_documents(
-        &self,
-        collection_id: CollectionId,
-        index_id: IndexId,
-        document_list: DocumentList,
-        doc_ids: Vec<DocumentId>,
-    ) -> Result<InsertDocumentsResult, WriteError> {
-        let mut result = InsertDocumentsResult {
-            inserted: 0,
-            replaced: 0,
-            failed: 0,
-        };
-
-        let mut collection = match self.collections.get_collection(collection_id).await {
-            Some(collection) => collection,
-            None => return Err(WriteError::CollectionNotFound(collection_id)),
-        };
-        let mut index = match collection.get_index(index_id).await {
-            Some(index) => index,
-            None => return Err(WriteError::IndexNotFound(collection_id, index_id)),
-        };
-
-        let mut pin_rules_writer = collection.get_pin_rule_writer("process_documents").await;
-        let mut pin_rules_touched = HashSet::new();
-
-        let mut shelves_writer = collection.get_shelves_writer("process_documents").await;
-        let mut shelves_touched = HashSet::new();
-
-        let document_count = document_list.len();
-
-        let mut index_operation_batch = Vec::with_capacity(document_count * 10);
-        let mut docs_to_remove = Vec::with_capacity(document_count);
-        for (i, doc) in document_list.0.into_iter().enumerate() {
-            if i % 100 == 0 {
-                info!("Processing document {}/{}", i, document_count);
-            }
-
-            let doc_id = doc_ids[i];
-            if index_operation_batch.capacity() * 4 / 5 < index_operation_batch.len() {
-                trace!("Sending operations");
-                self.op_sender
-                    .send_batch(index_operation_batch)
-                    .await
-                    .context("Cannot send index operation")?;
-                trace!("Operations sent");
-                index_operation_batch = Vec::with_capacity(document_count * 10);
-            }
-
-            // Check for pending write operations and yield if needed
-            if self.write_operation_counter.load(Ordering::Relaxed) > 0 {
-                // We need to drop the index lock before waiting
-                drop(shelves_writer);
-                drop(pin_rules_writer);
-                drop(index);
-                drop(collection);
-
-                self.wait_for_pending_write_operations().await?;
-
-                // Reacquire the index lock
-                collection = match self.collections.get_collection(collection_id).await {
-                    Some(collection) => collection,
-                    None => return Err(WriteError::CollectionNotFound(collection_id)),
-                };
-                index = match collection.get_index(index_id).await {
-                    Some(index) => index,
-                    None => return Err(WriteError::IndexNotFound(collection_id, index_id)),
-                };
-                pin_rules_writer = collection.get_pin_rule_writer("process_documents").await;
-                shelves_writer = collection.get_shelves_writer("process_documents").await;
-            }
-
-            let doc_id_str = doc
-                .inner
-                .get("id")
-                .context("Document does not have an id")?
-                .as_str()
-                .context("Document id is not a string")?
-                .to_string();
-
-            match index
-                .process_new_document(doc_id, doc_id_str.clone(), doc, &mut index_operation_batch)
-                .await
-                .context("Cannot process document")
-            {
-                Ok(Some(old_doc_id)) => {
-                    docs_to_remove.push(old_doc_id);
-                    result.inserted += 1;
-                }
-                Ok(None) => {
-                    result.inserted += 1;
-                }
-                Err(e) => {
-                    // If the document cannot be processed, we should remove it from the document storage
-                    // and from the read side
-                    // NB: check if the error handling is correct
-                    if let Err(remove_err) =
-                        collection.get_document_storage().remove(vec![doc_id]).await
-                    {
-                        tracing::error!(error = ?remove_err, "Cannot remove failed document");
-                    }
-
-                    tracing::error!(error = ?e, "Cannot process document");
-                    result.failed += 1;
-                    continue;
-                }
-            };
-
-            pin_rules_touched.extend(pin_rules_writer.get_matching_rules_ids(&doc_id_str));
-            shelves_touched.extend(shelves_writer.get_matching_shelves_ids(&doc_id_str));
-        }
-        debug!("All documents processed {}", document_count);
-
-        collection
-            .update_pin_rules(pin_rules_touched, &mut index_operation_batch)
-            .await;
-
-        collection
-            .update_shelves(shelves_touched, &mut index_operation_batch)
-            .await;
-
-        if !index_operation_batch.is_empty() {
-            trace!("Sending operations");
-            self.op_sender
-                .send_batch(index_operation_batch)
-                .await
-                .context("Cannot send index operation")?;
-            trace!("Operations sent");
-        }
-
-        collection
-            .get_document_storage()
-            .remove(docs_to_remove)
-            .await
-            .context("Cannot remove replaced documents")?;
-
-        Ok(result)
     }
 
     pub async fn get_collection(
@@ -1479,39 +975,6 @@ impl WriteSide {
 
     pub fn get_jwt_manager(&self) -> JwtManager<DashboardClaims> {
         self.jwt_manager.clone()
-    }
-
-    async fn wait_for_pending_write_operations(&self) -> Result<()> {
-        let timeout = Duration::from_secs(5);
-        let start = Instant::now();
-
-        // Initialize backoff parameters
-        let mut backoff = Duration::from_millis(10); // Start at 10ms
-        let max_backoff = Duration::from_millis(500); // Cap at 500ms to allow multiple retries within 5s
-
-        while self.write_operation_counter.load(Ordering::Relaxed) > 0 {
-            if start.elapsed() > timeout {
-                warn!("Timeout waiting for write operations to complete");
-                break;
-            }
-
-            // If there's some write pending operation we yield to let the write operation be processed
-            tokio::task::yield_now().await;
-
-            // Anyway, `yield_now` doens't guarantee that the other task will be executed
-            // If the scheduler will process this task without waiting the other task,
-            // we propose a sleep of 10ms to be sure that the other task will be executed.
-            // Anyway, this is not guaranteed again, it is just an hope.
-            if self.write_operation_counter.load(Ordering::Relaxed) > 0 {
-                sleep(backoff).await;
-                // Triple the backoff time, but cap it at max_backoff
-                backoff = (backoff * 3).min(max_backoff);
-            } else {
-                break;
-            }
-        }
-
-        Ok(())
     }
 }
 
@@ -1649,50 +1112,11 @@ impl Deref for HookWriterLock<'_> {
     }
 }
 
-fn merge(mut old: serde_json::value::Map<String, serde_json::Value>, delta: Document) -> Document {
-    let delta = delta.inner;
-    for (k, v) in delta {
-        if k.contains(".") {
-            let mut path = k.split(".").peekable();
-            let mut nested_doc = Some(&mut old);
-            let k = loop {
-                let k = path.next();
-                let f = path.peek();
-                nested_doc = match (k, f) {
-                    (None, _) => break None,
-                    (Some(k), None) => break Some(k),
-                    (Some(k), _) => {
-                        nested_doc.and_then(|v| v.get_mut(k).and_then(|v| v.as_object_mut()))
-                    }
-                }
-            };
-            if let Some(nested_doc) = nested_doc {
-                if let Some(k) = k {
-                    if v.is_null() {
-                        // Null removes the key from an object
-                        nested_doc.remove(k);
-                    } else {
-                        nested_doc.insert(k.to_string(), v);
-                    }
-                }
-            }
-        } else {
-            // Fast path
-            if v.is_null() {
-                // Null removes the key from an object
-                old.remove(&k);
-            } else {
-                old.insert(k, v);
-            }
-        }
-    }
-    Document { inner: old }
-}
-
 #[allow(clippy::approx_constant)]
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::helpers::merge;
+    use crate::types::Document;
     use serde_json::json;
 
     #[test]
