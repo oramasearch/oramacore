@@ -4,7 +4,7 @@ mod collections;
 pub mod document_storage;
 mod embedding;
 pub mod index;
-use orama_js_pool::{ExecOption, JSExecutor};
+
 use oramacore_lib::hook_storage::{HookType, HookWriter, HookWriterError};
 use oramacore_lib::nlp::NLPService;
 use oramacore_lib::shelves::ShelvesWriterError;
@@ -259,12 +259,19 @@ impl WriteSide {
         .context("Cannot load KV")?;
         let kv = Arc::new(kv);
         let system_prompts = SystemPromptInterface::new(kv.clone(), context.llm_service.clone());
-        let tools = ToolsRuntime::new(kv.clone(), context.llm_service.clone(), hooks_config.clone());
+        let tools = ToolsRuntime::new(
+            kv.clone(),
+            context.llm_service.clone(),
+            hooks_config.clone(),
+        );
 
-        let collections_writer =
-            CollectionsWriter::try_load(collections_writer_config, context.clone())
-                .await
-                .context("Cannot load collections")?;
+        let collections_writer = CollectionsWriter::try_load(
+            collections_writer_config,
+            context.clone(),
+            hooks_config.clone(),
+        )
+        .await
+        .context("Cannot load collections")?;
 
         let (stop_done_sender, stop_done_receiver) = tokio::sync::mpsc::channel(1);
         let (stop_sender, _) = tokio::sync::broadcast::channel(1);
@@ -794,26 +801,9 @@ impl WriteSide {
         };
 
         let mut document_to_store = document_list;
-        if let Some(hook_code) = hook_transform_before_save {
+        if hook_transform_before_save.is_some() {
             // Hook signature: function transformDocumentBeforeSave(documents)
             // - documents: the list of document to be inserted
-            let hooks_config = self.get_hooks_config();
-            let mut js_executor: JSExecutor<[DocumentList; 1], Option<DocumentList>> =
-                JSExecutor::builder(
-                    hook_code,
-                    HookType::TransformDocumentBeforeSave
-                        .get_function_name()
-                        .to_string(),
-                )
-                .allowed_hosts(hooks_config.allowed_hosts.clone())
-                .timeout(Duration::from_millis(hooks_config.builder_timeout_ms))
-                .is_async(true)
-                .build()
-                .await
-                .map_err(|e| {
-                    WriteError::Generic(anyhow::anyhow!("Failed to create JS executor: {e}"))
-                })?;
-
             // Clone for hook input, we need to preserve document_to_store in case:
             // 1. Hook returns None (no transformation), we use original for storage
             // 2. Hook modifies documents, we use modified for storage, original for indexing
@@ -822,25 +812,15 @@ impl WriteSide {
             let logs = self.get_hook_logs();
             let log_sender = logs.get_sender(&collection_id);
 
-            let output: Option<DocumentList> = js_executor
-                .exec(
-                    [hook_input],
+            let result: Option<DocumentList> = collection
+                .run_hook(
+                    HookType::TransformDocumentBeforeSave,
+                    hook_input,
                     log_sender,
-                    ExecOption {
-                        timeout: Duration::from_millis(hooks_config.execution_timeout_ms),
-                        allowed_hosts: Some(hooks_config.allowed_hosts.clone()),
-                    },
                 )
-                .await
-                .map_err(|e| {
-                    WriteError::Generic(anyhow::anyhow!(
-                        "TransformDocumentBeforeSave hook failed: {e}"
-                    ))
-                })?;
+                .await?;
 
-            drop(js_executor);
-
-            if let Some(modified_documents) = output {
+            if let Some(modified_documents) = result {
                 // Validate that the hook didn't break document integrity
                 Self::validate_hook_transform_before_save_output(
                     &modified_documents,
@@ -1014,31 +994,9 @@ impl WriteSide {
         let mut index_operation_batch = Vec::with_capacity(document_count * 10);
         let mut docs_to_remove = Vec::with_capacity(document_count);
 
-        let hooks_config = self.get_hooks_config();
-        let mut js_executor: Option<JSExecutor<[DocumentList; 1], Option<DocumentList>>> = None;
-        if let Some(ref hook_code) = hook_transform_before_save {
-            // Hook signature: function transformDocumentBeforeSave(documents)
-            // - documents: the list of document to be saved
-            js_executor = Some(
-                JSExecutor::builder(
-                    hook_code.clone(),
-                    HookType::TransformDocumentBeforeSave
-                        .get_function_name()
-                        .to_string(),
-                )
-                .allowed_hosts(hooks_config.allowed_hosts.clone())
-                .timeout(Duration::from_millis(hooks_config.builder_timeout_ms))
-                .is_async(true)
-                .build()
-                .await
-                .map_err(|e| {
-                    WriteError::Generic(anyhow::anyhow!("Failed to create JS executor: {e}"))
-                })?,
-            );
-        }
-
         let logs = self.get_hook_logs();
         let log_sender = logs.get_sender(&collection_id);
+        let has_hook = hook_transform_before_save.is_some();
 
         let mut doc_stream = collection_document_storage
             .stream_documents(document_ids)
@@ -1091,25 +1049,18 @@ impl WriteSide {
 
                         // Apply transformDocumentBeforeSave hook if present
                         let mut document_for_indexing: Option<Document> = None;
-                        if let Some(ref mut js_executor) = js_executor {
-                            // Clone for hook input (JSExecutor consumes the input)
+                        if has_hook {
+                            // Clone for hook input
                             let hook_input = document_for_storage.clone();
                             let document_list = DocumentList(vec![hook_input]);
-                            let output: Option<DocumentList> = js_executor
-                                .exec(
-                                    [document_list],
+
+                            let output: Option<DocumentList> = collection
+                                .run_hook(
+                                    HookType::TransformDocumentBeforeSave,
+                                    document_list,
                                     log_sender.clone(),
-                                    ExecOption {
-                                        timeout: Duration::from_millis(hooks_config.execution_timeout_ms),
-                                        allowed_hosts: Some(hooks_config.allowed_hosts.clone()),
-                                    },
                                 )
-                                .await
-                                .map_err(|e| {
-                                    WriteError::Generic(anyhow::anyhow!(
-                                        "TransformDocumentBeforeSave hook failed: {e}"
-                                    ))
-                                })?;
+                                .await?;
 
                             if let Some(mut modified_documents) = output {
                                 // Validate that the hook didn't break document integrity

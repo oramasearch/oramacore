@@ -1,8 +1,8 @@
 use futures::TryFutureExt;
 use llm_json::{repair_json, JsonRepairError};
-use orama_js_pool::{ExecOption, JSRunnerError, OutputChannel};
+use orama_js_pool::{DomainPermission, ExecOptions, OutputChannel, RuntimeError};
 use oramacore_lib::hook_storage::HookReaderError;
-use std::{collections::HashMap, sync::Arc, time::Duration};
+use std::{collections::HashMap, sync::Arc};
 use thiserror::Error;
 use tokio::sync::mpsc::error::SendError;
 use tokio_stream::StreamExt;
@@ -56,7 +56,7 @@ pub enum AnswerError {
     #[error("Hook read error: {0:?}")]
     HookError(#[from] HookReaderError),
     #[error("JS run error: {0:?}")]
-    JSError(#[from] JSRunnerError),
+    JSError(#[from] RuntimeError),
     #[error("Failed to get title: {0:?}")]
     TitleError(#[from] TitleError),
 }
@@ -199,10 +199,11 @@ impl Answer {
                 &lock,
                 params.clone(),
                 log_sender.clone(),
-                ExecOption {
-                    allowed_hosts: Some(hooks_config.allowed_hosts.clone()),
-                    timeout: Duration::from_millis(hooks_config.execution_timeout_ms),
-                },
+                ExecOptions::new()
+                    // .with_timeout(hooks_config.execution_timeout_ms)
+                    .with_domain_permission(DomainPermission::Allow(
+                        hooks_config.allowed_hosts.clone(),
+                    )),
                 hooks_config,
             )
             .await?;
@@ -249,10 +250,11 @@ impl Answer {
             &lock,
             (variables, system_prompt),
             log_sender,
-            ExecOption {
-                allowed_hosts: Some(hooks_config.allowed_hosts.clone()),
-                timeout: Duration::from_millis(hooks_config.execution_timeout_ms),
-            },
+            ExecOptions::new()
+                // .with_timeout(hooks_config.execution_timeout_ms)
+                .with_domain_permission(DomainPermission::Allow(
+                    hooks_config.allowed_hosts.clone(),
+                )),
             hooks_config,
         )
         .await?;
@@ -553,10 +555,11 @@ impl Answer {
             &lock,
             params.clone(),
             log_sender.clone(),
-            ExecOption {
-                allowed_hosts: Some(hooks_config.allowed_hosts.clone()),
-                timeout: Duration::from_millis(hooks_config.execution_timeout_ms),
-            },
+            ExecOptions::new()
+                // .with_timeout(hooks_config.execution_timeout_ms)
+                .with_domain_permission(DomainPermission::Allow(
+                    hooks_config.allowed_hosts.clone(),
+                )),
             hooks_config,
         )
         .await?;

@@ -93,11 +93,11 @@ pub struct HooksConfig {
 }
 
 fn default_hook_builder_timeout() -> u64 {
-    200 
+    200
 }
 
 fn default_hook_execution_timeout() -> u64 {
-    1000 
+    1000
 }
 
 impl Default for HooksConfig {
@@ -109,7 +109,6 @@ impl Default for HooksConfig {
         }
     }
 }
-
 
 #[derive(Deserialize, Clone)]
 pub struct OramacoreConfig {

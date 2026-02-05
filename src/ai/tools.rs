@@ -2,7 +2,7 @@ use std::{sync::Arc, time::Duration};
 
 use anyhow::{Context, Result};
 use async_openai::types::{ChatCompletionRequestMessage, FunctionObject, FunctionObjectArgs};
-use orama_js_pool::{ExecOption, JSExecutor, JSRunnerError};
+use orama_js_pool::{DomainPermission, ExecOptions, RuntimeError, Worker};
 use oramacore_lib::generic_kv::KV;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -53,7 +53,7 @@ pub enum ToolError {
     #[error("Tool {1} from collection {1} goes in timeout")]
     ExecutionTimeout(CollectionId, String),
     #[error("Tool {1} from collection {1} exited with this error: {2:?}")]
-    ExecutionError(CollectionId, String, JSRunnerError),
+    ExecutionError(CollectionId, String, RuntimeError),
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -97,8 +97,16 @@ pub struct ToolsRuntime {
 }
 
 impl ToolsRuntime {
-    pub fn new(kv: Arc<KV>, llm_service: Arc<LLMService>, hooks_config: crate::HooksConfig) -> Self {
-        ToolsRuntime { kv, llm_service, hooks_config }
+    pub fn new(
+        kv: Arc<KV>,
+        llm_service: Arc<LLMService>,
+        hooks_config: crate::HooksConfig,
+    ) -> Self {
+        ToolsRuntime {
+            kv,
+            llm_service,
+            hooks_config,
+        }
     }
 
     pub async fn insert(&self, collection_id: CollectionId, tool: Tool) -> Result<(), ToolError> {
@@ -277,26 +285,29 @@ impl ToolsRuntime {
                             })?;
 
                         let function_name = full_tool.id.clone();
-                        let mut executor = JSExecutor::builder(code, function_name.clone())
-                            .allowed_hosts(self.hooks_config.allowed_hosts.clone())
-                            .timeout(Duration::from_millis(self.hooks_config.builder_timeout_ms))
-                            .is_async(true)
+                        let mut worker = Worker::builder()
+                            .with_domain_permission(DomainPermission::Allow(
+                                self.hooks_config.allowed_hosts.clone(),
+                            ))
+                            .with_evaluation_timeout(Duration::from_millis(
+                                self.hooks_config.builder_timeout_ms,
+                            ))
+                            .add_module(&function_name, code)
                             .build()
                             .await
                             .map_err(|e| {
-                                ToolError::ExecutionError(collection_id, function_name, e)
+                                ToolError::ExecutionError(collection_id, function_name.clone(), e)
                             })?;
 
-                        // The JSExecutor call can easily fail under different circumstances.
+                        // The Worker exec can easily fail under different circumstances.
                         // We need to handle this error and send it back to the main thread.
-                        let output: Result<Value, JSRunnerError> = executor
+                        let output: Result<Value, RuntimeError> = worker
                             .exec(
+                                &function_name,
+                                &function_name,
                                 arguments_as_json_value,
-                                None,
-                                ExecOption {
-                                    timeout: Duration::from_millis(self.hooks_config.execution_timeout_ms),
-                                    allowed_hosts: Some(self.hooks_config.allowed_hosts.clone()),
-                                },
+                                ExecOptions::new(),
+                                // .with_timeout(self.hooks_config.execution_timeout_ms)
                             )
                             .await;
 

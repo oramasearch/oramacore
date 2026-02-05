@@ -37,7 +37,6 @@ use crate::{
         InputSideChannelType, OutputSideChannelType, ReplaceIndexReason,
     },
     python::embeddings::Model,
-    HooksConfig,
     types::{
         ApiKey, CollectionId, CollectionStatsRequest, CreateCollection, CreateIndexRequest,
         DescribeCollectionResponse, Document, DocumentList, IndexId, InsertDocumentsResult,
@@ -45,7 +44,7 @@ use crate::{
         TypeParsingStrategies, UpdateDocumentRequest, UpdateDocumentsResult, WriteApiKey,
     },
     web_server::HttpConfig,
-    OramacoreConfig,
+    HooksConfig, OramacoreConfig,
 };
 use crate::{collection_manager::sides::read::ReadError, types::SearchResultHit};
 use anyhow::Context;

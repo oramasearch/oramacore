@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 use anyhow::Result;
 use backoff::{backoff::Backoff, ExponentialBackoffBuilder};
 use futures::future::Future;
-use orama_js_pool::{ExecOption, OutputChannel};
+use orama_js_pool::{DomainPermission, ExecOptions, OutputChannel};
 use serde::Serialize;
 use tokio::sync::{mpsc, Mutex};
 use tokio::time::sleep;
@@ -1425,10 +1425,11 @@ impl AnswerStateMachine {
                 &lock,
                 params.clone(),
                 None, // log_sender
-                ExecOption {
-                    allowed_hosts: Some(hooks_config.allowed_hosts.clone()),
-                    timeout: Duration::from_millis(hooks_config.execution_timeout_ms),
-                },
+                ExecOptions::new()
+                    // .with_timeout(hooks_config.execution_timeout_ms)
+                    .with_domain_permission(DomainPermission::Allow(
+                        hooks_config.allowed_hosts.clone(),
+                    )),
                 hooks_config,
             )
             .await
@@ -1482,10 +1483,11 @@ impl AnswerStateMachine {
             &lock,
             (variables, system_prompt),
             log_sender,
-            ExecOption {
-                allowed_hosts: Some(hooks_config.allowed_hosts.clone()),
-                timeout: Duration::from_millis(hooks_config.execution_timeout_ms),
-            },
+            ExecOptions::new()
+                // .with_timeout(hooks_config.execution_timeout_ms)
+                .with_domain_permission(DomainPermission::Allow(
+                    hooks_config.allowed_hosts.clone(),
+                )),
             hooks_config,
         )
         .await

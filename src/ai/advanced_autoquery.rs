@@ -2,11 +2,11 @@ use anyhow::{Context, Result};
 use axum::extract::State;
 use futures::{future::join_all, Stream, StreamExt};
 use llm_json::repair_json;
-use orama_js_pool::{ExecOption, OutputChannel};
+use orama_js_pool::{DomainPermission, ExecOptions, OutputChannel};
 use regex::Regex;
 use serde::{self, Deserialize, Serialize};
+use std::collections::HashMap;
 use std::sync::Arc;
-use std::{collections::HashMap, time::Duration};
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 
@@ -641,10 +641,11 @@ impl AdvancedAutoQuery {
                     &lock,
                     search_params.clone(),
                     log_sender,
-                    ExecOption {
-                        allowed_hosts: Some(hooks_config.allowed_hosts.clone()),
-                        timeout: Duration::from_millis(hooks_config.execution_timeout_ms),
-                    },
+                    ExecOptions::new()
+                        // .with_timeout(hooks_config.execution_timeout_ms)
+                        .with_domain_permission(DomainPermission::Allow(
+                            hooks_config.allowed_hosts.clone(),
+                        )),
                     hooks_config,
                 )
                 .await?;

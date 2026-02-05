@@ -18,7 +18,7 @@ use oramacore_lib::hook_storage::{HookReader, HookReaderError, HookType};
 pub use collection::CollectionStats;
 use duration_str::deserialize_duration;
 use notify::NotifierConfig;
-use orama_js_pool::{ExecOption, JSExecutor, OutputChannel};
+use orama_js_pool::{ExecOptions, OutputChannel, Pool};
 use oramacore_lib::shelves::ShelfId;
 use std::ops::Deref;
 use std::sync::Arc;
@@ -170,6 +170,7 @@ pub struct ReadSide {
     llm_service: Arc<LLMService>,
     local_gpu_manager: Arc<LocalGPUManager>,
 
+    js_pool: Pool,
     hook_logs: HookLogs,
 
     hooks_config: HooksConfig,
@@ -267,6 +268,13 @@ impl ReadSide {
             .await
             .context("Cannot create JWT manager")?;
 
+        let js_pool = Pool::builder()
+            .with_domain_permission(orama_js_pool::DomainPermission::Allow(
+                hooks_config.allowed_hosts.clone(),
+            ))
+            .build()
+            .await?;
+
         let read_side = ReadSide {
             collections: collections_reader,
             _global_document_storage: global_document_storage,
@@ -282,6 +290,7 @@ impl ReadSide {
             llm_service,
             local_gpu_manager,
 
+            js_pool,
             hook_logs: HookLogs::new(),
             hooks_config,
             analytics_storage,
@@ -577,44 +586,29 @@ impl ReadSide {
             // Hook signature: function beforeSearch(search_params, claim)
             // - search_params: the search parameters that can be modified
             // - claim: the extra JWT claims (object) or null if using plain API key
-            let hooks_config = self.get_hooks_config();
-            let mut js_executor: JSExecutor<
-                (SearchParams, Option<HashMap<String, Value>>),
-                Option<SearchParams>,
-            > = JSExecutor::builder(
-                hook_code,
-                HookType::BeforeSearch.get_function_name().to_string(),
-            )
-            .allowed_hosts(hooks_config.allowed_hosts.clone())
-            .timeout(Duration::from_millis(hooks_config.builder_timeout_ms))
-            .is_async(true)
-            .build()
-            .await
-            .map_err(|e| {
-                ReadError::Generic(anyhow::anyhow!("Failed to create JS executor: {e}"))
-            })?;
+            let hook_input = (request.search_params.clone(), claims.clone());
 
             let logs = self.get_hook_logs();
             let log_sender = logs.get_sender(&collection_id);
 
-            let hook_input = (request.search_params.clone(), claims.clone());
-            let output: Option<SearchParams> = js_executor
+            let hook_name = HookType::BeforeSearch.get_function_name().to_string();
+
+            let result: Option<SearchParams> = self
+                .js_pool
                 .exec(
+                    &hook_name,
+                    &hook_code,
                     hook_input,
-                    log_sender,
-                    ExecOption {
-                        timeout: Duration::from_millis(hooks_config.execution_timeout_ms),
-                        allowed_hosts: Some(hooks_config.allowed_hosts.clone()),
-                    },
+                    ExecOptions::new()
+                        // .with_timeout(hooks_config.execution_timeout_ms)
+                        .with_stdout_sender(log_sender.unwrap()),
                 )
                 .await
                 .map_err(|e| {
                     ReadError::Generic(anyhow::anyhow!("BeforeSearch hook failed: {e}"))
                 })?;
 
-            drop(js_executor);
-
-            if let Some(modified_params) = output {
+            if let Some(modified_params) = result {
                 info!("Search params modified by hook");
                 request.search_params = modified_params;
             }
@@ -632,39 +626,26 @@ impl ReadSide {
         if let Some(hook_code) = hook_transform_after_search {
             // Hook signature: function transformDocumentAfterSearch(documents)
             // - documents: the search hit documents
-            let hooks_config = self.get_hooks_config();
-            let mut js_executor: JSExecutor<
-                [Vec<SearchResultHit>; 1],
-                Option<Vec<SearchResultHit>>,
-            > = JSExecutor::builder(
-                hook_code,
-                HookType::TransformDocumentAfterSearch
-                    .get_function_name()
-                    .to_string(),
-            )
-            .allowed_hosts(hooks_config.allowed_hosts.clone())
-            .timeout(Duration::from_millis(hooks_config.builder_timeout_ms))
-            .is_async(true)
-            .build()
-            .await
-            .map_err(|e| {
-                ReadError::Generic(anyhow::anyhow!("Failed to create JS executor: {e}"))
-            })?;
+            // Note: We must clone here because, if hook returns None (null/undefined in JS),
+            // we need to preserve original results.
+            let hook_input = search_result.hits.clone();
 
             let logs = self.get_hook_logs();
             let log_sender = logs.get_sender(&collection_id);
 
-            // Note: We must clone here because, if hook returns None (null/undefined in JS),
-            // we need to preserve original results.
-            let hook_input = search_result.hits.clone();
-            let output: Option<Vec<SearchResultHit>> = js_executor
+            let hook_name = HookType::TransformDocumentAfterSearch
+                .get_function_name()
+                .to_string();
+
+            let result: Option<Vec<SearchResultHit>> = self
+                .js_pool
                 .exec(
-                    [hook_input],
-                    log_sender,
-                    ExecOption {
-                        timeout: Duration::from_millis(hooks_config.execution_timeout_ms),
-                        allowed_hosts: Some(hooks_config.allowed_hosts.clone()),
-                    },
+                    &hook_name,
+                    &hook_code,
+                    hook_input,
+                    ExecOptions::new()
+                        // .with_timeout(hooks_config.execution_timeout_ms)
+                        .with_stdout_sender(log_sender.unwrap()),
                 )
                 .await
                 .map_err(|e| {
@@ -673,9 +654,7 @@ impl ReadSide {
                     ))
                 })?;
 
-            drop(js_executor);
-
-            if let Some(modified_documents) = output {
+            if let Some(modified_documents) = result {
                 info!("Search results document modified by hook");
                 search_result.count = modified_documents.len();
                 search_result.hits = modified_documents;

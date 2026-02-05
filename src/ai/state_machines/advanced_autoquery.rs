@@ -6,7 +6,7 @@ use anyhow::{Context, Result};
 use backoff::{backoff::Backoff, ExponentialBackoffBuilder};
 use futures::future::{join_all, Future};
 use llm_json::repair_json;
-use orama_js_pool::ExecOption;
+use orama_js_pool::{DomainPermission, ExecOptions};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use tokio::sync::{mpsc, Mutex};
@@ -1570,10 +1570,11 @@ impl AdvancedAutoqueryStateMachine {
             &lock,
             search_params.clone(),
             None, // log_sender
-            ExecOption {
-                allowed_hosts: Some(hooks_config.allowed_hosts.clone()),
-                timeout: Duration::from_millis(hooks_config.execution_timeout_ms),
-            },
+            ExecOptions::new()
+                // .with_timeout(hooks_config.execution_timeout_ms)
+                .with_domain_permission(DomainPermission::Allow(
+                    hooks_config.allowed_hosts.clone(),
+                )),
             hooks_config,
         )
         .await
