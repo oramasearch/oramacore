@@ -443,6 +443,15 @@ impl Index {
         }
         drop(score_fields);
 
+        // Extract the OCM (Orama Custom Multiplier) value if present and valid.
+        // Only positive values are accepted; zero, negative, or non-numeric values are ignored.
+        let ocm_multiplier: Option<f32> = doc
+            .inner
+            .get("_ocm")
+            .and_then(|v| v.as_f64())
+            .map(|f| f as f32)
+            .filter(|&f| f > 0.0);
+
         // This case is odd because it means that the document has no fields (just the "id" field)
         // Should we warn about it?
         if !doc_indexed_values.is_empty() {
@@ -450,9 +459,10 @@ impl Index {
                 self.collection_id,
                 CollectionWriteOperation::IndexWriteOperation(
                     self.index_id,
-                    IndexWriteOperation::Index {
+                    IndexWriteOperation::Index2 {
                         doc_id,
                         indexed_values: doc_indexed_values,
+                        ocm: ocm_multiplier,
                     },
                 ),
             ));
@@ -662,6 +672,12 @@ impl Index {
 
         // `id` field is always present in the documents
         current_fields.insert(Box::new([Cow::Owned("id".to_string())]), F::AlreadyInserted);
+        // `_ocm` (Orama Custom Multiplier) is a special field that should not be indexed
+        // It stores a multiplier that is applied to the document's score during search
+        current_fields.insert(
+            Box::new([Cow::Owned("_ocm".to_string())]),
+            F::AlreadyInserted,
+        );
 
         for doc in &docs.0 {
             recursive_object_inspection(&doc.inner, &mut current_fields, vec![])
