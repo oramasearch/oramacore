@@ -698,7 +698,7 @@ impl IntoResponse for AnswerError {
             }
             AnswerError::HookError(e) => (
                 StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Hook error {e:?}"),
+                format!("Hook error: {e}"),
             )
                 .into_response(),
             AnswerError::JSError(e) => (

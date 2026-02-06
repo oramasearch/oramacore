@@ -632,22 +632,17 @@ impl AdvancedAutoQuery {
 
             async move {
                 let search_params = tracked_query.search_params.clone();
-                let hook_storage = read_side
-                    .get_hook_storage(read_api_key, collection_id)
+                let collection = read_side
+                    .get_collection(collection_id, read_api_key)
                     .await?;
-                let lock = hook_storage.read("execute_mapped_searches").await;
-                let hooks_config = read_side.get_hooks_config();
+                let js_pool = collection.get_js_pool();
                 let search_params = run_before_retrieval(
-                    &lock,
+                    js_pool,
                     search_params.clone(),
                     log_sender,
-                    ExecOptions::new()
-                        // .with_timeout(hooks_config.execution_timeout_ms)
-                        .with_domain_permission(hooks_config.to_domain_permission()),
-                    hooks_config,
+                    ExecOptions::new(),
                 )
                 .await?;
-                drop(lock);
 
                 let search_result = read_side
                     .search(

@@ -1,7 +1,6 @@
 use futures::TryFutureExt;
 use llm_json::{repair_json, JsonRepairError};
 use orama_js_pool::{ExecOptions, OutputChannel, RuntimeError};
-use oramacore_lib::hook_storage::HookReaderError;
 use std::{collections::HashMap, sync::Arc};
 use thiserror::Error;
 use tokio::sync::mpsc::error::SendError;
@@ -53,8 +52,8 @@ pub enum AnswerError {
     ReadError(#[from] ReadError),
     #[error("channel is closed: {0}")]
     ChannelClosed(#[from] SendError<AnswerEvent>),
-    #[error("Hook read error: {0:?}")]
-    HookError(#[from] HookReaderError),
+    #[error("Hook error: {0}")]
+    HookError(String),
     #[error("JS run error: {0:?}")]
     JSError(#[from] RuntimeError),
     #[error("Failed to get title: {0:?}")]
@@ -189,23 +188,18 @@ impl Answer {
                 group_by: None,
             };
 
-            let hook_storage = self
+            let collection = self
                 .read_side
-                .get_hook_storage(&self.read_api_key, self.collection_id)
+                .get_collection(self.collection_id, &self.read_api_key)
                 .await?;
-            let lock = hook_storage.read("answer").await;
-            let hooks_config = self.read_side.get_hooks_config();
+            let js_pool = collection.get_js_pool();
             let params = run_before_retrieval(
-                &lock,
+                js_pool,
                 params.clone(),
                 log_sender.clone(),
-                ExecOptions::new()
-                    // .with_timeout(hooks_config.execution_timeout_ms)
-                    .with_domain_permission(hooks_config.to_domain_permission()),
-                hooks_config,
+                ExecOptions::new(),
             )
             .await?;
-            drop(lock);
 
             let result = self
                 .read_side
@@ -238,23 +232,18 @@ impl Answer {
             ("context".to_string(), search_result_str.clone()),
         ];
 
-        let hook_storage = self
+        let collection = self
             .read_side
-            .get_hook_storage(&self.read_api_key, self.collection_id)
+            .get_collection(self.collection_id, &self.read_api_key)
             .await?;
-        let lock = hook_storage.read("answer").await;
-        let hooks_config = self.read_side.get_hooks_config();
+        let js_pool = collection.get_js_pool();
         let (variables, system_prompt) = run_before_answer(
-            &lock,
+            js_pool,
             (variables, system_prompt),
             log_sender,
-            ExecOptions::new()
-                // .with_timeout(hooks_config.execution_timeout_ms)
-                .with_domain_permission(hooks_config.to_domain_permission()),
-            hooks_config,
+            ExecOptions::new(),
         )
         .await?;
-        drop(lock);
 
         info!("Variables for LLM: {:?}", variables);
         let answer_stream = llm_service
@@ -541,23 +530,18 @@ impl Answer {
             group_by: None,
         };
 
-        let hook_storage = self
+        let collection = self
             .read_side
-            .get_hook_storage(&self.read_api_key, self.collection_id)
+            .get_collection(self.collection_id, &self.read_api_key)
             .await?;
-        let lock = hook_storage.read("run_before_retrieval").await;
-        let hooks_config = self.read_side.get_hooks_config();
+        let js_pool = collection.get_js_pool();
         let params = run_before_retrieval(
-            &lock,
+            js_pool,
             params.clone(),
             log_sender.clone(),
-            ExecOptions::new()
-                // .with_timeout(hooks_config.execution_timeout_ms)
-                .with_domain_permission(hooks_config.to_domain_permission()),
-            hooks_config,
+            ExecOptions::new(),
         )
         .await?;
-        drop(lock);
 
         let result = match self
             .read_side

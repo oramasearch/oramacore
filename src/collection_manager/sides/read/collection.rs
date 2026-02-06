@@ -702,6 +702,10 @@ impl CollectionReader {
         &self.hooks_reader
     }
 
+    pub fn get_js_pool(&self) -> &Pool {
+        &self.js_pool
+    }
+
     /// Run a hook if it exists in the pool
     pub async fn run_hook<Input, Output>(
         &self,

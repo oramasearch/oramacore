@@ -102,10 +102,8 @@ pub enum AnswerError {
     RagAtError(String),
     #[error("Failed to execute search: {0}")]
     SearchError(String),
-    #[error("Failed to execute before retrieval hook: {0}")]
-    BeforeRetrievalHookError(String),
-    #[error("Failed to execute before answer hook: {0}")]
-    BeforeAnswerHookError(String),
+    #[error("Hook error: {0}")]
+    HookError(String),
     #[error("Failed to generate answer: {0}")]
     AnswerGenerationError(String),
     #[error("Failed to generate related queries: {0}")]
@@ -114,8 +112,6 @@ pub enum AnswerError {
     LLMServiceError(String),
     #[error("Read error: {0}")]
     ReadError(String),
-    #[error("Hook read error: {0}")]
-    HookError(String),
     #[error("JS run error: {0}")]
     JSError(String),
     #[error("JSON parsing error: {0}")]
@@ -1414,25 +1410,15 @@ impl AnswerStateMachine {
                 group_by: None,
             };
 
-            let hook_storage = self
+            let collection = self
                 .read_side
-                .get_hook_storage(&read_api_key, collection_id)
+                .get_collection(collection_id, &read_api_key)
                 .await
                 .map_err(|e| AnswerError::HookError(e.to_string()))?;
-            let lock = hook_storage.read("run_before_retrieval").await;
-            let hooks_config = self.read_side.get_hooks_config();
-            let params = run_before_retrieval(
-                &lock,
-                params.clone(),
-                None, // log_sender
-                ExecOptions::new()
-                    // .with_timeout(hooks_config.execution_timeout_ms)
-                    .with_domain_permission(hooks_config.to_domain_permission()),
-                hooks_config,
-            )
-            .await
-            .map_err(|e| AnswerError::BeforeRetrievalHookError(e.to_string()))?;
-            drop(lock);
+            let js_pool = collection.get_js_pool();
+            let params = run_before_retrieval(js_pool, params.clone(), None, ExecOptions::new())
+                .await
+                .map_err(|e| AnswerError::HookError(e.to_string()))?;
 
             let result = self
                 .read_side
@@ -1470,25 +1456,20 @@ impl AnswerStateMachine {
             ("context".to_string(), search_result_str.clone()),
         ];
 
-        let hook_storage = self
+        let collection = self
             .read_side
-            .get_hook_storage(&read_api_key, collection_id)
+            .get_collection(collection_id, &read_api_key)
             .await
             .map_err(|e| AnswerError::HookError(e.to_string()))?;
-        let lock = hook_storage.read("run_before_answer").await;
-        let hooks_config = self.read_side.get_hooks_config();
+        let js_pool = collection.get_js_pool();
         let (variables, system_prompt) = run_before_answer(
-            &lock,
+            js_pool,
             (variables, system_prompt),
             log_sender,
-            ExecOptions::new()
-                // .with_timeout(hooks_config.execution_timeout_ms)
-                .with_domain_permission(hooks_config.to_domain_permission()),
-            hooks_config,
+            ExecOptions::new(),
         )
         .await
-        .map_err(|e| AnswerError::BeforeAnswerHookError(e.to_string()))?;
-        drop(lock);
+        .map_err(|e| AnswerError::HookError(e.to_string()))?;
 
         Ok((variables, system_prompt))
     }
