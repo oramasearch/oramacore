@@ -19,6 +19,7 @@ use crate::metrics::CollectionCommitLabels;
 use crate::python::embeddings::Model;
 use crate::types::CollectionId;
 use crate::types::{CreateCollection, DescribeCollectionResponse, LanguageDTO};
+use crate::HooksConfig;
 use oramacore_lib::fs::{create_if_not_exists, BufferedFile};
 use oramacore_lib::nlp::locales::Locale;
 
@@ -31,14 +32,14 @@ pub struct CollectionsWriter {
     context: WriteSideContext,
     default_model: Model,
     data_dir: PathBuf,
-    hooks_config: crate::HooksConfig,
+    hooks_config: HooksConfig,
 }
 
 impl CollectionsWriter {
     pub async fn try_load(
         config: CollectionsWriterConfig,
         context: WriteSideContext,
-        hooks_config: crate::HooksConfig,
+        hooks_config: HooksConfig,
     ) -> Result<Self> {
         let mut collections: HashMap<CollectionId, CollectionWriter> = Default::default();
         let default_model = config.default_embedding_model;

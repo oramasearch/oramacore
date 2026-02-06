@@ -79,7 +79,6 @@ pub struct ReadSideConfig {
     pub analytics: Option<OramaCoreAnalyticConfig>,
     pub input: InputSideChannelType,
     pub config: IndexesConfig,
-    #[serde(default)]
     pub hooks: HooksConfig,
     pub jwt: Option<JwtConfig>,
 }

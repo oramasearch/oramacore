@@ -41,6 +41,7 @@ use crate::{
         ApiKey, CollectionId, CollectionStatsRequest, Document, DocumentId, FieldId, IndexId,
         InteractionMessage, Number, OramaDate, RawJSONDocument, ReadApiKey, Role,
     },
+    HooksConfig,
 };
 
 use super::{
@@ -172,7 +173,7 @@ impl CollectionReader {
         context: ReadSideContext,
         offload_config: OffloadFieldConfig,
         commit_config: CollectionCommitConfig,
-        hooks_config: crate::HooksConfig,
+        hooks_config: HooksConfig,
     ) -> Result<Self> {
         let document_storage = CollectionDocumentStorage::new(
             context.global_document_storage.clone(),
@@ -243,7 +244,7 @@ impl CollectionReader {
         offload_config: OffloadFieldConfig,
         commit_config: CollectionCommitConfig,
         global_offset: Offset,
-        hooks_config: crate::HooksConfig,
+        hooks_config: HooksConfig,
     ) -> Result<Self> {
         debug!("Loading collection info");
         let dump: Dump = BufferedFile::open(data_dir.join("collection.json"))
