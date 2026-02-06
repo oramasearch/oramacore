@@ -481,8 +481,9 @@ export default { transformDocumentAfterSearch }"#
         .await;
 
     assert!(result.is_err());
-    assert!(result
-        .unwrap_err()
-        .to_string()
-        .contains("TransformDocumentAfterSearch hook failed"));
+    let err = result.unwrap_err().to_string();
+    assert!(
+        err.contains("Hook TransformDocumentAfterSearch execution failed"),
+        "Got: {err}",
+    );
 }

@@ -13,7 +13,7 @@ use std::{
 use axum::extract::State;
 use chrono::{DateTime, Utc};
 use debug_panic::debug_panic;
-use orama_js_pool::OutputChannel;
+use orama_js_pool::{ExecOptions, OutputChannel, Pool};
 use oramacore_lib::{
     hook_storage::{HookReader, HookType},
     pin_rules::PinRulesReader,
@@ -134,7 +134,8 @@ pub struct CollectionReader {
 
     temp_indexes: OramaAsyncLock<Vec<Index>>,
 
-    hook: OramaAsyncLock<HookReader>,
+    js_pool: Pool,
+    hooks_reader: OramaAsyncLock<HookReader>,
 
     created_at: DateTime<Utc>,
     updated_at: OramaAsyncLock<DateTime<Utc>>,
@@ -160,7 +161,7 @@ pub struct CollectionReader {
 }
 
 impl CollectionReader {
-    pub fn empty(
+    pub async fn empty(
         data_dir: PathBuf,
         collection_id: CollectionId,
         description: Option<String>,
@@ -171,6 +172,7 @@ impl CollectionReader {
         context: ReadSideContext,
         offload_config: OffloadFieldConfig,
         commit_config: CollectionCommitConfig,
+        hooks_config: crate::HooksConfig,
     ) -> Result<Self> {
         let document_storage = CollectionDocumentStorage::new(
             context.global_document_storage.clone(),
@@ -178,6 +180,14 @@ impl CollectionReader {
             collection_id,
         )?;
         let document_storage = Arc::new(document_storage);
+
+        let js_pool = Pool::builder()
+            .with_evaluation_timeout(Duration::from_millis(500))
+            .with_domain_permission(orama_js_pool::DomainPermission::Allow(
+                hooks_config.allowed_hosts.clone(),
+            ))
+            .build()
+            .await?;
 
         Ok(Self {
             id: collection_id,
@@ -196,7 +206,8 @@ impl CollectionReader {
             indexes: OramaAsyncLock::new("collection_indexes", Default::default()),
             temp_indexes: OramaAsyncLock::new("collection_temp_indexes", Default::default()),
 
-            hook: OramaAsyncLock::new(
+            js_pool,
+            hooks_reader: OramaAsyncLock::new(
                 "collection_hook",
                 HookReader::try_new(data_dir.join("hooks"))?,
             ),
@@ -227,12 +238,13 @@ impl CollectionReader {
         })
     }
 
-    pub fn try_load(
+    pub async fn try_load(
         context: ReadSideContext,
         data_dir: PathBuf,
         offload_config: OffloadFieldConfig,
         commit_config: CollectionCommitConfig,
         global_offset: Offset,
+        hooks_config: crate::HooksConfig,
     ) -> Result<Self> {
         debug!("Loading collection info");
         let dump: Dump = BufferedFile::open(data_dir.join("collection.json"))
@@ -318,6 +330,27 @@ impl CollectionReader {
         )?;
         let document_storage = Arc::new(document_storage);
 
+        let js_pool = Pool::builder()
+            .with_evaluation_timeout(Duration::from_millis(500))
+            .with_domain_permission(orama_js_pool::DomainPermission::Allow(
+                hooks_config.allowed_hosts.clone(),
+            ))
+            .build()
+            .await?;
+
+        let hook_reader = HookReader::try_new(data_dir.join("hooks"))?;
+
+        // Load all existing hooks into the pool
+        let hooks = hook_reader.list()?;
+        for (hook_type, code) in hooks {
+            if let Some(code) = code {
+                js_pool
+                    .add_module(hook_type.get_function_name(), code)
+                    .await
+                    .context("Cannot add hook to pool")?;
+            }
+        }
+
         let s = Self {
             id: dump.id,
             description: dump.description,
@@ -338,10 +371,8 @@ impl CollectionReader {
             indexes: OramaAsyncLock::new("collection_indexes", indexes),
             temp_indexes: OramaAsyncLock::new("collection_temp_indexes", temp_indexes),
 
-            hook: OramaAsyncLock::new(
-                "collection_hook",
-                HookReader::try_new(data_dir.join("hooks"))?,
-            ),
+            js_pool,
+            hooks_reader: OramaAsyncLock::new("collection_hook", hook_reader),
 
             created_at: dump.created_at,
             updated_at: OramaAsyncLock::new("collection_updated_at", dump.updated_at),
@@ -482,7 +513,7 @@ impl CollectionReader {
         }
         drop(temp_indexes_lock);
 
-        let mut hook_lock = self.hook.write("commit").await;
+        let mut hook_lock = self.hooks_reader.write("commit").await;
         hook_lock.commit()?;
         drop(hook_lock);
 
@@ -670,7 +701,44 @@ impl CollectionReader {
     }
 
     pub fn get_hook_storage(&self) -> &OramaAsyncLock<HookReader> {
-        &self.hook
+        &self.hooks_reader
+    }
+
+    /// Run a hook if it exists in the pool
+    pub async fn run_hook<Input, Output>(
+        &self,
+        hook_type: HookType,
+        input: Input,
+        log_sender: Option<Arc<tokio::sync::broadcast::Sender<(OutputChannel, String)>>>,
+    ) -> Result<Option<Output>, ReadError>
+    where
+        Input: orama_js_pool::TryIntoFunctionParameters + Send + 'static,
+        Output: serde::de::DeserializeOwned + Send + 'static,
+    {
+        let hook_content = self
+            .hooks_reader
+            .read("run_hook")
+            .await
+            .get_hook_content(hook_type)?;
+        if hook_content.is_none() {
+            return Ok(None);
+        }
+
+        let hook_name = hook_type.get_function_name();
+        let mut exec_opts = ExecOptions::new();
+        if let Some(sender) = log_sender {
+            exec_opts = exec_opts.with_stdout_sender(sender);
+        }
+
+        let result: Option<Output> = self
+            .js_pool
+            .exec(hook_name, hook_name, input, exec_opts)
+            .await
+            .map_err(|e| {
+                ReadError::Generic(anyhow::anyhow!("Hook {hook_type:?} execution failed: {e}"))
+            })?;
+
+        Ok(result)
     }
 
     pub async fn update_mcp_description(&self, mcp_description: Option<String>) -> Result<()> {
@@ -993,7 +1061,37 @@ impl CollectionReader {
                 }
             }
             CollectionWriteOperation::Hook(op) => {
-                let mut lock = self.hook.write("update_hook").await;
+                // Handle hook updates through the js_pool
+                use oramacore_lib::hook_storage::HookOperation;
+                match &op {
+                    HookOperation::Insert(hook_type, code) => {
+                        self.js_pool
+                            .add_module(hook_type.get_function_name(), code.clone())
+                            .await
+                            .map_err(|e| {
+                                anyhow::anyhow!("Hook {hook_type:?} validation failed: {e}")
+                            })?;
+                    }
+                    HookOperation::Delete(hook_type) => {
+                        match self
+                            .js_pool
+                            .remove_module(hook_type.get_function_name())
+                            .await
+                        {
+                            Ok(_) => {}
+                            Err(orama_js_pool::RuntimeError::MissingModule(_)) => {
+                                // Module doesn't exist, treat it as success
+                            }
+                            Err(e) => {
+                                return Err(anyhow::anyhow!(
+                                    "Hook {hook_type:?} delete failed: {e}"
+                                ));
+                            }
+                        }
+                    }
+                }
+
+                let mut lock = self.hooks_reader.write("update_hook").await;
                 lock.update(op)?;
                 drop(lock);
             }
@@ -1080,7 +1178,7 @@ impl CollectionReader {
             indexes_stats.push(i.stats(true).await?);
         }
 
-        let lock = self.hook.read("stats").await;
+        let lock = self.hooks_reader.read("stats").await;
         let hooks = lock.list()?;
         let hooks = hooks
             .into_iter()

@@ -18,7 +18,7 @@ use oramacore_lib::hook_storage::{HookReader, HookReaderError, HookType};
 pub use collection::CollectionStats;
 use duration_str::deserialize_duration;
 use notify::NotifierConfig;
-use orama_js_pool::{ExecOptions, OutputChannel, Pool};
+use orama_js_pool::OutputChannel;
 use oramacore_lib::shelves::ShelfId;
 use std::ops::Deref;
 use std::sync::Arc;
@@ -170,9 +170,7 @@ pub struct ReadSide {
     llm_service: Arc<LLMService>,
     local_gpu_manager: Arc<LocalGPUManager>,
 
-    js_pool: Pool,
     hook_logs: HookLogs,
-
     hooks_config: HooksConfig,
 
     analytics_storage: Option<OramaCoreAnalytics>,
@@ -236,9 +234,10 @@ impl ReadSide {
         };
         info!(offset=?last_offset, "Starting read side");
 
-        let collections_reader = CollectionsReader::try_load(context, config.config, last_offset)
-            .await
-            .context("Cannot load collections")?;
+        let collections_reader =
+            CollectionsReader::try_load(context, config.config, hooks_config.clone(), last_offset)
+                .await
+                .context("Cannot load collections")?;
 
         let kv = KV::try_load(KVConfig {
             data_dir: data_dir.join("kv"),
@@ -268,13 +267,6 @@ impl ReadSide {
             .await
             .context("Cannot create JWT manager")?;
 
-        let js_pool = Pool::builder()
-            .with_domain_permission(orama_js_pool::DomainPermission::Allow(
-                hooks_config.allowed_hosts.clone(),
-            ))
-            .build()
-            .await?;
-
         let read_side = ReadSide {
             collections: collections_reader,
             _global_document_storage: global_document_storage,
@@ -290,7 +282,6 @@ impl ReadSide {
             llm_service,
             local_gpu_manager,
 
-            js_pool,
             hook_logs: HookLogs::new(),
             hooks_config,
             analytics_storage,
@@ -575,43 +566,18 @@ impl ReadSide {
             ReadApiKey::ApiKey(_) => None,
         };
 
-        let storage = collection.get_hook_storage();
-        let storage = storage.read("run_before_search").await;
-        let hook_before_search = storage.get_hook_content(HookType::BeforeSearch)?;
-        let hook_transform_after_search =
-            storage.get_hook_content(HookType::TransformDocumentAfterSearch)?;
-        drop(storage);
+        // Hook signature: function beforeSearch(search_params, claim)
+        // - search_params: the search parameters that can be modified
+        // - claim: the extra JWT claims (object) or null if using plain API key
+        let hook_input = (request.search_params.clone(), claims.clone());
+        let log_sender = self.get_hook_logs().get_sender(&collection_id);
+        let result: Option<SearchParams> = collection
+            .run_hook(HookType::BeforeSearch, hook_input, log_sender)
+            .await?;
 
-        if let Some(hook_code) = hook_before_search {
-            // Hook signature: function beforeSearch(search_params, claim)
-            // - search_params: the search parameters that can be modified
-            // - claim: the extra JWT claims (object) or null if using plain API key
-            let hook_input = (request.search_params.clone(), claims.clone());
-
-            let logs = self.get_hook_logs();
-            let log_sender = logs.get_sender(&collection_id);
-
-            let hook_name = HookType::BeforeSearch.get_function_name().to_string();
-
-            let result: Option<SearchParams> = self
-                .js_pool
-                .exec(
-                    &hook_name,
-                    &hook_code,
-                    hook_input,
-                    ExecOptions::new()
-                        // .with_timeout(hooks_config.execution_timeout_ms)
-                        .with_stdout_sender(log_sender.unwrap()),
-                )
-                .await
-                .map_err(|e| {
-                    ReadError::Generic(anyhow::anyhow!("BeforeSearch hook failed: {e}"))
-                })?;
-
-            if let Some(modified_params) = result {
-                info!("Search params modified by hook");
-                request.search_params = modified_params;
-            }
+        if let Some(modified_params) = result {
+            info!("Search params modified by hook");
+            request.search_params = modified_params;
         }
 
         let search = Search::new(
@@ -623,42 +589,24 @@ impl ReadSide {
 
         let mut search_result = search.execute().await?;
 
-        if let Some(hook_code) = hook_transform_after_search {
-            // Hook signature: function transformDocumentAfterSearch(documents)
-            // - documents: the search hit documents
-            // Note: We must clone here because, if hook returns None (null/undefined in JS),
-            // we need to preserve original results.
-            let hook_input = search_result.hits.clone();
+        // Hook signature: function transformDocumentAfterSearch(documents)
+        // - documents: the search hit documents
+        // Note: We must clone here because, if hook returns None (null/undefined in JS),
+        // we need to preserve original results.
+        let hook_input = search_result.hits.clone();
+        let log_sender = self.get_hook_logs().get_sender(&collection_id);
+        let result: Option<Vec<SearchResultHit>> = collection
+            .run_hook(
+                HookType::TransformDocumentAfterSearch,
+                vec![hook_input],
+                log_sender,
+            )
+            .await?;
 
-            let logs = self.get_hook_logs();
-            let log_sender = logs.get_sender(&collection_id);
-
-            let hook_name = HookType::TransformDocumentAfterSearch
-                .get_function_name()
-                .to_string();
-
-            let result: Option<Vec<SearchResultHit>> = self
-                .js_pool
-                .exec(
-                    &hook_name,
-                    &hook_code,
-                    hook_input,
-                    ExecOptions::new()
-                        // .with_timeout(hooks_config.execution_timeout_ms)
-                        .with_stdout_sender(log_sender.unwrap()),
-                )
-                .await
-                .map_err(|e| {
-                    ReadError::Generic(anyhow::anyhow!(
-                        "TransformDocumentAfterSearch hook failed: {e}"
-                    ))
-                })?;
-
-            if let Some(modified_documents) = result {
-                info!("Search results document modified by hook");
-                search_result.count = modified_documents.len();
-                search_result.hits = modified_documents;
-            }
+        if let Some(modified_documents) = result {
+            info!("Search results document modified by hook");
+            search_result.count = modified_documents.len();
+            search_result.hits = modified_documents;
         }
 
         Ok(search_result)
