@@ -2,7 +2,7 @@ use anyhow::{Context, Result};
 use axum::extract::State;
 use futures::{future::join_all, Stream, StreamExt};
 use llm_json::repair_json;
-use orama_js_pool::{DomainPermission, ExecOptions, OutputChannel};
+use orama_js_pool::{ExecOptions, OutputChannel};
 use regex::Regex;
 use serde::{self, Deserialize, Serialize};
 use std::collections::HashMap;
@@ -643,9 +643,7 @@ impl AdvancedAutoQuery {
                     log_sender,
                     ExecOptions::new()
                         // .with_timeout(hooks_config.execution_timeout_ms)
-                        .with_domain_permission(DomainPermission::Allow(
-                            hooks_config.allowed_hosts.clone(),
-                        )),
+                        .with_domain_permission(hooks_config.to_domain_permission()),
                     hooks_config,
                 )
                 .await?;

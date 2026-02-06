@@ -1,6 +1,6 @@
 use futures::TryFutureExt;
 use llm_json::{repair_json, JsonRepairError};
-use orama_js_pool::{DomainPermission, ExecOptions, OutputChannel, RuntimeError};
+use orama_js_pool::{ExecOptions, OutputChannel, RuntimeError};
 use oramacore_lib::hook_storage::HookReaderError;
 use std::{collections::HashMap, sync::Arc};
 use thiserror::Error;
@@ -201,9 +201,7 @@ impl Answer {
                 log_sender.clone(),
                 ExecOptions::new()
                     // .with_timeout(hooks_config.execution_timeout_ms)
-                    .with_domain_permission(DomainPermission::Allow(
-                        hooks_config.allowed_hosts.clone(),
-                    )),
+                    .with_domain_permission(hooks_config.to_domain_permission()),
                 hooks_config,
             )
             .await?;
@@ -252,9 +250,7 @@ impl Answer {
             log_sender,
             ExecOptions::new()
                 // .with_timeout(hooks_config.execution_timeout_ms)
-                .with_domain_permission(DomainPermission::Allow(
-                    hooks_config.allowed_hosts.clone(),
-                )),
+                .with_domain_permission(hooks_config.to_domain_permission()),
             hooks_config,
         )
         .await?;
@@ -557,9 +553,7 @@ impl Answer {
             log_sender.clone(),
             ExecOptions::new()
                 // .with_timeout(hooks_config.execution_timeout_ms)
-                .with_domain_permission(DomainPermission::Allow(
-                    hooks_config.allowed_hosts.clone(),
-                )),
+                .with_domain_permission(hooks_config.to_domain_permission()),
             hooks_config,
         )
         .await?;

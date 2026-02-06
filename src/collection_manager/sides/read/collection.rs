@@ -182,10 +182,9 @@ impl CollectionReader {
         let document_storage = Arc::new(document_storage);
 
         let js_pool = Pool::builder()
-            .with_evaluation_timeout(Duration::from_millis(500))
-            .with_domain_permission(orama_js_pool::DomainPermission::Allow(
-                hooks_config.allowed_hosts.clone(),
-            ))
+            .with_evaluation_timeout(hooks_config.builder_timeout)
+            .with_execution_timeout(hooks_config.execution_timeout)
+            .with_domain_permission(hooks_config.to_domain_permission())
             .build()
             .await?;
 
@@ -331,10 +330,9 @@ impl CollectionReader {
         let document_storage = Arc::new(document_storage);
 
         let js_pool = Pool::builder()
-            .with_evaluation_timeout(Duration::from_millis(500))
-            .with_domain_permission(orama_js_pool::DomainPermission::Allow(
-                hooks_config.allowed_hosts.clone(),
-            ))
+            .with_evaluation_timeout(hooks_config.builder_timeout)
+            .with_execution_timeout(hooks_config.execution_timeout)
+            .with_domain_permission(hooks_config.to_domain_permission())
             .build()
             .await?;
 

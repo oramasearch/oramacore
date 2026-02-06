@@ -1,4 +1,4 @@
-use std::{collections::HashMap, path::PathBuf, sync::Arc};
+use std::{collections::HashMap, path::PathBuf, sync::Arc, time::Duration};
 
 use ai::{
     automatic_embeddings_selector::AutomaticEmbeddingsSelector, gpu::LocalGPUManager,
@@ -11,7 +11,9 @@ use collection_manager::sides::{
     write::{WriteSide, WriteSideConfig},
     InputSideChannelType, OutputSideChannelType,
 };
+use duration_str::deserialize_duration;
 use metrics_exporter_prometheus::PrometheusBuilder;
+use orama_js_pool::{self, DomainPermission};
 use oramacore_lib::nlp;
 use serde::{Deserialize, Serialize};
 use tracing::level_filters::LevelFilter;
@@ -74,38 +76,66 @@ where
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HooksConfig {
     /// List of allowed hosts for external HTTP calls from hooks
-    /// Examples: ["s3.amazonaws.com", "*.googleapis.com", "api.example.com"]
-    /// Default: empty list (no external HTTP access allowed)
     #[serde(default)]
-    pub allowed_hosts: Vec<String>,
+    pub allowlist: Vec<String>,
 
-    /// Timeout for hook initialization/builder in milliseconds
-    /// This is the timeout for JSExecutor::try_new() - how long to wait for the JS runtime to initialize
-    /// Default: 200ms
-    #[serde(default = "default_hook_builder_timeout")]
-    pub builder_timeout_ms: u64,
+    /// List of denied hosts for external HTTP calls from hooks
+    #[serde(default)]
+    pub denylist: Vec<String>,
 
-    /// Timeout for hook execution in milliseconds
-    /// This is the timeout for the actual hook code execution
-    /// Default: 1000ms (1 second)
-    #[serde(default = "default_hook_execution_timeout")]
-    pub execution_timeout_ms: u64,
+    /// Timeout for hook initialization/builder
+    #[serde(
+        deserialize_with = "deserialize_duration",
+        default = "default_hook_builder_timeout"
+    )]
+    pub builder_timeout: Duration,
+
+    /// Timeout for hook execution
+    #[serde(
+        deserialize_with = "deserialize_duration",
+        default = "default_hook_execution_timeout"
+    )]
+    pub execution_timeout: Duration,
 }
 
-fn default_hook_builder_timeout() -> u64 {
-    200
+fn default_hook_builder_timeout() -> Duration {
+    Duration::from_millis(200)
 }
 
-fn default_hook_execution_timeout() -> u64 {
-    1000
+fn default_hook_execution_timeout() -> Duration {
+    Duration::from_millis(1000)
 }
 
 impl Default for HooksConfig {
     fn default() -> Self {
         Self {
-            allowed_hosts: vec![],
-            builder_timeout_ms: 200,
-            execution_timeout_ms: 1000,
+            allowlist: vec![],
+            denylist: vec![],
+            builder_timeout: Duration::from_millis(200),
+            execution_timeout: Duration::from_millis(1000),
+        }
+    }
+}
+
+impl HooksConfig {
+    /// Validates that both allowlist and denylist are not set at the same time
+    pub fn validate(&self) -> Result<()> {
+        if !self.allowlist.is_empty() && !self.denylist.is_empty() {
+            anyhow::bail!(
+                "HooksConfig: Cannot set both allowlist and denylist. Please configure only one."
+            );
+        }
+        Ok(())
+    }
+
+    /// Converts the HooksConfig into a DomainPermission for the JS pool
+    pub fn to_domain_permission(&self) -> DomainPermission {
+        if !self.allowlist.is_empty() {
+            DomainPermission::Allow(self.allowlist.clone())
+        } else if !self.denylist.is_empty() {
+            DomainPermission::Deny(self.denylist.clone())
+        } else {
+            DomainPermission::DenyAll
         }
     }
 }
@@ -188,6 +218,20 @@ pub async fn build_orama(
             anyhow::bail!("Failed to create LLMService: {err}. Please check your configuration.");
         }
     };
+
+    // Validate hooks configuration
+    #[cfg(feature = "writer")]
+    config
+        .writer_side
+        .hooks
+        .validate()
+        .context("Invalid writer hooks configuration")?;
+    #[cfg(feature = "reader")]
+    config
+        .reader_side
+        .hooks
+        .validate()
+        .context("Invalid reader hooks configuration")?;
 
     #[cfg(feature = "writer")]
     let writer_sender_config: Option<OutputSideChannelType> =

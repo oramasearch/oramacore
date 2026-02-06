@@ -1,8 +1,6 @@
-use std::{sync::Arc, time::Duration};
+use std::sync::Arc;
 
-use orama_js_pool::{
-    DomainPermission, ExecOptions, OutputChannel, RuntimeError, TryIntoFunctionParameters, Worker,
-};
+use orama_js_pool::{ExecOptions, OutputChannel, RuntimeError, TryIntoFunctionParameters, Worker};
 use oramacore_lib::hook_storage::{HookReader, HookReaderError, HookType};
 use tracing::info;
 
@@ -61,8 +59,8 @@ async fn run_hook_with_fallback<
         info!("Running hook: {:?}", hook_type);
 
         let mut worker = Worker::builder()
-            .with_domain_permission(DomainPermission::Allow(hooks_config.allowed_hosts.clone()))
-            .with_evaluation_timeout(Duration::from_millis(hooks_config.builder_timeout_ms))
+            .with_domain_permission(hooks_config.to_domain_permission())
+            .with_evaluation_timeout(hooks_config.builder_timeout)
             .add_module(hook_type.get_function_name(), code)
             .build()
             .await

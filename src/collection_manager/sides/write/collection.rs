@@ -3,13 +3,12 @@ use std::{
     ops::Deref,
     path::PathBuf,
     sync::Arc,
-    time::Duration,
 };
 
 use anyhow::{bail, Context, Result};
 use chrono::{DateTime, Utc};
 use futures::{future::join_all, FutureExt};
-use orama_js_pool::{DomainPermission, ExecOptions, OutputChannel, Pool};
+use orama_js_pool::{ExecOptions, OutputChannel, Pool};
 use oramacore_lib::{
     hook_storage::{HookType, HookWriter, HookWriterError},
     pin_rules::PinRulesWriter,
@@ -97,8 +96,9 @@ impl CollectionWriter {
         });
 
         let js_pool = Pool::builder()
-            .with_evaluation_timeout(Duration::from_millis(500))
-            .with_domain_permission(DomainPermission::Allow(hooks_config.allowed_hosts.clone()))
+            .with_evaluation_timeout(hooks_config.builder_timeout)
+            .with_execution_timeout(hooks_config.execution_timeout)
+            .with_domain_permission(hooks_config.to_domain_permission())
             .build()
             .await?;
 
@@ -202,8 +202,9 @@ impl CollectionWriter {
         .context("Cannot create hook writer")?;
 
         let js_pool = Pool::builder()
-            .with_evaluation_timeout(Duration::from_millis(500))
-            .with_domain_permission(DomainPermission::Allow(hooks_config.allowed_hosts.clone()))
+            .with_evaluation_timeout(hooks_config.execution_timeout)
+            .with_execution_timeout(hooks_config.execution_timeout)
+            .with_domain_permission(hooks_config.to_domain_permission())
             .build()
             .await?;
 

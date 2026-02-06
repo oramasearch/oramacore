@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 use anyhow::Result;
 use backoff::{backoff::Backoff, ExponentialBackoffBuilder};
 use futures::future::Future;
-use orama_js_pool::{DomainPermission, ExecOptions, OutputChannel};
+use orama_js_pool::{ExecOptions, OutputChannel};
 use serde::Serialize;
 use tokio::sync::{mpsc, Mutex};
 use tokio::time::sleep;
@@ -1427,9 +1427,7 @@ impl AnswerStateMachine {
                 None, // log_sender
                 ExecOptions::new()
                     // .with_timeout(hooks_config.execution_timeout_ms)
-                    .with_domain_permission(DomainPermission::Allow(
-                        hooks_config.allowed_hosts.clone(),
-                    )),
+                    .with_domain_permission(hooks_config.to_domain_permission()),
                 hooks_config,
             )
             .await
@@ -1485,9 +1483,7 @@ impl AnswerStateMachine {
             log_sender,
             ExecOptions::new()
                 // .with_timeout(hooks_config.execution_timeout_ms)
-                .with_domain_permission(DomainPermission::Allow(
-                    hooks_config.allowed_hosts.clone(),
-                )),
+                .with_domain_permission(hooks_config.to_domain_permission()),
             hooks_config,
         )
         .await

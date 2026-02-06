@@ -171,7 +171,6 @@ pub struct ReadSide {
     local_gpu_manager: Arc<LocalGPUManager>,
 
     hook_logs: HookLogs,
-    hooks_config: HooksConfig,
 
     analytics_storage: Option<OramaCoreAnalytics>,
 
@@ -283,7 +282,6 @@ impl ReadSide {
             local_gpu_manager,
 
             hook_logs: HookLogs::new(),
-            hooks_config,
             analytics_storage,
 
             data_dir,
@@ -846,10 +844,6 @@ impl ReadSide {
 
     pub fn get_hook_logs(&self) -> &HookLogs {
         &self.hook_logs
-    }
-
-    pub fn get_hooks_config(&self) -> &HooksConfig {
-        &self.hooks_config
     }
 
     pub fn get_analytics_logs(&self) -> Option<OramaCoreAnalytics> {

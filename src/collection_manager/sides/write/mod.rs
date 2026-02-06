@@ -162,7 +162,6 @@ pub struct WriteSide {
     context: WriteSideContext,
 
     hook_logs: HookLogs,
-    hooks_config: HooksConfig,
 
     stop_sender: tokio::sync::broadcast::Sender<()>,
     stop_done_receiver: OramaAsyncLock<tokio::sync::mpsc::Receiver<()>>,
@@ -297,7 +296,6 @@ impl WriteSide {
             kv,
             context: context.clone(),
             hook_logs: HookLogs::new(),
-            hooks_config,
             stop_sender,
             stop_done_receiver: OramaAsyncLock::new("stop_done_receiver", stop_done_receiver),
             write_operation_counter: AtomicU32::new(0),
@@ -1262,10 +1260,6 @@ impl WriteSide {
 
     pub fn get_hook_logs(&self) -> &HookLogs {
         &self.hook_logs
-    }
-
-    pub fn get_hooks_config(&self) -> &HooksConfig {
-        &self.hooks_config
     }
 
     /// Validates that the hook output maintains document integrity

@@ -1,8 +1,8 @@
-use std::{sync::Arc, time::Duration};
+use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use async_openai::types::{ChatCompletionRequestMessage, FunctionObject, FunctionObjectArgs};
-use orama_js_pool::{DomainPermission, ExecOptions, RuntimeError, Worker};
+use orama_js_pool::{ExecOptions, RuntimeError, Worker};
 use oramacore_lib::generic_kv::KV;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -286,12 +286,8 @@ impl ToolsRuntime {
 
                         let function_name = full_tool.id.clone();
                         let mut worker = Worker::builder()
-                            .with_domain_permission(DomainPermission::Allow(
-                                self.hooks_config.allowed_hosts.clone(),
-                            ))
-                            .with_evaluation_timeout(Duration::from_millis(
-                                self.hooks_config.builder_timeout_ms,
-                            ))
+                            .with_domain_permission(self.hooks_config.to_domain_permission())
+                            .with_evaluation_timeout(self.hooks_config.builder_timeout)
                             .add_module(&function_name, code)
                             .build()
                             .await
