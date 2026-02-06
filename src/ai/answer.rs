@@ -1,7 +1,7 @@
 use futures::TryFutureExt;
 use llm_json::{repair_json, JsonRepairError};
 use orama_js_pool::{ExecOptions, OutputChannel, RuntimeError};
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::HashMap, sync::Arc, time::Duration};
 use thiserror::Error;
 use tokio::sync::mpsc::error::SendError;
 use tokio_stream::StreamExt;
@@ -52,8 +52,10 @@ pub enum AnswerError {
     ReadError(#[from] ReadError),
     #[error("channel is closed: {0}")]
     ChannelClosed(#[from] SendError<AnswerEvent>),
-    #[error("Hook error: {0}")]
-    HookError(String),
+    #[error("Failed to execute before retrieval hook: {0}")]
+    BeforeRetrievalHookError(String),
+    #[error("Failed to execute before answer hook: {0}")]
+    BeforeAnswerHookError(String),
     #[error("JS run error: {0:?}")]
     JSError(#[from] RuntimeError),
     #[error("Failed to get title: {0:?}")]
@@ -197,7 +199,7 @@ impl Answer {
                 js_pool,
                 params.clone(),
                 log_sender.clone(),
-                ExecOptions::new(),
+                ExecOptions::new().with_timeout(Duration::from_millis(500)),
             )
             .await?;
 
@@ -241,7 +243,7 @@ impl Answer {
             js_pool,
             (variables, system_prompt),
             log_sender,
-            ExecOptions::new(),
+            ExecOptions::new().with_timeout(Duration::from_millis(500)),
         )
         .await?;
 
@@ -539,7 +541,7 @@ impl Answer {
             js_pool,
             params.clone(),
             log_sender.clone(),
-            ExecOptions::new(),
+            ExecOptions::new().with_timeout(Duration::from_millis(500)),
         )
         .await?;
 

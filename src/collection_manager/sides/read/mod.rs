@@ -246,7 +246,7 @@ impl ReadSide {
         let kv = Arc::new(kv);
         let system_prompts = SystemPromptInterface::new(kv.clone(), llm_service.clone());
         let training_sets = TrainingSetInterface::new(kv.clone());
-        let tools = ToolsRuntime::new(kv.clone(), llm_service.clone(), hooks_config.clone());
+        let tools = ToolsRuntime::new(kv.clone(), llm_service.clone());
 
         let (stop_done_sender, stop_done_receiver) = tokio::sync::mpsc::channel(1);
         let (stop_sender, _) = tokio::sync::broadcast::channel(1);

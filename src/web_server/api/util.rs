@@ -700,9 +700,14 @@ impl IntoResponse for AnswerError {
                 )
                     .into_response()
             }
-            AnswerError::HookError(e) => (
+            AnswerError::BeforeRetrievalHookError(e) => (
                 StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Hook error: {e}"),
+                format!("Before retrieval hook error: {e}"),
+            )
+                .into_response(),
+            AnswerError::BeforeAnswerHookError(e) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Before answer hook error: {e}"),
             )
                 .into_response(),
             AnswerError::JSError(e) => (

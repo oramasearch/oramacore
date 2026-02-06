@@ -133,8 +133,8 @@ pub enum AdvancedAutoqueryError {
     CombineQueriesError(String),
     #[error("Failed to generate tracked queries: {0}")]
     GenerateTrackedQueriesError(String),
-    #[error("Hook error: {0}")]
-    HookError(String),
+    #[error("Failed to execute before retrieval hook: {0}")]
+    ExecuteBeforeRetrievalHookError(String),
     #[error("Failed to execute searches: {0}")]
     ExecuteSearchesError(String),
     #[error("LLM service error: {0}")]
@@ -1562,12 +1562,16 @@ impl AdvancedAutoqueryStateMachine {
         let collection = read_side
             .get_collection(collection_id, &read_api_key)
             .await
-            .map_err(|e| AdvancedAutoqueryError::HookError(e.to_string()))?;
+            .map_err(|e| AdvancedAutoqueryError::ExecuteBeforeRetrievalHookError(e.to_string()))?;
         let js_pool = collection.get_js_pool();
-        let processed_search_params =
-            run_before_retrieval(js_pool, search_params.clone(), None, ExecOptions::new())
-                .await
-                .map_err(|e| AdvancedAutoqueryError::HookError(e.to_string()))?;
+        let processed_search_params = run_before_retrieval(
+            js_pool,
+            search_params.clone(),
+            None,
+            ExecOptions::new().with_timeout(Duration::from_millis(500)),
+        )
+        .await
+        .map_err(|e| AdvancedAutoqueryError::ExecuteBeforeRetrievalHookError(e.to_string()))?;
 
         Ok(ProcessedTrackedQuery {
             index: tracked_query.index,

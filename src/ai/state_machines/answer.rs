@@ -102,8 +102,10 @@ pub enum AnswerError {
     RagAtError(String),
     #[error("Failed to execute search: {0}")]
     SearchError(String),
-    #[error("Hook error: {0}")]
-    HookError(String),
+    #[error("Failed to execute before retrieval hook: {0}")]
+    BeforeRetrievalHookError(String),
+    #[error("Failed to execute before answer hook: {0}")]
+    BeforeAnswerHookError(String),
     #[error("Failed to generate answer: {0}")]
     AnswerGenerationError(String),
     #[error("Failed to generate related queries: {0}")]
@@ -1414,11 +1416,11 @@ impl AnswerStateMachine {
                 .read_side
                 .get_collection(collection_id, &read_api_key)
                 .await
-                .map_err(|e| AnswerError::HookError(e.to_string()))?;
+                .map_err(|e| AnswerError::BeforeRetrievalHookError(e.to_string()))?;
             let js_pool = collection.get_js_pool();
             let params = run_before_retrieval(js_pool, params.clone(), None, ExecOptions::new())
                 .await
-                .map_err(|e| AnswerError::HookError(e.to_string()))?;
+                .map_err(|e| AnswerError::BeforeRetrievalHookError(e.to_string()))?;
 
             let result = self
                 .read_side
@@ -1460,7 +1462,7 @@ impl AnswerStateMachine {
             .read_side
             .get_collection(collection_id, &read_api_key)
             .await
-            .map_err(|e| AnswerError::HookError(e.to_string()))?;
+            .map_err(|e| AnswerError::BeforeAnswerHookError(e.to_string()))?;
         let js_pool = collection.get_js_pool();
         let (variables, system_prompt) = run_before_answer(
             js_pool,
@@ -1469,7 +1471,7 @@ impl AnswerStateMachine {
             ExecOptions::new(),
         )
         .await
-        .map_err(|e| AnswerError::HookError(e.to_string()))?;
+        .map_err(|e| AnswerError::BeforeAnswerHookError(e.to_string()))?;
 
         Ok((variables, system_prompt))
     }

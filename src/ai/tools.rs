@@ -1,8 +1,8 @@
-use std::sync::Arc;
+use std::{sync::Arc, time::Duration};
 
 use anyhow::{Context, Result};
 use async_openai::types::{ChatCompletionRequestMessage, FunctionObject, FunctionObjectArgs};
-use orama_js_pool::{ExecOptions, RuntimeError, Worker};
+use orama_js_pool::{DomainPermission, ExecOptions, RuntimeError, Worker};
 use oramacore_lib::generic_kv::KV;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -93,20 +93,11 @@ impl Tool {
 pub struct ToolsRuntime {
     pub kv: Arc<KV>,
     pub llm_service: Arc<LLMService>,
-    pub hooks_config: crate::HooksConfig,
 }
 
 impl ToolsRuntime {
-    pub fn new(
-        kv: Arc<KV>,
-        llm_service: Arc<LLMService>,
-        hooks_config: crate::HooksConfig,
-    ) -> Self {
-        ToolsRuntime {
-            kv,
-            llm_service,
-            hooks_config,
-        }
+    pub fn new(kv: Arc<KV>, llm_service: Arc<LLMService>) -> Self {
+        ToolsRuntime { kv, llm_service }
     }
 
     pub async fn insert(&self, collection_id: CollectionId, tool: Tool) -> Result<(), ToolError> {
@@ -286,8 +277,9 @@ impl ToolsRuntime {
 
                         let function_name = full_tool.id.clone();
                         let mut worker = Worker::builder()
-                            .with_domain_permission(self.hooks_config.to_domain_permission())
-                            .with_evaluation_timeout(self.hooks_config.builder_timeout)
+                            .with_domain_permission(DomainPermission::DenyAll)
+                            .with_evaluation_timeout(Duration::from_millis(200))
+                            .with_execution_timeout(Duration::from_millis(200))
                             .add_module(&function_name, code)
                             .build()
                             .await
@@ -303,7 +295,6 @@ impl ToolsRuntime {
                                 &function_name,
                                 arguments_as_json_value,
                                 ExecOptions::new(),
-                                // .with_timeout(self.hooks_config.execution_timeout_ms)
                             )
                             .await;
 
