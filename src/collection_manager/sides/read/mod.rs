@@ -13,14 +13,13 @@ use axum::extract::State;
 use duration_string::DurationString;
 use futures::Stream;
 pub use index::*;
-use oramacore_lib::hook_storage::{HookReader, HookReaderError, HookType};
+use oramacore_lib::hook_storage::{HookReaderError, HookType};
 
 pub use collection::CollectionStats;
 use duration_str::deserialize_duration;
 use notify::NotifierConfig;
 use orama_js_pool::OutputChannel;
 use oramacore_lib::shelves::ShelfId;
-use std::ops::Deref;
 use std::sync::Arc;
 use std::time::Duration;
 use std::{collections::HashMap, path::PathBuf};
@@ -827,21 +826,6 @@ impl ReadSide {
         ))
     }
 
-    pub async fn get_hook_storage<'s>(
-        &'s self,
-        read_api_key: &ReadApiKey,
-        collection_id: CollectionId,
-    ) -> Result<HookReaderLock<'s>, ReadError> {
-        let collection = self
-            .collections
-            .get_collection(collection_id)
-            .await
-            .ok_or_else(|| ReadError::NotFound(collection_id))?;
-        collection.check_read_api_key(read_api_key, self.master_api_key)?;
-
-        Ok(HookReaderLock { collection })
-    }
-
     pub fn get_hook_logs(&self) -> &HookLogs {
         &self.hook_logs
     }
@@ -1119,18 +1103,6 @@ struct ReadInfoV1 {
 #[derive(Deserialize, Serialize, Debug)]
 enum ReadInfo {
     V1(ReadInfoV1),
-}
-
-pub struct HookReaderLock<'guard> {
-    collection: CollectionReadLock<'guard>,
-}
-
-impl Deref for HookReaderLock<'_> {
-    type Target = OramaAsyncLock<HookReader>;
-
-    fn deref(&self) -> &Self::Target {
-        self.collection.get_hook_storage()
-    }
 }
 
 #[cfg(test)]

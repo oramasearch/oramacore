@@ -15,7 +15,7 @@ use chrono::{DateTime, Utc};
 use debug_panic::debug_panic;
 use orama_js_pool::{ExecOptions, OutputChannel, Pool};
 use oramacore_lib::{
-    hook_storage::{HookReader, HookType},
+    hook_storage::{HookOperation, HookReader, HookType},
     pin_rules::PinRulesReader,
     shelves::{Shelf, ShelfId, ShelvesReader},
 };
@@ -698,10 +698,6 @@ impl CollectionReader {
         self.id
     }
 
-    pub fn get_hook_storage(&self) -> &OramaAsyncLock<HookReader> {
-        &self.hooks_reader
-    }
-
     pub fn get_js_pool(&self) -> &Pool {
         &self.js_pool
     }
@@ -1063,8 +1059,6 @@ impl CollectionReader {
                 }
             }
             CollectionWriteOperation::Hook(op) => {
-                // Handle hook updates through the js_pool
-                use oramacore_lib::hook_storage::HookOperation;
                 match &op {
                     HookOperation::Insert(hook_type, code) => {
                         self.js_pool
