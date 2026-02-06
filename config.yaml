@@ -24,16 +24,13 @@ writer_side:
         # producer_name: write
 
     hooks:
-        # List of allowed hosts for external HTTP calls from hooks
-        # Examples: ["s3.amazonaws.com", "*.s3.amazonaws.com", "storage.googleapis.com"]
-        # Empty list (default) means no external HTTP access is allowed
-        allowed_hosts: []
-        # Timeout for hook initialization (JSExecutor builder) in milliseconds
-        # This is how long to wait for the JavaScript runtime to initialize
-        builder_timeout_ms: 200
-        # Timeout for hook execution in milliseconds
-        # This is how long the actual hook code can run (including HTTP calls)
-        execution_timeout_ms: 1000
+        # List of allowed domains for external HTTP calls from hooks
+        allowed_domains: 
+            - "localhost"
+        # Timeout for hook JavaScript runtime to initialize
+        builder_timeout: 200ms
+        # Timeout for hook execution 
+        execution_timeout: 1s
 
     # Replace the following value with your own API key
     master_api_key: my-master-api-key
@@ -122,16 +119,13 @@ reader_side:
             slot_size_exp: 4
 
     hooks:
-        # List of allowed hosts for external HTTP calls from hooks
-        # Examples: ["s3.amazonaws.com", "*.s3.amazonaws.com", "storage.googleapis.com"]
-        # Empty list (default) means no external HTTP access is allowed
-        allowed_hosts: []
-        # Timeout for hook initialization (JSExecutor builder) in milliseconds
-        # This is how long to wait for the JavaScript runtime to initialize
-        builder_timeout_ms: 200
-        # Timeout for hook execution in milliseconds
-        # This is how long the actual hook code can run (including HTTP calls)
-        execution_timeout_ms: 1000
+        # List of allowed domains for external HTTP calls from hooks
+        allowed_domains: 
+            - "localhost"
+        # Timeout for hook JavaScript runtime to initialize
+        builder_timeout: 200ms
+        # Timeout for hook execution 
+        execution_timeout: 1s
 
     # Uncomment to allow analytics
     analytics:

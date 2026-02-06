@@ -75,13 +75,13 @@ where
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HooksConfig {
-    /// List of allowed hosts for external HTTP calls from hooks
+    /// List of allowed domains for external HTTP calls from hooks
     #[serde(default)]
-    pub allowlist: Vec<String>,
+    pub allowed_domains: Vec<String>,
 
-    /// List of denied hosts for external HTTP calls from hooks
+    /// List of denied domains for external HTTP calls from hooks
     #[serde(default)]
-    pub denylist: Vec<String>,
+    pub denied_domains: Vec<String>,
 
     /// Timeout for hook initialization/builder
     #[serde(
@@ -109,8 +109,8 @@ fn default_hook_execution_timeout() -> Duration {
 impl Default for HooksConfig {
     fn default() -> Self {
         Self {
-            allowlist: vec![],
-            denylist: vec![],
+            allowed_domains: vec![],
+            denied_domains: vec![],
             builder_timeout: Duration::from_millis(200),
             execution_timeout: Duration::from_millis(1000),
         }
@@ -118,11 +118,11 @@ impl Default for HooksConfig {
 }
 
 impl HooksConfig {
-    /// Validates that both allowlist and denylist are not set at the same time
+    /// Validates that both allowed_domains and denied_domains are not set at the same time
     pub fn validate(&self) -> Result<()> {
-        if !self.allowlist.is_empty() && !self.denylist.is_empty() {
+        if !self.allowed_domains.is_empty() && !self.denied_domains.is_empty() {
             anyhow::bail!(
-                "HooksConfig: Cannot set both allowlist and denylist. Please configure only one."
+                "HooksConfig: Cannot set both allowed_domains and denied_domains. Please configure only one."
             );
         }
         Ok(())
@@ -130,10 +130,10 @@ impl HooksConfig {
 
     /// Converts the HooksConfig into a DomainPermission for the JS pool
     pub fn to_domain_permission(&self) -> DomainPermission {
-        if !self.allowlist.is_empty() {
-            DomainPermission::Allow(self.allowlist.clone())
-        } else if !self.denylist.is_empty() {
-            DomainPermission::Deny(self.denylist.clone())
+        if !self.allowed_domains.is_empty() {
+            DomainPermission::Allow(self.allowed_domains.clone())
+        } else if !self.denied_domains.is_empty() {
+            DomainPermission::Deny(self.denied_domains.clone())
         } else {
             DomainPermission::DenyAll
         }
