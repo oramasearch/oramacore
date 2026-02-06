@@ -97,8 +97,10 @@ pub enum WriteError {
     IndexNotFound(CollectionId, IndexId),
     #[error("Temp index {1} doesn't exist in collection {0}")]
     TempIndexNotFound(CollectionId, IndexId),
-    #[error("Error in hook: {0}")]
-    HookWriterError(#[from] HookWriterError),
+    #[error("Hook error: {0}")]
+    HookExec(String),
+    #[error("Hook storage error: {0}")]
+    HookError(#[from] HookWriterError),
     #[error("Error in pin rule")]
     PinRulesError(#[from] PinRulesWriterError),
     #[error("Error in shelf")]
@@ -1270,12 +1272,10 @@ impl WriteSide {
         original_ids: &[S],
     ) -> Result<(), WriteError> {
         if modified_docs.len() != original_ids.len() {
-            return Err(WriteError::HookWriterError(HookWriterError::Generic(
-                anyhow::anyhow!(
-                    "Hook returned {} documents but expected {}. Documents cannot be added or removed.",
-                    modified_docs.len(),
-                    original_ids.len()
-                )
+            return Err(WriteError::HookExec(format!(
+                "Hook returned {} documents but expected {}. Documents cannot be added or removed.",
+                modified_docs.len(),
+                original_ids.len()
             )));
         }
 
@@ -1283,17 +1283,15 @@ impl WriteSide {
             modified_docs.0.iter().zip(original_ids.iter()).enumerate()
         {
             let actual_id = doc.get("id").and_then(|v| v.as_str()).ok_or_else(|| {
-                WriteError::HookWriterError(HookWriterError::Generic(anyhow::anyhow!(
-                    "Hook removed or corrupted 'id' field at document index {index}",
-                )))
+                WriteError::HookExec(format!(
+                    "Hook removed or corrupted 'id' field at document index {index}"
+                ))
             })?;
 
             if actual_id != expected_id.as_ref() {
-                return Err(WriteError::HookWriterError(HookWriterError::Generic(
-                    anyhow::anyhow!(
-                        "Hook modified document ID at index {index}. Expected '{}' but got '{actual_id}'. Document IDs must not be modified.",
-                        expected_id.as_ref()
-                    )
+                return Err(WriteError::HookExec(format!(
+                    "Hook modified document ID at index {index}. Expected '{}' but got '{actual_id}'. Document IDs must not be modified.",
+                    expected_id.as_ref()
                 )));
             }
         }

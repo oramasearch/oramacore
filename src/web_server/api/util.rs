@@ -530,9 +530,13 @@ impl IntoResponse for WriteError {
                     format!("Temporary index {index_id} not found in collection {collection_id}");
                 (StatusCode::BAD_REQUEST, body).into_response()
             }
-            Self::HookWriterError(e) => {
-                let body = format!("Invalid hook: {e:?}");
+            Self::HookExec(msg) => {
+                let body = format!("Hook error: {msg}");
                 (StatusCode::BAD_REQUEST, body).into_response()
+            }
+            Self::HookError(e) => {
+                let body = format!("Hook storage error: {e}");
+                (StatusCode::INTERNAL_SERVER_ERROR, body).into_response()
             }
             Self::PinRulesError(e) => {
                 let body = format!("Invalid pin rule: {e:?}");

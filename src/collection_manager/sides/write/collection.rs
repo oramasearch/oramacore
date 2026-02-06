@@ -10,7 +10,7 @@ use chrono::{DateTime, Utc};
 use futures::{future::join_all, FutureExt};
 use orama_js_pool::{ExecOptions, OutputChannel, Pool};
 use oramacore_lib::{
-    hook_storage::{HookType, HookWriter, HookWriterError},
+    hook_storage::{HookType, HookWriter},
     pin_rules::PinRulesWriter,
     shelves::{Shelf, ShelfId, ShelfOperation, ShelvesWriter},
 };
@@ -836,9 +836,7 @@ impl CollectionWriter {
             .add_module(hook_type.get_function_name(), code.clone())
             .await
             .map_err(|e| {
-                WriteError::HookWriterError(HookWriterError::ValidationError(format!(
-                    "Hook {hook_type:?} validation failed: {e}"
-                )))
+                WriteError::HookExec(format!("Hook {hook_type:?} validation failed: {e}"))
             })?;
 
         self.hooks_writer.insert_hook(hook_type, code).await?;
@@ -857,8 +855,8 @@ impl CollectionWriter {
                 // Module doesn't exist treat it as a success
             }
             Err(e) => {
-                return Err(WriteError::HookWriterError(HookWriterError::Generic(
-                    anyhow::anyhow!("Hook {hook_type:?} delete failed: {e}"),
+                return Err(WriteError::HookExec(format!(
+                    "Hook {hook_type:?} delete failed: {e}"
                 )));
             }
         }
@@ -869,9 +867,7 @@ impl CollectionWriter {
     }
 
     pub fn list_hooks(&self) -> Result<Vec<(HookType, Option<String>)>, WriteError> {
-        self.hooks_writer
-            .list_hooks()
-            .map_err(WriteError::HookWriterError)
+        Ok(self.hooks_writer.list_hooks()?)
     }
 
     pub fn has_hook(&self, hook_type: HookType) -> Result<bool, WriteError> {
