@@ -5,7 +5,7 @@ pub mod document_storage;
 mod embedding;
 pub mod index;
 
-use oramacore_lib::hook_storage::{HookType, HookWriter, HookWriterError};
+use oramacore_lib::hook_storage::{HookType, HookWriterError};
 use oramacore_lib::nlp::NLPService;
 use oramacore_lib::shelves::ShelvesWriterError;
 use thiserror::Error;
@@ -15,7 +15,6 @@ use std::borrow::Cow;
 use std::collections::HashSet;
 use std::{
     collections::HashMap,
-    ops::Deref,
     path::PathBuf,
     sync::{
         atomic::{AtomicU32, Ordering},
@@ -163,7 +162,6 @@ pub struct WriteSide {
     context: WriteSideContext,
 
     hook_logs: HookLogs,
-
     hooks_config: HooksConfig,
 
     stop_sender: tokio::sync::broadcast::Sender<()>,
@@ -773,12 +771,10 @@ impl WriteSide {
 
         debug!("Inserting documents {}", document_count);
 
-        let hooks = collection.get_hook_storage();
-        let hook_transform_before_save =
-            hooks.get_hook_content(HookType::TransformDocumentBeforeSave)?;
-
+        let has_hook_transform_before_save =
+            collection.has_hook(HookType::TransformDocumentBeforeSave)?;
         // Pre-assign IDs and clone documents for indexing
-        let (documents_for_indexing, id_map) = if hook_transform_before_save.is_some() {
+        let (documents_for_indexing, id_map) = if has_hook_transform_before_save {
             // Pre-assign IDs to all documents
             let mut id_map = Vec::with_capacity(document_list.len());
             for doc in document_list.0.iter_mut() {
@@ -801,7 +797,7 @@ impl WriteSide {
         };
 
         let mut document_to_store = document_list;
-        if hook_transform_before_save.is_some() {
+        if has_hook_transform_before_save {
             // Hook signature: function transformDocumentBeforeSave(documents)
             // - documents: the list of document to be inserted
             // Clone for hook input, we need to preserve document_to_store in case:
@@ -809,13 +805,11 @@ impl WriteSide {
             // 2. Hook modifies documents, we use modified for storage, original for indexing
             let hook_input = document_to_store.clone();
 
-            let logs = self.get_hook_logs();
-            let log_sender = logs.get_sender(&collection_id);
-
+            let log_sender = self.get_hook_logs().get_sender(&collection_id);
             let result: Option<DocumentList> = collection
                 .run_hook(
                     HookType::TransformDocumentBeforeSave,
-                    hook_input,
+                    vec![hook_input],
                     log_sender,
                 )
                 .await?;
@@ -961,11 +955,6 @@ impl WriteSide {
         let document_ids: Vec<_> = document_ids_map.keys().copied().collect();
         drop(document_id_storage);
 
-        // Get the hook for transforming documents before save
-        let hooks = collection.get_hook_storage();
-        let hook_transform_before_save =
-            hooks.get_hook_content(HookType::TransformDocumentBeforeSave)?;
-
         // Prepare documents with IDs
         let mut documents: HashMap<String, Document> = update_document_request
             .documents
@@ -994,9 +983,10 @@ impl WriteSide {
         let mut index_operation_batch = Vec::with_capacity(document_count * 10);
         let mut docs_to_remove = Vec::with_capacity(document_count);
 
-        let logs = self.get_hook_logs();
-        let log_sender = logs.get_sender(&collection_id);
-        let has_hook = hook_transform_before_save.is_some();
+        // Get the hook for transforming documents before save
+        let has_hook_transform_before_save =
+            collection.has_hook(HookType::TransformDocumentBeforeSave)?;
+        let log_sender = self.get_hook_logs().get_sender(&collection_id);
 
         let mut doc_stream = collection_document_storage
             .stream_documents(document_ids)
@@ -1049,7 +1039,7 @@ impl WriteSide {
 
                         // Apply transformDocumentBeforeSave hook if present
                         let mut document_for_indexing: Option<Document> = None;
-                        if has_hook {
+                        if has_hook_transform_before_save {
                             // Clone for hook input
                             let hook_input = document_for_storage.clone();
                             let document_list = DocumentList(vec![hook_input]);
@@ -1057,7 +1047,7 @@ impl WriteSide {
                             let output: Option<DocumentList> = collection
                                 .run_hook(
                                     HookType::TransformDocumentBeforeSave,
-                                    document_list,
+                                    vec![document_list],
                                     log_sender.clone(),
                                 )
                                 .await?;
@@ -1600,15 +1590,6 @@ impl WriteSide {
         ))
     }
 
-    pub async fn get_hooks_storage<'s>(
-        &'s self,
-        write_api_key: WriteApiKey,
-        collection_id: CollectionId,
-    ) -> Result<HookWriterLock<'s>, WriteError> {
-        let collection = self.get_collection(collection_id, write_api_key).await?;
-        Ok(HookWriterLock { collection })
-    }
-
     pub async fn get_tools_manager(
         &self,
         write_api_key: WriteApiKey,
@@ -1817,17 +1798,6 @@ fn default_temp_index_cleanup_config() -> TempIndexCleanupConfig {
     TempIndexCleanupConfig {
         cleanup_interval: Duration::from_secs(3600), // 1 hour
         max_age: Duration::from_secs(43200),         // 12 hours
-    }
-}
-
-pub struct HookWriterLock<'guard> {
-    collection: CollectionReadLock<'guard>,
-}
-impl Deref for HookWriterLock<'_> {
-    type Target = HookWriter;
-
-    fn deref(&self) -> &Self::Target {
-        self.collection.get_hook_storage()
     }
 }
 
