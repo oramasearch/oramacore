@@ -33,6 +33,7 @@ use crate::{
         ApiKey, CollectionId, DescribeCollectionResponse, DocumentId, IndexEmbeddingsCalculation,
         IndexId, WriteApiKey,
     },
+    HooksConfig,
 };
 use oramacore_lib::fs::BufferedFile;
 
@@ -77,7 +78,7 @@ impl CollectionWriter {
         data_dir: PathBuf,
         req: CreateEmptyCollection,
         context: WriteSideContext,
-        hooks_config: &crate::HooksConfig,
+        hooks_config: &HooksConfig,
     ) -> Result<Self> {
         let id = req.id;
 
@@ -142,7 +143,7 @@ impl CollectionWriter {
     pub async fn try_load(
         data_dir: PathBuf,
         context: WriteSideContext,
-        hooks_config: &crate::HooksConfig,
+        hooks_config: &HooksConfig,
     ) -> Result<Self> {
         let dump: CollectionDump = BufferedFile::open(data_dir.join("info.json"))
             .context("Cannot open info.json file")?
