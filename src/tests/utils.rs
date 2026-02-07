@@ -44,7 +44,7 @@ use crate::{
         TypeParsingStrategies, UpdateDocumentRequest, UpdateDocumentsResult, WriteApiKey,
     },
     web_server::HttpConfig,
-    OramacoreConfig,
+    HooksConfig, OramacoreConfig,
 };
 use crate::{collection_manager::sides::read::ReadError, types::SearchResultHit};
 use anyhow::Context;
@@ -119,7 +119,7 @@ pub fn create_oramacore_config() -> OramacoreConfig {
         writer_side: WriteSideConfig {
             master_api_key: ApiKey::try_new("my-master-api-key").unwrap(),
             output: OutputSideChannelType::InMemory { capacity: 100 },
-            // hooks: hooks_runtime_config(),
+            hooks: HooksConfig::default(),
             config: CollectionsWriterConfig {
                 data_dir: generate_new_path(),
                 embedding_queue_limit: 50,
@@ -159,6 +159,7 @@ pub fn create_oramacore_config() -> OramacoreConfig {
                 },
                 force_commit: u32::MAX,
             },
+            hooks: HooksConfig::default(),
             analytics: None,
             jwt: None,
         },
@@ -512,12 +513,12 @@ impl TestCollectionClient<'_> {
     }
 
     pub async fn insert_hook(&self, hook_type: HookType, code: String) -> Result<()> {
-        let hook_storage = self
+        let collection = self
             .writer
-            .get_hooks_storage(self.write_api_key, self.collection_id)
+            .get_collection(self.collection_id, self.write_api_key)
             .await?;
 
-        hook_storage.insert_hook(hook_type, code).await?;
+        collection.set_hook(hook_type, code).await?;
 
         Ok(())
     }

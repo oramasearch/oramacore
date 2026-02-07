@@ -6,7 +6,7 @@ use anyhow::{Context, Result};
 use backoff::{backoff::Backoff, ExponentialBackoffBuilder};
 use futures::future::{join_all, Future};
 use llm_json::repair_json;
-use orama_js_pool::ExecOption;
+use orama_js_pool::ExecOptions;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use tokio::sync::{mpsc, Mutex};
@@ -1559,24 +1559,19 @@ impl AdvancedAutoqueryStateMachine {
         read_side: Arc<ReadSide>,
     ) -> Result<ProcessedTrackedQuery, AdvancedAutoqueryError> {
         let search_params = tracked_query.search_params.clone();
-        let hook_storage = read_side
-            .get_hook_storage(&read_api_key, collection_id)
+        let collection = read_side
+            .get_collection(collection_id, &read_api_key)
             .await
             .map_err(|e| AdvancedAutoqueryError::ExecuteBeforeRetrievalHookError(e.to_string()))?;
-
-        let lock = hook_storage.read("run_before_retrieval").await;
+        let js_pool = collection.get_js_pool();
         let processed_search_params = run_before_retrieval(
-            &lock,
+            js_pool,
             search_params.clone(),
-            None, // log_sender
-            ExecOption {
-                allowed_hosts: Some(vec![]),
-                timeout: Duration::from_millis(500),
-            },
+            None,
+            ExecOptions::new().with_timeout(Duration::from_millis(500)),
         )
         .await
         .map_err(|e| AdvancedAutoqueryError::ExecuteBeforeRetrievalHookError(e.to_string()))?;
-        drop(lock);
 
         Ok(ProcessedTrackedQuery {
             index: tracked_query.index,

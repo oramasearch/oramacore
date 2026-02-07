@@ -20,6 +20,8 @@ mod fulltext_benchmark_test;
 mod fulltext_search;
 mod geosearch;
 mod groupby;
+mod hook_transform_after_search;
+mod hook_transform_before_save;
 mod hooks;
 // mod hurl;
 mod index_rebuild;

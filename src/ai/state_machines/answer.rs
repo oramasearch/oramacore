@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 use anyhow::Result;
 use backoff::{backoff::Backoff, ExponentialBackoffBuilder};
 use futures::future::Future;
-use orama_js_pool::{ExecOption, OutputChannel};
+use orama_js_pool::{ExecOptions, OutputChannel};
 use serde::Serialize;
 use tokio::sync::{mpsc, Mutex};
 use tokio::time::sleep;
@@ -114,8 +114,6 @@ pub enum AnswerError {
     LLMServiceError(String),
     #[error("Read error: {0}")]
     ReadError(String),
-    #[error("Hook read error: {0}")]
-    HookError(String),
     #[error("JS run error: {0}")]
     JSError(String),
     #[error("JSON parsing error: {0}")]
@@ -1414,24 +1412,15 @@ impl AnswerStateMachine {
                 group_by: None,
             };
 
-            let hook_storage = self
+            let collection = self
                 .read_side
-                .get_hook_storage(&read_api_key, collection_id)
+                .get_collection(collection_id, &read_api_key)
                 .await
-                .map_err(|e| AnswerError::HookError(e.to_string()))?;
-            let lock = hook_storage.read("run_before_retrieval").await;
-            let params = run_before_retrieval(
-                &lock,
-                params.clone(),
-                None, // log_sender
-                ExecOption {
-                    allowed_hosts: Some(vec![]),
-                    timeout: self.config.hook_timeout,
-                },
-            )
-            .await
-            .map_err(|e| AnswerError::BeforeRetrievalHookError(e.to_string()))?;
-            drop(lock);
+                .map_err(|e| AnswerError::BeforeRetrievalHookError(e.to_string()))?;
+            let js_pool = collection.get_js_pool();
+            let params = run_before_retrieval(js_pool, params.clone(), None, ExecOptions::new())
+                .await
+                .map_err(|e| AnswerError::BeforeRetrievalHookError(e.to_string()))?;
 
             let result = self
                 .read_side
@@ -1469,24 +1458,20 @@ impl AnswerStateMachine {
             ("context".to_string(), search_result_str.clone()),
         ];
 
-        let hook_storage = self
+        let collection = self
             .read_side
-            .get_hook_storage(&read_api_key, collection_id)
+            .get_collection(collection_id, &read_api_key)
             .await
-            .map_err(|e| AnswerError::HookError(e.to_string()))?;
-        let lock = hook_storage.read("run_before_answer").await;
+            .map_err(|e| AnswerError::BeforeAnswerHookError(e.to_string()))?;
+        let js_pool = collection.get_js_pool();
         let (variables, system_prompt) = run_before_answer(
-            &lock,
+            js_pool,
             (variables, system_prompt),
             log_sender,
-            ExecOption {
-                allowed_hosts: Some(vec![]),
-                timeout: self.config.hook_timeout,
-            },
+            ExecOptions::new(),
         )
         .await
         .map_err(|e| AnswerError::BeforeAnswerHookError(e.to_string()))?;
-        drop(lock);
 
         Ok((variables, system_prompt))
     }

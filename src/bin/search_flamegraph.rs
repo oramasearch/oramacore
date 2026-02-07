@@ -26,7 +26,7 @@ use oramacore::{
         IndexEmbeddingsCalculation, IndexId, LanguageDTO, ReadApiKey, SearchParams, WriteApiKey,
     },
     web_server::HttpConfig,
-    LogConfig, OramacoreConfig,
+    HooksConfig, LogConfig, OramacoreConfig,
 };
 
 // Configuration constants
@@ -128,6 +128,7 @@ fn create_test_config(build: bool) -> OramacoreConfig {
                     max_age: Duration::from_secs(3600),
                 },
             },
+            hooks: HooksConfig::default(),
             jwt: None,
         },
         reader_side: ReadSideConfig {
@@ -149,6 +150,7 @@ fn create_test_config(build: bool) -> OramacoreConfig {
                 },
                 force_commit: 4,
             },
+            hooks: HooksConfig::default(),
             analytics: None,
             jwt: None,
         },

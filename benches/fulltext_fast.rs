@@ -78,6 +78,7 @@ pub fn create_minimal_config() -> OramacoreConfig {
                     max_age: Duration::from_secs(43200),
                 },
             },
+            hooks: Default::default(),
             jwt: None,
         },
         reader_side: ReadSideConfig {
@@ -96,6 +97,7 @@ pub fn create_minimal_config() -> OramacoreConfig {
                 force_commit: 4,
                 collection_commit: CollectionCommitConfig::default(),
             },
+            hooks: Default::default(),
             analytics: None,
             jwt: None,
         },

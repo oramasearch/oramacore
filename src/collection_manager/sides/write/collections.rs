@@ -19,6 +19,7 @@ use crate::metrics::CollectionCommitLabels;
 use crate::python::embeddings::Model;
 use crate::types::CollectionId;
 use crate::types::{CreateCollection, DescribeCollectionResponse, LanguageDTO};
+use crate::HooksConfig;
 use oramacore_lib::fs::{create_if_not_exists, BufferedFile};
 use oramacore_lib::nlp::locales::Locale;
 
@@ -31,12 +32,14 @@ pub struct CollectionsWriter {
     context: WriteSideContext,
     default_model: Model,
     data_dir: PathBuf,
+    hooks_config: HooksConfig,
 }
 
 impl CollectionsWriter {
     pub async fn try_load(
         config: CollectionsWriterConfig,
         context: WriteSideContext,
+        hooks_config: HooksConfig,
     ) -> Result<Self> {
         let mut collections: HashMap<CollectionId, CollectionWriter> = Default::default();
         let default_model = config.default_embedding_model;
@@ -62,6 +65,7 @@ impl CollectionsWriter {
                     context,
                     default_model,
                     data_dir,
+                    hooks_config,
                 });
             }
         };
@@ -73,7 +77,8 @@ impl CollectionsWriter {
             // and we abort the start up process
             // Should we instead ignore it?
             // TODO: think about it
-            let collection = CollectionWriter::try_load(collection_dir, context.clone()).await?;
+            let collection =
+                CollectionWriter::try_load(collection_dir, context.clone(), &hooks_config).await?;
             collections.insert(collection_id, collection);
         }
 
@@ -83,6 +88,7 @@ impl CollectionsWriter {
             context,
             default_model,
             data_dir,
+            hooks_config,
         };
 
         Ok(writer)
@@ -127,9 +133,13 @@ impl CollectionsWriter {
             write_api_key,
             read_api_key,
         };
-        let collection =
-            CollectionWriter::empty(self.data_dir.join(id.as_str()), req, self.context.clone())
-                .await?;
+        let collection = CollectionWriter::empty(
+            self.data_dir.join(id.as_str()),
+            req,
+            self.context.clone(),
+            &self.hooks_config,
+        )
+        .await?;
 
         let mut collections = self.collections.write("create_collection").await;
 
