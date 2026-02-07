@@ -199,7 +199,7 @@ impl ReadSide {
         .context("Cannot create document storage")?;
         let global_document_storage = Arc::new(document_storage);
 
-        let hooks_config = config.hooks;
+        let hooks_config = Arc::new(config.hooks);
         let insert_batch_commit_size = config.config.insert_batch_commit_size;
         let commit_interval = config.config.commit_interval;
         let force_commit = config.config.force_commit;
@@ -217,6 +217,7 @@ impl ReadSide {
             llm_service: llm_service.clone(),
             notifier,
             global_document_storage: global_document_storage.clone(),
+            hooks_config: hooks_config.clone(),
         };
 
         let read_info: Result<ReadInfo> = BufferedFile::open(data_dir.join("read.info"))
@@ -231,10 +232,9 @@ impl ReadSide {
         };
         info!(offset=?last_offset, "Starting read side");
 
-        let collections_reader =
-            CollectionsReader::try_load(context, config.config, hooks_config.clone(), last_offset)
-                .await
-                .context("Cannot load collections")?;
+        let collections_reader = CollectionsReader::try_load(context, config.config, last_offset)
+            .await
+            .context("Cannot load collections")?;
 
         let kv = KV::try_load(KVConfig {
             data_dir: data_dir.join("kv"),

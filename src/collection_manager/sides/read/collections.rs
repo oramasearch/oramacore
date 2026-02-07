@@ -7,7 +7,6 @@ use crate::{
     collection_manager::sides::{read::context::ReadSideContext, Offset},
     lock::{OramaAsyncLock, OramaAsyncLockReadGuard},
     types::{ApiKey, CollectionId},
-    HooksConfig,
 };
 
 use oramacore_lib::fs::{create_if_not_exists, create_if_not_exists_async, BufferedFile};
@@ -35,7 +34,6 @@ pub struct CollectionsReader {
 
     collections: OramaAsyncLock<HashMap<CollectionId, CollectionReader>>,
     indexes_config: IndexesConfig,
-    hooks_config: HooksConfig,
     last_reindexed_collections: OramaAsyncLock<Vec<(CollectionId, CollectionId)>>,
 }
 
@@ -43,7 +41,6 @@ impl CollectionsReader {
     pub async fn try_load(
         context: ReadSideContext,
         indexes_config: IndexesConfig,
-        hooks_config: HooksConfig,
         global_offset: Offset,
     ) -> Result<Self> {
         let data_dir = &indexes_config.data_dir;
@@ -60,7 +57,6 @@ impl CollectionsReader {
                         context,
                         collections: OramaAsyncLock::new("collections", Default::default()),
                         indexes_config,
-                        hooks_config,
                         last_reindexed_collections: OramaAsyncLock::new(
                             "last_reindexed_collections",
                             Default::default(),
@@ -92,7 +88,6 @@ impl CollectionsReader {
                 indexes_config.offload_field,
                 indexes_config.collection_commit,
                 global_offset,
-                hooks_config.clone(),
             )
             .await
             .with_context(|| format!("Cannot load {collection_id:?} collection"))?;
@@ -109,7 +104,6 @@ impl CollectionsReader {
 
             collections: OramaAsyncLock::new("collections", collections),
             indexes_config,
-            hooks_config,
             last_reindexed_collections: OramaAsyncLock::new(
                 "last_reindexed_collections",
                 collections_info
@@ -254,7 +248,6 @@ impl CollectionsReader {
             self.context.clone(),
             self.indexes_config.offload_field,
             self.indexes_config.collection_commit,
-            self.hooks_config.clone(),
         )
         .await?;
 

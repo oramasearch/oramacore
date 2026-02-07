@@ -33,7 +33,6 @@ use crate::{
         ApiKey, CollectionId, DescribeCollectionResponse, DocumentId, IndexEmbeddingsCalculation,
         IndexId, WriteApiKey,
     },
-    HooksConfig,
 };
 use oramacore_lib::fs::BufferedFile;
 
@@ -78,7 +77,6 @@ impl CollectionWriter {
         data_dir: PathBuf,
         req: CreateEmptyCollection,
         context: WriteSideContext,
-        hooks_config: &HooksConfig,
     ) -> Result<Self> {
         let id = req.id;
 
@@ -97,9 +95,9 @@ impl CollectionWriter {
         });
 
         let js_pool = Pool::builder()
-            .with_evaluation_timeout(hooks_config.builder_timeout)
-            .with_execution_timeout(hooks_config.execution_timeout)
-            .with_domain_permission(hooks_config.to_domain_permission())
+            .with_evaluation_timeout(context.hooks_config.builder_timeout)
+            .with_execution_timeout(context.hooks_config.execution_timeout)
+            .with_domain_permission(context.hooks_config.to_domain_permission())
             .build()
             .await?;
 
@@ -140,11 +138,7 @@ impl CollectionWriter {
         })
     }
 
-    pub async fn try_load(
-        data_dir: PathBuf,
-        context: WriteSideContext,
-        hooks_config: &HooksConfig,
-    ) -> Result<Self> {
+    pub async fn try_load(data_dir: PathBuf, context: WriteSideContext) -> Result<Self> {
         let dump: CollectionDump = BufferedFile::open(data_dir.join("info.json"))
             .context("Cannot open info.json file")?
             .read_json_data()
@@ -203,9 +197,9 @@ impl CollectionWriter {
         .context("Cannot create hook writer")?;
 
         let js_pool = Pool::builder()
-            .with_evaluation_timeout(hooks_config.execution_timeout)
-            .with_execution_timeout(hooks_config.execution_timeout)
-            .with_domain_permission(hooks_config.to_domain_permission())
+            .with_evaluation_timeout(context.hooks_config.execution_timeout)
+            .with_execution_timeout(context.hooks_config.execution_timeout)
+            .with_domain_permission(context.hooks_config.to_domain_permission())
             .build()
             .await?;
 

@@ -197,7 +197,7 @@ impl WriteSide {
         python_service: Arc<PythonService>,
     ) -> Result<Arc<Self>> {
         let master_api_key = config.master_api_key;
-        let hooks_config = config.hooks;
+        let hooks_config = Arc::new(config.hooks);
         let collections_writer_config = config.config;
         let data_dir = collections_writer_config.data_dir.clone();
 
@@ -241,6 +241,7 @@ impl WriteSide {
             automatic_embeddings_selector,
             llm_service,
             global_document_storage: document_storage.clone(),
+            hooks_config: hooks_config.clone(),
         };
 
         let kv_op_sender = context.op_sender.clone();
@@ -260,13 +261,10 @@ impl WriteSide {
         let system_prompts = SystemPromptInterface::new(kv.clone(), context.llm_service.clone());
         let tools = ToolsRuntime::new(kv.clone(), context.llm_service.clone());
 
-        let collections_writer = CollectionsWriter::try_load(
-            collections_writer_config,
-            context.clone(),
-            hooks_config.clone(),
-        )
-        .await
-        .context("Cannot load collections")?;
+        let collections_writer =
+            CollectionsWriter::try_load(collections_writer_config, context.clone())
+                .await
+                .context("Cannot load collections")?;
 
         let (stop_done_sender, stop_done_receiver) = tokio::sync::mpsc::channel(1);
         let (stop_sender, _) = tokio::sync::broadcast::channel(1);

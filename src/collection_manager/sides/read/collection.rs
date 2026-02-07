@@ -41,7 +41,6 @@ use crate::{
         ApiKey, CollectionId, CollectionStatsRequest, Document, DocumentId, FieldId, IndexId,
         InteractionMessage, Number, OramaDate, RawJSONDocument, ReadApiKey, Role,
     },
-    HooksConfig,
 };
 
 use super::{
@@ -173,7 +172,6 @@ impl CollectionReader {
         context: ReadSideContext,
         offload_config: OffloadFieldConfig,
         commit_config: CollectionCommitConfig,
-        hooks_config: HooksConfig,
     ) -> Result<Self> {
         let document_storage = CollectionDocumentStorage::new(
             context.global_document_storage.clone(),
@@ -183,9 +181,9 @@ impl CollectionReader {
         let document_storage = Arc::new(document_storage);
 
         let js_pool = Pool::builder()
-            .with_evaluation_timeout(hooks_config.builder_timeout)
-            .with_execution_timeout(hooks_config.execution_timeout)
-            .with_domain_permission(hooks_config.to_domain_permission())
+            .with_evaluation_timeout(context.hooks_config.builder_timeout)
+            .with_execution_timeout(context.hooks_config.execution_timeout)
+            .with_domain_permission(context.hooks_config.to_domain_permission())
             .build()
             .await?;
 
@@ -244,7 +242,6 @@ impl CollectionReader {
         offload_config: OffloadFieldConfig,
         commit_config: CollectionCommitConfig,
         global_offset: Offset,
-        hooks_config: HooksConfig,
     ) -> Result<Self> {
         debug!("Loading collection info");
         let dump: Dump = BufferedFile::open(data_dir.join("collection.json"))
@@ -331,9 +328,9 @@ impl CollectionReader {
         let document_storage = Arc::new(document_storage);
 
         let js_pool = Pool::builder()
-            .with_evaluation_timeout(hooks_config.builder_timeout)
-            .with_execution_timeout(hooks_config.execution_timeout)
-            .with_domain_permission(hooks_config.to_domain_permission())
+            .with_evaluation_timeout(context.hooks_config.builder_timeout)
+            .with_execution_timeout(context.hooks_config.execution_timeout)
+            .with_domain_permission(context.hooks_config.to_domain_permission())
             .build()
             .await?;
 

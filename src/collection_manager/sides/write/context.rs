@@ -10,6 +10,7 @@ use crate::{
         OperationSender,
     },
     python::PythonService,
+    HooksConfig,
 };
 
 #[derive(Clone)]
@@ -21,4 +22,5 @@ pub struct WriteSideContext {
     pub automatic_embeddings_selector: Arc<AutomaticEmbeddingsSelector>,
     pub llm_service: Arc<LLMService>,
     pub global_document_storage: Arc<DocumentStorage>,
+    pub hooks_config: Arc<HooksConfig>,
 }
