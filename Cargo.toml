@@ -75,7 +75,7 @@ backoff = { version = "0.4.0", features = ["tokio"] }
 debug_panic = "0.2.1"
 async-openai = "0.28.0"
 
-orama-js-pool = "0.3.0"
+orama-js-pool = "0.4.0"
 sentry = "0.37.0"
 sentry-tracing = "0.37.0"
 arrayvec = "0.7.6"

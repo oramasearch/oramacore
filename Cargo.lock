@@ -2778,6 +2778,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0cc23270f6e1808e30a928bdc84dea0b9b4136a8bc82338574f23baf47bbd280"
 
 [[package]]
+name = "globset"
+version = "0.4.18"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "52dfc19153a48bde0cbd630453615c8151bce3a5adfac7a0aebfbf0a1e1f57e3"
+dependencies = [
+ "aho-corasick",
+ "bstr",
+ "log",
+ "regex-automata",
+ "regex-syntax",
+]
+
+[[package]]
 name = "group"
 version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4668,9 +4681,9 @@ checksum = "04744f49eae99ab78e0d5c0b603ab218f515ea8cfe5a456d7629ad883a3b6e7d"
 
 [[package]]
 name = "orama-js-pool"
-version = "0.3.0"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4591c11bcbd30898f5ad942bed9bac47d22a08aaf6fce61beba5e1f16b7cbffb"
+checksum = "f132c212c14af3057b0ada7c0491787d94266ce980a0b0726afb9911f25b2789"
 dependencies = [
  "deadpool",
  "deno_console",
@@ -4684,6 +4697,7 @@ dependencies = [
  "deno_url",
  "deno_web",
  "deno_webidl",
+ "globset",
  "serde",
  "serde_json",
  "thiserror 2.0.17",
