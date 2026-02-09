@@ -874,11 +874,11 @@ impl CollectionWriter {
     pub async fn run_hook<Input, Output>(
         &self,
         hook_type: HookType,
-        input: Input,
+        input: &Input,
         log_sender: Option<Arc<tokio::sync::broadcast::Sender<(OutputChannel, String)>>>,
     ) -> Result<Option<Output>, WriteError>
     where
-        Input: orama_js_pool::TryIntoFunctionParameters + Send + 'static,
+        Input: orama_js_pool::TryIntoFunctionParameters + Send + Sync + 'static,
         Output: serde::de::DeserializeOwned + Send + 'static,
     {
         let has_hook = self.hooks_writer.has_hook(hook_type);

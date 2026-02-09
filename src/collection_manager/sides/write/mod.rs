@@ -765,70 +765,54 @@ impl WriteSide {
 
         debug!("Inserting documents {}", document_count);
 
+        for doc in document_list.0.iter_mut() {
+            Self::ensure_document_id(doc);
+        }
+
         let has_hook_transform_before_save =
             collection.has_hook(HookType::TransformDocumentBeforeSave)?;
-        // Pre-assign IDs and clone documents for indexing
-        let (documents_for_indexing, id_map) = if has_hook_transform_before_save {
-            // Pre-assign IDs to all documents
-            let mut id_map = Vec::with_capacity(document_list.len());
-            for doc in document_list.0.iter_mut() {
-                let doc_id_str = Self::ensure_document_id(doc);
-                id_map.push(doc_id_str);
-            }
 
-            // Clone documents for indexing (before hook modifies them)
-            let docs_for_indexing = document_list.clone();
-            debug!("Documents cloned for indexing (hook TransformDocumentBeforeSave present)");
+        // Wrap original documents in Arc to avoid cloning
+        let original_documents = Arc::new(document_list);
 
-            (Some(docs_for_indexing), Some(id_map))
-        } else {
-            // No hook: Pre-assign IDs directly and skip cloning
-            for doc in document_list.0.iter_mut() {
-                Self::ensure_document_id(doc);
-            }
-
-            (None, None)
-        };
-
-        let mut document_to_store = document_list;
-        if has_hook_transform_before_save {
+        let document_to_store = if has_hook_transform_before_save {
             // Hook signature: function transformDocumentBeforeSave(documents)
-            // - documents: the list of document to be inserted
-            // Clone for hook input, we need to preserve document_to_store in case:
-            // 1. Hook returns None (no transformation), we use original for storage
-            // 2. Hook modifies documents, we use modified for storage, original for indexing
-            let hook_input = document_to_store.clone();
+            // - documents: the list of documents to be transformed before storage
+            let hook_input = vec![(*original_documents).clone()];
 
             let log_sender = self.get_hook_logs().get_sender(&collection_id);
             let result: Option<DocumentList> = collection
                 .run_hook(
                     HookType::TransformDocumentBeforeSave,
-                    vec![hook_input],
+                    &hook_input,
                     log_sender,
                 )
                 .await?;
 
             if let Some(modified_documents) = result {
-                // Validate that the hook didn't break document integrity
-                Self::validate_hook_transform_before_save_output(
-                    &modified_documents,
-                    id_map
-                        .as_ref()
-                        .expect("ID map should exist when hook is present"),
-                )?;
-
-                info!("Documents modified by hook and validated");
-                document_to_store = modified_documents;
+                if modified_documents.len() != original_documents.len() {
+                    return Err(anyhow::anyhow!(
+                        "Documents cannot be added or removed in Hook: expected {}, got {}",
+                        original_documents.len(),
+                        modified_documents.len()
+                    )
+                    .into());
+                }
+                info!("Documents modified by TransformDocumentBeforeSave hook and validated");
+                Arc::new(modified_documents)
+            } else {
+                original_documents.clone()
             }
-        }
+        } else {
+            original_documents.clone()
+        };
 
+        debug!("Inserting documents {}", document_count);
         let collection_document_storage = collection.get_document_storage();
-
-        // Add documents to storage (uses hook-modified version if hook existed)
         let doc_ids = self
             .add_documents_to_storage(
                 collection_document_storage,
-                &document_to_store,
+                document_to_store,
                 collection_id,
                 target_index_id,
             )
@@ -836,18 +820,9 @@ impl WriteSide {
             .context("Cannot insert documents into document storage")?;
         debug!("Document inserted");
 
-        // Determine which documents to use for indexing
-        let documents_for_indexing = if let Some(docs) = documents_for_indexing {
-            // Hook existed: use the original unmodified documents
-            docs
-        } else {
-            // No hook: use the current document_list (which has IDs assigned)
-            document_to_store
-        };
-
         debug!("Looking for new fields...");
         index
-            .add_fields_if_needed(&documents_for_indexing)
+            .add_fields_if_needed(&original_documents)
             .await
             .context("Cannot add fields if needed")?;
         debug!("Done");
@@ -857,7 +832,7 @@ impl WriteSide {
 
         debug!("Processing documents {}", document_count);
         let result = self
-            .inner_process_documents(collection_id, index_id, documents_for_indexing, doc_ids)
+            .inner_process_documents(collection_id, index_id, original_documents, doc_ids)
             .await
             .context("Cannot process documents")?;
         info!("All documents are inserted: {}", document_count);
@@ -1037,28 +1012,29 @@ impl WriteSide {
                             // Clone for hook input
                             let hook_input = document_for_storage.clone();
                             let document_list = DocumentList(vec![hook_input]);
+                            let hook_params = vec![document_list];
 
                             let output: Option<DocumentList> = collection
                                 .run_hook(
                                     HookType::TransformDocumentBeforeSave,
-                                    vec![document_list],
+                                    &hook_params,
                                     log_sender.clone(),
                                 )
                                 .await?;
 
                             if let Some(mut modified_documents) = output {
-                                // Validate that the hook didn't break document integrity
-                                Self::validate_hook_transform_before_save_output(
-                                    &modified_documents,
-                                    &[doc_id_str.as_str()],
-                                )?;
-
-                                if !modified_documents.is_empty() {
-                                    info!("Document modified by hook and validated");
-                                    let doc = document_for_storage;
-                                    document_for_storage = modified_documents.0.remove(0);
-                                    document_for_indexing = Some(doc);
+                                if modified_documents.len() != 1 {
+                                    return Err(anyhow::anyhow!(
+                                        "Documents cannot be added or removed in Hook: expected 1, got {}",
+                                        modified_documents.len()
+                                    )
+                                    .into());
                                 }
+
+                                info!("Document modified by hook and validated");
+                                let doc = document_for_storage;
+                                document_for_storage = modified_documents.0.remove(0);
+                                document_for_indexing = Some(doc);
                             }
                         };
 
@@ -1258,45 +1234,10 @@ impl WriteSide {
         &self.hook_logs
     }
 
-    /// Validates that the hook output maintains document integrity
-    /// - Same number of documents
-    /// - All document IDs are preserved and in the same order
-    fn validate_hook_transform_before_save_output<S: AsRef<str>>(
-        modified_docs: &DocumentList,
-        original_ids: &[S],
-    ) -> Result<(), WriteError> {
-        if modified_docs.len() != original_ids.len() {
-            return Err(WriteError::HookExec(format!(
-                "Hook returned {} documents but expected {}. Documents cannot be added or removed.",
-                modified_docs.len(),
-                original_ids.len()
-            )));
-        }
-
-        for (index, (doc, expected_id)) in
-            modified_docs.0.iter().zip(original_ids.iter()).enumerate()
-        {
-            let actual_id = doc.get("id").and_then(|v| v.as_str()).ok_or_else(|| {
-                WriteError::HookExec(format!(
-                    "Hook removed or corrupted 'id' field at document index {index}"
-                ))
-            })?;
-
-            if actual_id != expected_id.as_ref() {
-                return Err(WriteError::HookExec(format!(
-                    "Hook modified document ID at index {index}. Expected '{}' but got '{actual_id}'. Document IDs must not be modified.",
-                    expected_id.as_ref()
-                )));
-            }
-        }
-
-        Ok(())
-    }
-
     async fn add_documents_to_storage(
         self: &WriteSide,
         collection_document_storage: &CollectionDocumentStorage,
-        document_list: &DocumentList,
+        document_list: Arc<DocumentList>,
         collection_id: CollectionId,
         target_index_id: IndexId,
     ) -> Result<Vec<DocumentId>> {
@@ -1368,7 +1309,7 @@ impl WriteSide {
             collection_document_storage
                 .insert_many(&docs)
                 .await
-                .context("Cannot inser document into document storage")?;
+                .context("Cannot insert document into document storage")?;
         }
 
         trace!("Sending documents");
@@ -1385,7 +1326,7 @@ impl WriteSide {
         &self,
         collection_id: CollectionId,
         index_id: IndexId,
-        document_list: DocumentList,
+        document_list: Arc<DocumentList>,
         doc_ids: Vec<DocumentId>,
     ) -> Result<InsertDocumentsResult, WriteError> {
         let mut result = InsertDocumentsResult {
@@ -1413,7 +1354,7 @@ impl WriteSide {
 
         let mut index_operation_batch = Vec::with_capacity(document_count * 10);
         let mut docs_to_remove = Vec::with_capacity(document_count);
-        for (i, doc) in document_list.0.into_iter().enumerate() {
+        for (i, doc) in document_list.0.iter().enumerate() {
             if i % 100 == 0 {
                 info!("Processing document {}/{}", i, document_count);
             }
@@ -1461,7 +1402,12 @@ impl WriteSide {
                 .to_string();
 
             match index
-                .process_new_document(doc_id, doc_id_str.clone(), doc, &mut index_operation_batch)
+                .process_new_document(
+                    doc_id,
+                    doc_id_str.clone(),
+                    doc.clone(),
+                    &mut index_operation_batch,
+                )
                 .await
                 .context("Cannot process document")
             {

@@ -39,7 +39,7 @@ pub async fn run_before_answer(
 }
 
 async fn run_hook_with_fallback<
-    Params: TryIntoFunctionParameters + serde::de::DeserializeOwned + Clone + Send + 'static,
+    Params: TryIntoFunctionParameters + serde::de::DeserializeOwned + Clone + Send + Sync + 'static,
 >(
     js_pool: &Pool,
     input: Params,
@@ -59,7 +59,7 @@ async fn run_hook_with_fallback<
         .exec(
             hook_type.get_function_name(),
             hook_type.get_function_name(),
-            input.clone(),
+            &input.clone(),
             exec_opts,
         )
         .await;

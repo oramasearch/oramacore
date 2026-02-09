@@ -708,7 +708,7 @@ impl CollectionReader {
         log_sender: Option<Arc<tokio::sync::broadcast::Sender<(OutputChannel, String)>>>,
     ) -> Result<Option<Output>, ReadError>
     where
-        Input: orama_js_pool::TryIntoFunctionParameters + Send + 'static,
+        Input: orama_js_pool::TryIntoFunctionParameters + Send + Sync + 'static,
         Output: serde::de::DeserializeOwned + Send + 'static,
     {
         let hook_content = self
@@ -728,7 +728,7 @@ impl CollectionReader {
 
         let result: Option<Output> = self
             .js_pool
-            .exec(hook_name, hook_name, input, exec_opts)
+            .exec(hook_name, hook_name, &input, exec_opts)
             .await
             .map_err(|e| {
                 ReadError::Generic(anyhow::anyhow!("Hook {hook_type:?} execution failed: {e}"))

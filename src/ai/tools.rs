@@ -293,7 +293,7 @@ impl ToolsRuntime {
                             .exec(
                                 &function_name,
                                 &function_name,
-                                arguments_as_json_value,
+                                &arguments_as_json_value,
                                 ExecOptions::new(),
                             )
                             .await;
