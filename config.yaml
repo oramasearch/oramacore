@@ -25,9 +25,13 @@ writer_side:
         # producer_name: write
 
     hooks:
-        # List of allowed domains for external HTTP calls from hooks
-        allowed_domains: 
-            - "localhost"
+        # Domain restrictions for hook HTTP calls (mutually exclusive):
+        # 'denied_domains' to blocklist, 'allowed_domains' to allowlist
+        # It supports also ip wildcards: 10.0.0.*
+        # denied_domains: 
+        #     - "example.org"
+        # allowed_domains:
+        #     - "api.example.com"
         # Timeout for hook JavaScript runtime to initialize
         evaluation_timeout: 200ms
         # Timeout for hook execution 
@@ -120,9 +124,13 @@ reader_side:
             slot_size_exp: 4
 
     hooks:
-        # List of allowed domains for external HTTP calls from hooks
-        allowed_domains: 
-            - "localhost"
+        # Domain restrictions for hook HTTP calls (mutually exclusive):
+        # 'denied_domains' to blocklist, 'allowed_domains' to allowlist
+        # It supports also ip wildcards: 10.0.0.*
+        # denied_domains: 
+        #     - "example.org"
+        # allowed_domains:
+        #     - "api.example.com"
         # Timeout for hook JavaScript runtime to initialize
         evaluation_timeout: 200ms
         # Timeout for hook execution 

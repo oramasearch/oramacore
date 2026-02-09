@@ -135,7 +135,7 @@ impl HooksConfig {
         } else if !self.denied_domains.is_empty() {
             DomainPermission::Deny(self.denied_domains.clone())
         } else {
-            DomainPermission::DenyAll
+            DomainPermission::AllowAll
         }
     }
 }
