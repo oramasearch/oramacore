@@ -1,12 +1,15 @@
+use orama_js_pool::OutputChannel;
 use oramacore_lib::{
     data_structures::ShouldInclude,
     filters::{DocId, FilterResult, PlainFilterResult},
+    hook_storage::HookType,
     pin_rules::{Consequence, PinRulesReader},
 };
 use std::{
     borrow::Cow,
     collections::{HashMap, HashSet},
     hash::Hash,
+    sync::Arc,
     time::Instant,
 };
 
@@ -26,8 +29,8 @@ use crate::{
     },
     metrics::{search::SEARCH_CALCULATION_TIME, SearchCollectionLabels},
     types::{
-        DocumentId, FacetResult, GroupedResult, SearchMode, SearchParams, SearchResult,
-        SearchResultHit, TokenScore,
+        DocumentId, FacetResult, GroupedResult, RawJSONDocument, SearchMode, SearchParams,
+        SearchResult, SearchResultHit, TokenScore,
     },
 };
 
@@ -68,6 +71,7 @@ pub struct Search<'collection, 'analytics_storage> {
     collection: &'collection CollectionReader,
     analytics_storage: Option<&'analytics_storage OramaCoreAnalytics>,
     request: SearchRequest,
+    log_sender: Option<Arc<tokio::sync::broadcast::Sender<(OutputChannel, String)>>>,
 }
 
 impl<'collection, 'analytics_storage> Search<'collection, 'analytics_storage> {
@@ -75,11 +79,13 @@ impl<'collection, 'analytics_storage> Search<'collection, 'analytics_storage> {
         collection: &'collection CollectionReader,
         analytics_storage: Option<&'analytics_storage OramaCoreAnalytics>,
         request: SearchRequest,
+        log_sender: Option<Arc<tokio::sync::broadcast::Sender<(OutputChannel, String)>>>,
     ) -> Self {
         Self {
             collection,
             analytics_storage,
             request,
+            log_sender,
         }
     }
 
@@ -90,6 +96,7 @@ impl<'collection, 'analytics_storage> Search<'collection, 'analytics_storage> {
             collection,
             analytics_storage,
             request,
+            log_sender,
         } = self;
         let SearchRequest {
             search_params,
@@ -151,13 +158,33 @@ impl<'collection, 'analytics_storage> Search<'collection, 'analytics_storage> {
             })
             .unwrap_or_else(|| Box::new(std::iter::empty()));
         let all_docs_ids = top_results.iter().map(|ts| ts.document_id).chain(group);
-        let docs = collection_document_storage
+        let mut docs = collection_document_storage
             .get_documents_by_ids(all_docs_ids.collect())
             .await?;
 
+        // Hook signature: function transformDocumentAfterSearch(documents)
+        // - documents: the fetched documents from storage
+        // Note: We must clone here because, if hook returns None (null/undefined in JS),
+        // we need to preserve original docs.
+        let hook_input = docs.clone();
+        let result: Option<Vec<(DocumentId, Arc<RawJSONDocument>)>> = collection
+            .run_hook(
+                HookType::TransformDocumentAfterSearch,
+                vec![hook_input],
+                log_sender,
+            )
+            .await?;
+
+        let mut count = count;
+        if let Some(modified_documents) = result {
+            info!("Documents modified by TransformDocumentAfterSearch hook");
+            count = modified_documents.len();
+            docs = modified_documents;
+        }
+
         let hits = top_results
             .into_iter()
-            .map(|ts| {
+            .filter_map(|ts| {
                 let TokenScore {
                     document_id: id,
                     score,
@@ -172,11 +199,6 @@ impl<'collection, 'analytics_storage> Search<'collection, 'analytics_storage> {
                             score,
                             document: Some(doc),
                         }
-                    })
-                    .unwrap_or_else(|| SearchResultHit {
-                        id: Default::default(),
-                        score,
-                        document: None,
                     })
             })
             .collect();

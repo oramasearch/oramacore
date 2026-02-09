@@ -56,7 +56,7 @@ use crate::metrics::Empty;
 use crate::python::PythonService;
 use crate::types::{
     ApiKey, CollectionStatsRequest, CustomerClaims, Document, InteractionLLMConfig, ReadApiKey,
-    SearchMode, SearchModeResult, SearchResult, SearchResultHit,
+    SearchMode, SearchModeResult, SearchResult,
 };
 use crate::types::{CollectionId, SearchParams};
 use crate::types::{IndexId, NLPSearchRequest};
@@ -576,34 +576,16 @@ impl ReadSide {
             request.search_params = modified_params;
         }
 
+        let log_sender = self.get_hook_logs().get_sender(&collection_id);
         let search = Search::new(
             &collection,
             // &self.global_document_storage,
             self.analytics_storage.as_ref(),
             request,
+            log_sender,
         );
 
-        let mut search_result = search.execute().await?;
-
-        // Hook signature: function transformDocumentAfterSearch(documents)
-        // - documents: the search hit documents
-        // Note: We must clone here because, if hook returns None (null/undefined in JS),
-        // we need to preserve original results.
-        let hook_input = search_result.hits.clone();
-        let log_sender = self.get_hook_logs().get_sender(&collection_id);
-        let result: Option<Vec<SearchResultHit>> = collection
-            .run_hook(
-                HookType::TransformDocumentAfterSearch,
-                vec![hook_input],
-                log_sender,
-            )
-            .await?;
-
-        if let Some(modified_documents) = result {
-            info!("Search results document modified by hook");
-            search_result.count = modified_documents.len();
-            search_result.hits = modified_documents;
-        }
+        let search_result = search.execute().await?;
 
         Ok(search_result)
     }
