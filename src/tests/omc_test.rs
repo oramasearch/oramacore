@@ -3,21 +3,21 @@ use serde_json::json;
 
 use crate::tests::utils::{init_log, TestContext};
 
-/// Test that documents with OCM (_ocm field) have their scores multiplied by the OCM value.
+/// Test that documents with OMC (_omc field) have their scores multiplied by the OMC value.
 #[tokio::test(flavor = "multi_thread")]
-async fn test_ocm_multiplies_scores() {
+async fn test_omc_multiplies_scores() {
     init_log();
 
     let test_context = TestContext::new().await;
     let collection_client = test_context.create_collection().await.unwrap();
     let index_client = collection_client.create_index().await.unwrap();
 
-    // Insert two identical documents, one with OCM multiplier of 2.0
+    // Insert two identical documents, one with OMC multiplier of 2.0
     let documents = json!([
         {
             "id": "doc1",
             "title": "machine learning",
-            "_ocm": 2.0
+            "_omc": 2.0
         },
         {
             "id": "doc2",
@@ -61,9 +61,9 @@ async fn test_ocm_multiplies_scores() {
     drop(test_context);
 }
 
-/// Test that OCM multipliers work correctly after commit (persisted to disk).
+/// Test that OMC multipliers work correctly after commit (persisted to disk).
 #[tokio::test(flavor = "multi_thread")]
-async fn test_ocm_persists_after_commit() {
+async fn test_omc_persists_after_commit() {
     init_log();
 
     let test_context = TestContext::new().await;
@@ -74,7 +74,7 @@ async fn test_ocm_persists_after_commit() {
         {
             "id": "doc1",
             "title": "machine learning",
-            "_ocm": 3.0
+            "_omc": 3.0
         },
         {
             "id": "doc2",
@@ -123,7 +123,7 @@ async fn test_ocm_persists_after_commit() {
 
     // Scores should be approximately equal before and after commit
     // Note: There might be slight differences due to BM25 calculation changes after commit
-    // but the OCM multiplier effect should still be present
+    // but the OMC multiplier effect should still be present
     let doc2_after = results_after
         .hits
         .iter()
@@ -136,41 +136,41 @@ async fn test_ocm_persists_after_commit() {
     drop(test_context);
 }
 
-/// Test that invalid OCM values (zero, negative, non-numeric) are ignored.
+/// Test that invalid OMC values (zero, negative, non-numeric) are ignored.
 #[tokio::test(flavor = "multi_thread")]
-async fn test_ocm_invalid_values_ignored() {
+async fn test_omc_invalid_values_ignored() {
     init_log();
 
     let test_context = TestContext::new().await;
     let collection_client = test_context.create_collection().await.unwrap();
     let index_client = collection_client.create_index().await.unwrap();
 
-    // Insert documents with various invalid OCM values
+    // Insert documents with various invalid OMC values
     let documents = json!([
         {
             "id": "doc_negative",
             "title": "machine learning",
-            "_ocm": -1.0  // Negative, should be ignored
+            "_omc": -1.0  // Negative, should be ignored
         },
         {
             "id": "doc_zero",
             "title": "machine learning",
-            "_ocm": 0.0  // Zero, should be ignored
+            "_omc": 0.0  // Zero, should be ignored
         },
         {
             "id": "doc_string",
             "title": "machine learning",
-            "_ocm": "invalid"  // Non-numeric, should be ignored
+            "_omc": "invalid"  // Non-numeric, should be ignored
         },
         {
             "id": "doc_null",
             "title": "machine learning",
-            "_ocm": null  // Null, should be ignored
+            "_omc": null  // Null, should be ignored
         },
         {
             "id": "doc_normal",
             "title": "machine learning"
-            // No _ocm, should have default score
+            // No _omc, should have default score
         }
     ]);
 
@@ -190,7 +190,7 @@ async fn test_ocm_invalid_values_ignored() {
 
     assert_eq!(results.count, 5);
 
-    // All documents should have the same score (invalid OCM values are ignored)
+    // All documents should have the same score (invalid OMC values are ignored)
     let scores: Vec<f32> = results.hits.iter().map(|h| h.score).collect();
     let first_score = scores[0];
     for score in scores.iter() {
@@ -200,9 +200,9 @@ async fn test_ocm_invalid_values_ignored() {
     drop(test_context);
 }
 
-/// Test that OCM values are removed when documents are deleted.
+/// Test that OMC values are removed when documents are deleted.
 #[tokio::test(flavor = "multi_thread")]
-async fn test_ocm_removed_on_delete() {
+async fn test_omc_removed_on_delete() {
     init_log();
 
     let test_context = TestContext::new().await;
@@ -213,7 +213,7 @@ async fn test_ocm_removed_on_delete() {
         {
             "id": "doc1",
             "title": "machine learning",
-            "_ocm": 5.0
+            "_omc": 5.0
         }
     ]);
 
@@ -228,17 +228,17 @@ async fn test_ocm_removed_on_delete() {
         .await
         .unwrap();
 
-    // Insert a new document with the same id but different OCM
+    // Insert a new document with the same id but different OMC
     let documents = json!([
         {
             "id": "doc1",
             "title": "machine learning",
-            "_ocm": 1.0  // Different OCM
+            "_omc": 1.0  // Different OMC
         },
         {
             "id": "doc2",
             "title": "machine learning"
-            // No OCM
+            // No OMC
         }
     ]);
 
@@ -258,7 +258,7 @@ async fn test_ocm_removed_on_delete() {
 
     assert_eq!(results.count, 2);
 
-    // doc1 should have the new OCM value (1.0, effectively same as doc2)
+    // doc1 should have the new OMC value (1.0, effectively same as doc2)
     // not the old deleted one (5.0)
     let doc1 = results
         .hits
@@ -277,21 +277,21 @@ async fn test_ocm_removed_on_delete() {
     drop(test_context);
 }
 
-/// Test that document updates correctly update the OCM value.
+/// Test that document updates correctly update the OMC value.
 #[tokio::test(flavor = "multi_thread")]
-async fn test_ocm_updated_on_document_update() {
+async fn test_omc_updated_on_document_update() {
     init_log();
 
     let test_context = TestContext::new().await;
     let collection_client = test_context.create_collection().await.unwrap();
     let index_client = collection_client.create_index().await.unwrap();
 
-    // Insert initial document with OCM
+    // Insert initial document with OMC
     let documents = json!([
         {
             "id": "doc1",
             "title": "machine learning",
-            "_ocm": 2.0
+            "_omc": 2.0
         },
         {
             "id": "doc2",
@@ -327,14 +327,14 @@ async fn test_ocm_updated_on_document_update() {
     // doc1 should have 2x the score initially
     assert_approx_eq!(doc1_before.score, doc2_before.score * 2.0, 0.001);
 
-    // Update doc1 with a new OCM value
+    // Update doc1 with a new OMC value
     // Use unchecked_insert_documents because insert_documents expects document count to increase,
     // but when updating an existing document, the count stays the same
     let documents = json!([
         {
             "id": "doc1",
             "title": "machine learning",
-            "_ocm": 4.0  // Changed from 2.0 to 4.0
+            "_omc": 4.0  // Changed from 2.0 to 4.0
         }
     ]);
 
@@ -368,9 +368,9 @@ async fn test_ocm_updated_on_document_update() {
     drop(test_context);
 }
 
-/// Test that _ocm field is preserved in the document and returned in search results.
+/// Test that _omc field is preserved in the document and returned in search results.
 #[tokio::test(flavor = "multi_thread")]
-async fn test_ocm_field_in_document() {
+async fn test_omc_field_in_document() {
     init_log();
 
     let test_context = TestContext::new().await;
@@ -381,7 +381,7 @@ async fn test_ocm_field_in_document() {
         {
             "id": "doc1",
             "title": "machine learning",
-            "_ocm": 2.5
+            "_omc": 2.5
         }
     ]);
 
@@ -401,52 +401,52 @@ async fn test_ocm_field_in_document() {
 
     assert_eq!(results.count, 1);
 
-    // The _ocm field should be in the returned document
+    // The _omc field should be in the returned document
     let doc = results.hits[0]
         .document
         .as_ref()
         .expect("document should be returned");
-    // Parse the raw JSON to check for _ocm field
+    // Parse the raw JSON to check for _omc field
     let raw_json = doc.inner.get();
     let parsed: serde_json::Value = serde_json::from_str(raw_json).expect("valid JSON");
-    let ocm_value = parsed.get("_ocm");
-    // _ocm is stored in the document and should be returned
-    assert!(ocm_value.is_some(), "_ocm should be in document");
-    assert_eq!(ocm_value.unwrap().as_f64(), Some(2.5));
+    let omc_value = parsed.get("_omc");
+    // _omc is stored in the document and should be returned
+    assert!(omc_value.is_some(), "_omc should be in document");
+    assert_eq!(omc_value.unwrap().as_f64(), Some(2.5));
 
     drop(test_context);
 }
 
-/// Test OCM with different positive multipliers.
+/// Test OMC with different positive multipliers.
 #[tokio::test(flavor = "multi_thread")]
-async fn test_ocm_various_multipliers() {
+async fn test_omc_various_multipliers() {
     init_log();
 
     let test_context = TestContext::new().await;
     let collection_client = test_context.create_collection().await.unwrap();
     let index_client = collection_client.create_index().await.unwrap();
 
-    // Insert documents with various OCM values
+    // Insert documents with various OMC values
     let documents = json!([
         {
             "id": "doc_x1",
             "title": "test document",
-            "_ocm": 1.0  // Base multiplier
+            "_omc": 1.0  // Base multiplier
         },
         {
             "id": "doc_x2",
             "title": "test document",
-            "_ocm": 2.0
+            "_omc": 2.0
         },
         {
             "id": "doc_x5",
             "title": "test document",
-            "_ocm": 5.0
+            "_omc": 5.0
         },
         {
             "id": "doc_x10",
             "title": "test document",
-            "_ocm": 10.0
+            "_omc": 10.0
         }
     ]);
 
@@ -486,15 +486,15 @@ async fn test_ocm_various_multipliers() {
     assert_approx_eq!(score_x5, score_x1 * 5.0, 0.01);
     assert_approx_eq!(score_x10, score_x1 * 10.0, 0.01);
 
-    // Document with highest OCM should be ranked first
+    // Document with highest OMC should be ranked first
     assert!(results.hits[0].id.contains("doc_x10"));
 
     drop(test_context);
 }
 
-/// Test OCM with fractional multipliers (less than 1.0 but positive).
+/// Test OMC with fractional multipliers (less than 1.0 but positive).
 #[tokio::test(flavor = "multi_thread")]
-async fn test_ocm_fractional_multipliers() {
+async fn test_omc_fractional_multipliers() {
     init_log();
 
     let test_context = TestContext::new().await;
@@ -505,17 +505,17 @@ async fn test_ocm_fractional_multipliers() {
         {
             "id": "doc_full",
             "title": "test document",
-            "_ocm": 1.0
+            "_omc": 1.0
         },
         {
             "id": "doc_half",
             "title": "test document",
-            "_ocm": 0.5
+            "_omc": 0.5
         },
         {
             "id": "doc_quarter",
             "title": "test document",
-            "_ocm": 0.25
+            "_omc": 0.25
         }
     ]);
 
@@ -552,7 +552,7 @@ async fn test_ocm_fractional_multipliers() {
     assert_approx_eq!(score_half, score_full * 0.5, 0.001);
     assert_approx_eq!(score_quarter, score_full * 0.25, 0.001);
 
-    // Document with highest OCM should be ranked first
+    // Document with highest OMC should be ranked first
     assert!(results.hits[0].id.contains("doc_full"));
 
     drop(test_context);
