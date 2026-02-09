@@ -798,6 +798,25 @@ impl WriteSide {
                     )
                     .into());
                 }
+
+                // Validate that document IDs remain in the same order
+                for (i, (original, modified)) in original_documents
+                    .0
+                    .iter()
+                    .zip(modified_documents.0.iter())
+                    .enumerate()
+                {
+                    let original_id = original.inner.get("id");
+                    let modified_id = modified.inner.get("id");
+
+                    if original_id != modified_id {
+                        return Err(anyhow::anyhow!(
+                            "Document IDs cannot be changed or reordered in Hook: document at position {i} has id changed from {original_id:?} to {modified_id:?}"
+                        )
+                        .into());
+                    }
+                }
+
                 info!("Documents modified by TransformDocumentBeforeSave hook and validated");
                 Arc::new(modified_documents)
             } else {

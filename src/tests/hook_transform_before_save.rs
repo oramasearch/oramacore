@@ -511,3 +511,55 @@ export default { transformDocumentBeforeSave }"#
     let err_msg = result.unwrap_err().to_string();
     assert!(err_msg.contains("Documents cannot be added or removed"));
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_transform_before_save_shuffle_documents() {
+    init_log();
+
+    let test_context = TestContext::new().await;
+    let collection_client = test_context.create_collection().await.unwrap();
+
+    collection_client
+        .insert_hook(
+            HookType::TransformDocumentBeforeSave,
+            r#"
+const transformDocumentBeforeSave = function (documents) {
+    // Attempt to swap documents with id "1" and id "2"
+    const doc1_idx = documents.findIndex(doc => doc.id === "1");
+    const doc2_idx = documents.findIndex(doc => doc.id === "2");
+    
+    if (doc1_idx !== -1 && doc2_idx !== -1) {
+        const temp = documents[doc1_idx];
+        documents[doc1_idx] = documents[doc2_idx];
+        documents[doc2_idx] = temp;
+    }
+    
+    return documents;
+}
+export default { transformDocumentBeforeSave }"#
+                .to_string(),
+        )
+        .await
+        .unwrap();
+
+    let index_client = collection_client.create_index().await.unwrap();
+
+    // Attempt to insert documents with id "1" and "2"
+    // This should fail because the hook tries to shuffle them,
+    // and this can cause a miss match between the indexed documents and the saved one.
+    let documents: DocumentList = json!([
+        {"id": "1", "title": "original first document"},
+        {"id": "2", "title": "original second document"}
+    ])
+    .try_into()
+    .unwrap();
+
+    let result = index_client.unchecked_insert_documents(documents).await;
+
+    assert!(result.is_err());
+    let err_msg = result.unwrap_err().to_string();
+    assert!(
+        err_msg.contains("Document IDs cannot be changed or reordered"),
+        "Expected error about document reordering, got: {err_msg}"
+    );
+}
