@@ -278,8 +278,8 @@ impl ToolsRuntime {
                         let function_name = full_tool.id.clone();
                         let mut worker = Worker::builder()
                             .with_domain_permission(DomainPermission::DenyAll)
-                            .with_evaluation_timeout(Duration::from_millis(200))
-                            .with_execution_timeout(Duration::from_millis(200))
+                            .with_evaluation_timeout(Duration::from_millis(500))
+                            .with_execution_timeout(Duration::from_millis(500))
                             .add_module(&function_name, code)
                             .build()
                             .await
