@@ -152,10 +152,10 @@ pub struct Index {
 
     enum_strategy: EnumStrategy,
 
-    /// Custom multipliers (OCM - Orama Custom Multiplier) for documents.
+    /// Custom multipliers (OMC - Orama Custom Multiplier) for documents.
     /// These multipliers are applied to document scores during search.
-    /// The first HashMap is uncommitted OCM values, the second is committed.
-    ocm: OramaAsyncLock<(HashMap<DocumentId, f32>, HashMap<DocumentId, f32>)>,
+    /// The first HashMap is uncommitted OMC values, the second is committed.
+    omc: OramaAsyncLock<(HashMap<DocumentId, f32>, HashMap<DocumentId, f32>)>,
 }
 
 impl Index {
@@ -191,7 +191,7 @@ impl Index {
 
             enum_strategy,
 
-            ocm: OramaAsyncLock::new("ocm", (HashMap::new(), HashMap::new())),
+            omc: OramaAsyncLock::new("omc", (HashMap::new(), HashMap::new())),
         }
     }
 
@@ -319,17 +319,26 @@ impl Index {
         }
         debug!("Vector fields loaded");
 
-        // Load OCM from dedicated versioned file, with backward compatibility
-        // for existing indexes that stored OCM inside index.json (dump.ocm).
-        let committed_ocm: HashMap<DocumentId, f32> = BufferedFile::open(data_dir.join("ocm.bin"))
-            .and_then(|f| f.read_bincode_data::<OcmDump>())
+        // Load OMC from dedicated versioned file, with backward compatibility
+        // for existing indexes that stored OMC inside index.json (dump.omc).
+        let committed_omc: HashMap<DocumentId, f32> = BufferedFile::open(data_dir.join("omc.bin"))
+            .and_then(|f| f.read_bincode_data::<OmcDump>())
             .map(|dump| {
-                let OcmDump::V1(v1) = dump;
+                let OmcDump::V1(v1) = dump;
                 v1.data
             })
             .unwrap_or_else(|_| {
-                // Fallback to dump.ocm for backward compatibility with existing indexes
-                dump.ocm.unwrap_or_default()
+                // Fallback 1: try reading old ocm.bin for backward compatibility
+                BufferedFile::open(data_dir.join("ocm.bin"))
+                    .and_then(|f| f.read_bincode_data::<OmcDump>())
+                    .map(|dump| {
+                        let OmcDump::V1(v1) = dump;
+                        v1.data
+                    })
+                    .unwrap_or_else(|_| {
+                        // Fallback 2: dump.ocm for backward compatibility with existing indexes
+                        dump.ocm.unwrap_or_default()
+                    })
             });
 
         Ok(Self {
@@ -357,8 +366,8 @@ impl Index {
 
             enum_strategy: dump.enum_strategy,
 
-            // Use OCM loaded from dedicated file or from dump (backward compatibility)
-            ocm: OramaAsyncLock::new("ocm", (HashMap::new(), committed_ocm)),
+            // Use OMC loaded from dedicated file or from dump (backward compatibility)
+            omc: OramaAsyncLock::new("omc", (HashMap::new(), committed_omc)),
         })
     }
 
@@ -679,34 +688,34 @@ impl Index {
             &mut uncommitted_fields.vector_fields,
         );
 
-        // Merge and commit OCM values
-        // Get write lock to merge uncommitted_ocm into committed_ocm
-        let mut ocm_lock = self.ocm.write("commit").await;
+        // Merge and commit OMC values
+        // Get write lock to merge uncommitted_omc into committed_omc
+        let mut omc_lock = self.omc.write("commit").await;
 
-        // Collect uncommitted OCM values first to avoid borrow issues
-        let uncommitted_ocm_values: Vec<_> = ocm_lock.0.drain().collect();
+        // Collect uncommitted OMC values first to avoid borrow issues
+        let uncommitted_omc_values: Vec<_> = omc_lock.0.drain().collect();
 
-        // Merge uncommitted OCM into committed OCM
-        for (doc_id, multiplier) in uncommitted_ocm_values {
-            ocm_lock.1.insert(doc_id, multiplier);
+        // Merge uncommitted OMC into committed OMC
+        for (doc_id, multiplier) in uncommitted_omc_values {
+            omc_lock.1.insert(doc_id, multiplier);
         }
 
-        // Remove deleted documents from committed OCM
+        // Remove deleted documents from committed OMC
         for doc_id in &self.uncommitted_deleted_documents {
-            ocm_lock.1.remove(doc_id);
+            omc_lock.1.remove(doc_id);
         }
 
-        // Save OCM to dedicated versioned file (only if not empty)
-        if !ocm_lock.1.is_empty() {
-            let ocm_dump = OcmDump::V1(OcmDumpV1 {
-                data: ocm_lock.1.clone(),
+        // Save OMC to dedicated versioned file (only if not empty)
+        if !omc_lock.1.is_empty() {
+            let omc_dump = OmcDump::V1(OmcDumpV1 {
+                data: omc_lock.1.clone(),
             });
-            BufferedFile::create_or_overwrite(data_dir.join("ocm.bin"))
-                .context("Cannot create ocm.bin")?
-                .write_bincode_data(&ocm_dump)
-                .context("Cannot write ocm.bin")?;
+            BufferedFile::create_or_overwrite(data_dir.join("omc.bin"))
+                .context("Cannot create omc.bin")?
+                .write_bincode_data(&omc_dump)
+                .context("Cannot write omc.bin")?;
         }
-        drop(ocm_lock);
+        drop(omc_lock);
 
         let dump = Dump::V1(DumpV1 {
             id: self.id,
@@ -753,7 +762,7 @@ impl Index {
             created_at: self.created_at,
             updated_at: self.updated_at,
             enum_strategy: self.enum_strategy,
-            // OCM is now stored in dedicated ocm.bin file; set to None for new data
+            // OMC is now stored in dedicated omc.bin file; set to None for new data
             ocm: None,
         });
 
@@ -1047,15 +1056,15 @@ impl Index {
             IndexWriteOperation::Index2 {
                 doc_id,
                 indexed_values,
-                ocm,
+                omc,
             } => {
-                // Handle Index2: same as Index but also stores the OCM value if present
+                // Handle Index2: same as Index but also stores the OMC value if present
                 self.document_count += 1;
 
-                // Store OCM value if provided
-                if let Some(multiplier) = ocm {
-                    let (ref mut uncommitted_ocm, _) = *self.ocm.get_mut();
-                    uncommitted_ocm.insert(doc_id, multiplier);
+                // Store OMC value if provided
+                if let Some(multiplier) = omc {
+                    let (ref mut uncommitted_omc, _) = *self.omc.get_mut();
+                    uncommitted_omc.insert(doc_id, multiplier);
                 }
 
                 for indexed_value in indexed_values {
@@ -1127,11 +1136,11 @@ impl Index {
             IndexWriteOperation::DeleteDocuments { doc_ids } => {
                 let len = doc_ids.len() as u64;
 
-                // Also remove OCM values for deleted documents
-                let (ref mut uncommitted_ocm, ref mut committed_ocm) = *self.ocm.get_mut();
+                // Also remove OMC values for deleted documents
+                let (ref mut uncommitted_omc, ref mut committed_omc) = *self.omc.get_mut();
                 for doc_id in &doc_ids {
-                    uncommitted_ocm.remove(doc_id);
-                    committed_ocm.remove(doc_id);
+                    uncommitted_omc.remove(doc_id);
+                    committed_omc.remove(doc_id);
                 }
 
                 self.uncommitted_deleted_documents.extend(doc_ids);
@@ -1155,15 +1164,15 @@ impl Index {
             .is_some()
     }
 
-    /// Get all OCM values at once for batch operations.
-    /// Returns a reference to both uncommitted and committed OCM maps.
-    pub async fn get_all_ocm(
+    /// Get all OMC values at once for batch operations.
+    /// Returns a reference to both uncommitted and committed OMC maps.
+    pub async fn get_all_omc(
         &self,
     ) -> crate::lock::OramaAsyncLockReadGuard<
         '_,
         (HashMap<DocumentId, f32>, HashMap<DocumentId, f32>),
     > {
-        self.ocm.read("get_all_ocm").await
+        self.omc.read("get_all_omc").await
     }
 
     // Since we only have one embedding model for all indexes in a collection,
@@ -1271,24 +1280,24 @@ struct DumpV1 {
     updated_at: DateTime<Utc>,
     #[serde(default)]
     enum_strategy: EnumStrategy,
-    /// OCM (Orama Custom Multiplier) values for documents.
-    /// DEPRECATED: OCM is now stored in a dedicated `ocm.bin` file.
+    /// OMC (Orama Custom Multiplier) values for documents.
+    /// DEPRECATED: OMC is now stored in a dedicated `omc.bin` file.
     /// This field is kept for backward compatibility when reading existing data.
     #[serde(default)]
     ocm: Option<HashMap<DocumentId, f32>>,
 }
 
-/// Versioned dump format for OCM (Orama Custom Multiplier) data.
-/// Stored separately in `ocm.bin` for better separation of concerns.
+/// Versioned dump format for OMC (Orama Custom Multiplier) data.
+/// Stored separately in `omc.bin` for better separation of concerns.
 #[derive(Debug, Serialize, Deserialize)]
-struct OcmDumpV1 {
+struct OmcDumpV1 {
     data: HashMap<DocumentId, f32>,
 }
 
-/// Versioned envelope for OCM dump data, allowing future format migrations.
+/// Versioned envelope for OMC dump data, allowing future format migrations.
 #[derive(Debug, Serialize, Deserialize)]
-enum OcmDump {
-    V1(OcmDumpV1),
+enum OmcDump {
+    V1(OmcDumpV1),
 }
 
 #[derive(Debug, Serialize, Deserialize)]
