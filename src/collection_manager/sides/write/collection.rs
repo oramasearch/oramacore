@@ -95,7 +95,7 @@ impl CollectionWriter {
         });
 
         let js_pool = Pool::builder()
-            .with_evaluation_timeout(context.hooks_config.builder_timeout)
+            .with_evaluation_timeout(context.hooks_config.evaluation_timeout)
             .with_execution_timeout(context.hooks_config.execution_timeout)
             .with_domain_permission(context.hooks_config.to_domain_permission())
             .build()

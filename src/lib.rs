@@ -86,9 +86,9 @@ pub struct HooksConfig {
     /// Timeout for hook initialization/builder
     #[serde(
         deserialize_with = "deserialize_duration",
-        default = "default_hook_builder_timeout"
+        default = "default_hook_evaluation_timeout"
     )]
-    pub builder_timeout: Duration,
+    pub evaluation_timeout: Duration,
 
     /// Timeout for hook execution
     #[serde(
@@ -98,7 +98,7 @@ pub struct HooksConfig {
     pub execution_timeout: Duration,
 }
 
-fn default_hook_builder_timeout() -> Duration {
+fn default_hook_evaluation_timeout() -> Duration {
     Duration::from_millis(200)
 }
 
@@ -111,7 +111,7 @@ impl Default for HooksConfig {
         Self {
             allowed_domains: vec![],
             denied_domains: vec![],
-            builder_timeout: Duration::from_millis(200),
+            evaluation_timeout: Duration::from_millis(200),
             execution_timeout: Duration::from_millis(1000),
         }
     }

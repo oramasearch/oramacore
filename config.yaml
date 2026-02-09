@@ -29,7 +29,7 @@ writer_side:
         allowed_domains: 
             - "localhost"
         # Timeout for hook JavaScript runtime to initialize
-        builder_timeout: 200ms
+        evaluation_timeout: 200ms
         # Timeout for hook execution 
         execution_timeout: 1s
 
@@ -124,7 +124,7 @@ reader_side:
         allowed_domains: 
             - "localhost"
         # Timeout for hook JavaScript runtime to initialize
-        builder_timeout: 200ms
+        evaluation_timeout: 200ms
         # Timeout for hook execution 
         execution_timeout: 1s
 
