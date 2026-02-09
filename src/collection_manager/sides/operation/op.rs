@@ -141,14 +141,14 @@ pub enum IndexWriteOperation {
         doc_id: DocumentId,
         indexed_values: Vec<IndexedValue>,
     },
-    /// Index operation with optional OCM (Orama Custom Multiplier) support.
+    /// Index operation with optional OMC (Orama Custom Multiplier) support.
     /// This variant is used for new documents and is backward compatible with Index.
     Index2 {
         doc_id: DocumentId,
         indexed_values: Vec<IndexedValue>,
         /// Optional custom multiplier applied to the document's score during search.
         /// Only positive values are valid; zero, negative, or absent values are ignored.
-        ocm: Option<f32>,
+        omc: Option<f32>,
     },
     IndexEmbedding {
         data: EmbeddingIndexData,
@@ -187,12 +187,12 @@ impl Debug for IndexWriteOperation {
             Self::Index2 {
                 doc_id,
                 indexed_values,
-                ocm,
+                omc,
             } => f
                 .debug_struct("Index2")
                 .field("doc_id", doc_id)
                 .field("indexed_values", indexed_values)
-                .field("ocm", ocm)
+                .field("omc", omc)
                 .finish(),
             Self::IndexEmbedding { .. } => {
                 f.debug_struct("IndexEmbedding")
@@ -666,7 +666,7 @@ mod tests {
                     },
                 ),
             ),
-            // Test Index2 with OCM (Orama Custom Multiplier)
+            // Test Index2 with OMC (Orama Custom Multiplier)
             WriteOperation::Collection(
                 collection_id,
                 CollectionWriteOperation::IndexWriteOperation(
@@ -674,7 +674,7 @@ mod tests {
                     IndexWriteOperation::Index2 {
                         doc_id: DocumentId(2),
                         indexed_values: Vec::from([IndexedValue::FilterBool(field_id, false)]),
-                        ocm: Some(2.0),
+                        omc: Some(2.0),
                     },
                 ),
             ),

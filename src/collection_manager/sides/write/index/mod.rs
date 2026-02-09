@@ -443,11 +443,11 @@ impl Index {
         }
         drop(score_fields);
 
-        // Extract the OCM (Orama Custom Multiplier) value if present and valid.
+        // Extract the OMC (Orama Custom Multiplier) value if present and valid.
         // Only positive values are accepted; zero, negative, or non-numeric values are ignored.
-        let ocm_multiplier: Option<f32> = doc
+        let omc_multiplier: Option<f32> = doc
             .inner
-            .get("_ocm")
+            .get("_omc")
             .and_then(|v| v.as_f64())
             .map(|f| f as f32)
             .filter(|&f| f > 0.0);
@@ -462,7 +462,7 @@ impl Index {
                     IndexWriteOperation::Index2 {
                         doc_id,
                         indexed_values: doc_indexed_values,
-                        ocm: ocm_multiplier,
+                        omc: omc_multiplier,
                     },
                 ),
             ));
@@ -672,10 +672,10 @@ impl Index {
 
         // `id` field is always present in the documents
         current_fields.insert(Box::new([Cow::Owned("id".to_string())]), F::AlreadyInserted);
-        // `_ocm` (Orama Custom Multiplier) is a special field that should not be indexed
+        // `_omc` (Orama Custom Multiplier) is a special field that should not be indexed
         // It stores a multiplier that is applied to the document's score during search
         current_fields.insert(
-            Box::new([Cow::Owned("_ocm".to_string())]),
+            Box::new([Cow::Owned("_omc".to_string())]),
             F::AlreadyInserted,
         );
 
