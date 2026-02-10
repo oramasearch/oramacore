@@ -9,7 +9,13 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
+use tracing::warn;
 
+use super::constraint_extractor::{
+    extract_constraints, format_constraints_for_prompt, has_shared_budget, inject_constraints,
+    validate_search_params, BudgetAllocation, BudgetPlannerResponse, ExtractedConstraint,
+    FieldInfo,
+};
 use super::llms::{KnownPrompts, LLMService};
 use crate::ai::run_hooks::run_before_retrieval;
 use crate::collection_manager::sides::read::{SearchAnalyticEventOrigin, SearchRequest};
@@ -156,9 +162,21 @@ enum FieldStatType {
         true_count: usize,
     },
     #[serde(rename = "uncommitted_number")]
-    UncommittedNumber { _min: f64, _max: f64, count: usize },
+    UncommittedNumber {
+        #[serde(default)]
+        _min: Option<f64>,
+        #[serde(default)]
+        _max: Option<f64>,
+        #[serde(default)]
+        count: usize,
+    },
     #[serde(rename = "committed_number")]
-    CommittedNumber { _min: f64, _max: f64 },
+    CommittedNumber {
+        #[serde(default)]
+        _min: Option<f64>,
+        #[serde(default)]
+        _max: Option<f64>,
+    },
     #[serde(rename = "uncommitted_string_filter")]
     UncommittedStringFilter {
         #[allow(dead_code)]
@@ -214,14 +232,17 @@ impl FieldStatType {
                 true_count,
             } => false_count + true_count,
             UncommittedNumber { count, .. } => *count,
-            CommittedNumber { .. } => 0,
+            // Committed number/vector fields don't carry a count, but if
+            // they exist they contain documents. Return 1 so they pass the
+            // "document_count > 0" filter in extract_schema_fields.
+            CommittedNumber { .. } => 1,
             UncommittedStringFilter { document_count, .. }
             | CommittedStringFilter { document_count, .. } => *document_count,
             UncommittedString { global_info, .. } | CommittedString { global_info, .. } => {
                 global_info.total_documents
             }
             UncommittedVector { document_count, .. } => *document_count,
-            CommittedVector { .. } => 0,
+            CommittedVector { .. } => 1,
         }
     }
 
@@ -231,7 +252,7 @@ impl FieldStatType {
         match self {
             UncommittedBoolean { .. } | CommittedBoolean { .. } => "boolean",
             UncommittedNumber { .. } | CommittedNumber { .. } => "number",
-            UncommittedStringFilter { .. } | CommittedStringFilter { .. } => "string",
+            UncommittedStringFilter { .. } | CommittedStringFilter { .. } => "string_filter",
             UncommittedString { .. } | CommittedString { .. } => "string",
             UncommittedVector { .. } | CommittedVector { .. } => "vector",
         }
@@ -557,7 +578,12 @@ impl AdvancedAutoQuery {
             .collect()
     }
 
-    /// Generates search queries with tracking information
+    /// Generates search queries with tracking information.
+    ///
+    /// Integrates schema-aware constraint extraction: before calling the LLM,
+    /// extracts numeric, string enum, and boolean constraints from the query text
+    /// and passes them as hard constraints to the prompt. After the LLM responds,
+    /// validates that all constraints are present and injects any that are missing.
     async fn generate_tracked_search_queries(
         &mut self,
         mut query_plan: Vec<QueryAndProperties>,
@@ -571,8 +597,19 @@ impl AdvancedAutoQuery {
             query_and_props.filter_properties = filter_properties.clone();
         }
 
-        // Convert to LLM variables and run queries in parallel
-        let variables_list = self.create_llm_variables(&query_plan);
+        // Extract schema field info and number fields for constraint matching
+        let schema_fields = self.extract_schema_fields();
+        let number_fields = self.extract_number_fields();
+
+        // Extract constraints for each query and build hard_constraints strings
+        let per_query_constraints: Vec<Vec<ExtractedConstraint>> = query_plan
+            .iter()
+            .map(|qp| extract_constraints(&qp.query, &schema_fields, &filter_properties))
+            .collect();
+
+        // Convert to LLM variables (includes hard_constraints)
+        let variables_list =
+            self.create_llm_variables(&query_plan, &per_query_constraints, &number_fields);
         let futures: Vec<_> = variables_list
             .into_iter()
             .map(|variables| {
@@ -588,7 +625,7 @@ impl AdvancedAutoQuery {
 
         let results = futures::future::join_all(futures).await;
 
-        // Process results with tracking
+        // Process results with tracking and constraint validation
         let tracked_queries: Result<Vec<TrackedQuery>> = results
             .into_iter()
             .enumerate()
@@ -601,6 +638,19 @@ impl AdvancedAutoQuery {
                         let mut search_params = serde_json::from_str::<SearchParams>(&cleaned)
                             .context("Failed to parse search params")?;
                         search_params.user_id = user_id.clone();
+
+                        // Validate and inject missing constraints
+                        let constraints = &per_query_constraints[index];
+                        let missing =
+                            validate_search_params(&search_params, constraints, &number_fields);
+                        if !missing.is_empty() {
+                            warn!(
+                                "LLM omitted {} constraint(s) for query '{}', injecting",
+                                missing.len(),
+                                query_plan[index].query
+                            );
+                            inject_constraints(&mut search_params, &missing, &number_fields);
+                        }
 
                         Ok(TrackedQuery {
                             index,
@@ -773,14 +823,20 @@ impl AdvancedAutoQuery {
         properties_map
     }
 
-    /// Creates LLM variables from queries and properties
+    /// Creates LLM variables from queries, properties, and extracted constraints.
+    ///
+    /// Includes a `hard_constraints` variable that lists pre-extracted constraints
+    /// for the LLM to include in its generated search parameters.
     fn create_llm_variables(
         &self,
         queries_and_properties: &[QueryAndProperties],
+        per_query_constraints: &[Vec<ExtractedConstraint>],
+        number_fields: &[String],
     ) -> Vec<Vec<(String, String)>> {
         queries_and_properties
             .iter()
-            .map(|qp| {
+            .enumerate()
+            .map(|(i, qp)| {
                 let mut variables = vec![("query".to_string(), qp.query.clone())];
 
                 // Flatten all properties from all collections
@@ -797,6 +853,14 @@ impl AdvancedAutoQuery {
                 if let Ok(filter_json) = serde_json::to_string(&qp.filter_properties) {
                     variables.push(("filter_properties".to_string(), filter_json));
                 }
+
+                // Add hard constraints from the constraint extractor
+                let constraints = per_query_constraints
+                    .get(i)
+                    .map(|c| c.as_slice())
+                    .unwrap_or(&[]);
+                let hard_constraints = format_constraints_for_prompt(constraints, number_fields);
+                variables.push(("hard_constraints".to_string(), hard_constraints));
 
                 variables
             })
@@ -885,6 +949,121 @@ impl AdvancedAutoQuery {
             .collect();
 
         result
+    }
+
+    /// Extract schema field info (name + type) from collection stats.
+    ///
+    /// Used to provide schema context to the constraint extractor.
+    fn extract_schema_fields(&self) -> Vec<FieldInfo> {
+        let prefix_regex = Regex::new(r"^(committed|uncommitted)_").expect("Valid regex pattern");
+        let mut fields = Vec::new();
+        let mut seen = HashMap::new();
+
+        for index in &self.collection_stats.indexes_stats {
+            if index.is_temp {
+                continue;
+            }
+            for stat in &index.fields_stats {
+                let field_path = prefix_regex.replace(&stat.field_path, "").to_string();
+                if field_path == "___orama_auto_embedding" || seen.contains_key(&field_path) {
+                    continue;
+                }
+                if let Ok(stat_json) = serde_json::to_string(&stat.stats) {
+                    if let Ok(field_stat_type) = serde_json::from_str::<FieldStatType>(&stat_json) {
+                        if !field_stat_type.is_unfilterable_string()
+                            && field_stat_type.document_count() > 0
+                        {
+                            seen.insert(field_path.clone(), true);
+                            fields.push(FieldInfo {
+                                name: field_path,
+                                field_type: field_stat_type.field_type_name().to_string(),
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        fields
+    }
+
+    /// Extract the names of all number-typed fields from collection stats.
+    fn extract_number_fields(&self) -> Vec<String> {
+        self.extract_schema_fields()
+            .iter()
+            .filter(|f| f.field_type == "number")
+            .map(|f| f.name.clone())
+            .collect()
+    }
+
+    /// Plan budget allocations across multiple sub-queries when a shared budget is detected.
+    ///
+    /// Calls the budget planner LLM prompt to split the total budget across sub-queries.
+    /// Returns None if no shared budget is detected or if planning fails.
+    #[allow(dead_code)]
+    async fn plan_budget(
+        &self,
+        original_query: &str,
+        sub_queries: &[String],
+        global_constraints: &[ExtractedConstraint],
+    ) -> Result<Option<Vec<BudgetAllocation>>> {
+        // Only plan budget if there's a shared budget and multiple sub-queries
+        if sub_queries.len() <= 1 || !has_shared_budget(original_query) {
+            return Ok(None);
+        }
+
+        // Find the budget constraint
+        let budget_constraint = global_constraints.iter().find(|c| {
+            matches!(
+                c,
+                ExtractedConstraint::Numeric {
+                    field_hint: Some(hint),
+                    ..
+                } if hint == "price"
+            )
+        });
+
+        let budget_value = match budget_constraint {
+            Some(ExtractedConstraint::Numeric { value, .. }) => *value,
+            _ => return Ok(None),
+        };
+
+        let number_fields = self.extract_number_fields();
+        let price_fields_json =
+            serde_json::to_string(&number_fields).context("Failed to serialize price fields")?;
+
+        let variables = vec![
+            ("original_query".to_string(), original_query.to_string()),
+            (
+                "sub_queries".to_string(),
+                serde_json::to_string(sub_queries).context("Failed to serialize sub-queries")?,
+            ),
+            ("total_budget".to_string(), budget_value.to_string()),
+            ("price_fields".to_string(), price_fields_json),
+        ];
+
+        let result = self
+            .llm_service
+            .run_known_prompt(
+                KnownPrompts::V1_1AdvancedAutoQueryBudgetPlanner,
+                vec![],
+                variables,
+                None,
+                self.llm_config.clone(),
+            )
+            .await
+            .context("Failed to run budget planner prompt")?;
+
+        let cleaned = repair_json(&result, &Default::default())
+            .context("Failed to clean budget planner response")?;
+
+        match serde_json::from_str::<BudgetPlannerResponse>(&cleaned) {
+            Ok(response) => Ok(Some(response.allocations)),
+            Err(e) => {
+                warn!("Failed to parse budget planner response: {e}");
+                Ok(None)
+            }
+        }
     }
 }
 

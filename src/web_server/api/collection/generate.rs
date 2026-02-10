@@ -1,5 +1,5 @@
 use crate::ai::state_machines::advanced_autoquery::{
-    AdvancedAutoqueryConfig, AdvancedAutoqueryEvent, AdvancedAutoqueryStateMachine,
+    AdvancedAutoqueryConfig, AdvancedAutoqueryEvent, AdvancedAutoqueryStateMachine, PromptVersion,
 };
 use crate::ai::state_machines::answer::{AnswerConfig, AnswerEvent, AnswerStateMachine};
 use crate::collection_manager::sides::read::{
@@ -30,6 +30,10 @@ pub fn apis(read_side: Arc<ReadSide>) -> Router {
             post(nlp_query_v1),
         )
         .route(
+            "/v1.1/collections/{collection_id}/generate/nlp_query",
+            post(nlp_query_v1_1),
+        )
+        .route(
             "/v1/collections/{collection_id}/generate/answer",
             post(answer_v1),
         )
@@ -52,6 +56,38 @@ async fn nlp_query_v1(
     State(read_side): State<Arc<ReadSide>>,
     read_api_key: ReadApiKey,
     Json(request): Json<NlpQueryRequest>,
+) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
+    nlp_query_inner(
+        collection_id,
+        read_side,
+        read_api_key,
+        request,
+        PromptVersion::V1,
+    )
+}
+
+async fn nlp_query_v1_1(
+    collection_id: CollectionId,
+    State(read_side): State<Arc<ReadSide>>,
+    read_api_key: ReadApiKey,
+    Json(request): Json<NlpQueryRequest>,
+) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
+    nlp_query_inner(
+        collection_id,
+        read_side,
+        read_api_key,
+        request,
+        PromptVersion::V1_1,
+    )
+}
+
+/// Shared SSE streaming logic for the nlp_query endpoint across prompt versions.
+fn nlp_query_inner(
+    collection_id: CollectionId,
+    read_side: Arc<ReadSide>,
+    read_api_key: ReadApiKey,
+    request: NlpQueryRequest,
+    prompt_version: PromptVersion,
 ) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
     let (event_sender, event_receiver) = mpsc::channel(100);
     let rx_stream = ReceiverStream::new(event_receiver);
@@ -81,8 +117,13 @@ async fn nlp_query_v1(
 
         let llm_service = read_side.get_llm_service();
 
+        let config = AdvancedAutoqueryConfig {
+            prompt_version,
+            ..Default::default()
+        };
+
         let state_machine = AdvancedAutoqueryStateMachine::new(
-            AdvancedAutoqueryConfig::default(),
+            config,
             llm_service,
             request.llm_config,
             collection_stats,

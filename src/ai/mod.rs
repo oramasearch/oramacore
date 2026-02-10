@@ -9,6 +9,7 @@ use strum_macros::Display;
 pub mod advanced_autoquery;
 pub mod answer;
 pub mod automatic_embeddings_selector;
+pub mod constraint_extractor;
 pub mod gpu;
 pub mod llms;
 pub mod ragat;
