@@ -5,7 +5,6 @@ mod collections;
 mod context;
 pub mod document_storage;
 mod index;
-mod logs;
 pub mod notify;
 mod search;
 pub mod sort;
@@ -14,14 +13,13 @@ use axum::extract::State;
 use duration_string::DurationString;
 use futures::Stream;
 pub use index::*;
-use oramacore_lib::hook_storage::{HookReader, HookReaderError, HookType};
+use oramacore_lib::hook_storage::{HookReaderError, HookType};
 
 pub use collection::CollectionStats;
 use duration_str::deserialize_duration;
 use notify::NotifierConfig;
-use orama_js_pool::{ExecOption, JSExecutor, OutputChannel};
+use orama_js_pool::OutputChannel;
 use oramacore_lib::shelves::ShelfId;
-use std::ops::Deref;
 use std::sync::Arc;
 use std::time::Duration;
 use std::{collections::HashMap, path::PathBuf};
@@ -47,9 +45,9 @@ use crate::ai::tools::{CollectionToolsRuntime, ToolError, ToolsRuntime};
 use crate::ai::training_sets::{TrainingDestination, TrainingSetInterface};
 use crate::ai::RemoteLLMProvider;
 use crate::auth::{JwtConfig, JwtManager};
+use crate::collection_manager::sides::logs::HookLogs;
 use crate::collection_manager::sides::read::collection::FilterableFieldsStats;
 pub use crate::collection_manager::sides::read::context::ReadSideContext;
-use crate::collection_manager::sides::read::logs::HookLogs;
 use crate::collection_manager::sides::read::notify::Notifier;
 use crate::collection_manager::sides::read::search::Search;
 use crate::lock::{OramaAsyncLock, OramaAsyncMutex};
@@ -62,6 +60,7 @@ use crate::types::{
 };
 use crate::types::{CollectionId, SearchParams};
 use crate::types::{IndexId, NLPSearchRequest};
+use crate::HooksConfig;
 use oramacore_lib::fs::BufferedFile;
 use oramacore_lib::generic_kv::{KVConfig, KV};
 use oramacore_lib::nlp::NLPService;
@@ -80,7 +79,8 @@ pub struct ReadSideConfig {
     pub analytics: Option<OramaCoreAnalyticConfig>,
     pub input: InputSideChannelType,
     pub config: IndexesConfig,
-
+    #[serde(default)]
+    pub hooks: HooksConfig,
     pub jwt: Option<JwtConfig>,
 }
 
@@ -200,6 +200,7 @@ impl ReadSide {
         .context("Cannot create document storage")?;
         let global_document_storage = Arc::new(document_storage);
 
+        let hooks_config = Arc::new(config.hooks);
         let insert_batch_commit_size = config.config.insert_batch_commit_size;
         let commit_interval = config.config.commit_interval;
         let force_commit = config.config.force_commit;
@@ -217,6 +218,7 @@ impl ReadSide {
             llm_service: llm_service.clone(),
             notifier,
             global_document_storage: global_document_storage.clone(),
+            hooks_config: hooks_config.clone(),
         };
 
         let read_info: Result<ReadInfo> = BufferedFile::open(data_dir.join("read.info"))
@@ -561,62 +563,32 @@ impl ReadSide {
             ReadApiKey::ApiKey(_) => None,
         };
 
-        let storage = collection.get_hook_storage();
-        let storage = storage.read("run_before_search").await;
-        let hook_content = storage.get_hook_content(HookType::BeforeSearch)?;
-        if let Some(hook_code) = hook_content {
-            // Hook signature: function beforeSearch(search_params, claim)
-            // - search_params: the search parameters that can be modified
-            // - claim: the extra JWT claims (object) or null if using plain API key
-            let mut js_executor: JSExecutor<
-                (SearchParams, Option<HashMap<String, Value>>),
-                Option<SearchParams>,
-            > = JSExecutor::try_new(
-                hook_code,
-                Some(vec![]),
-                Duration::from_millis(200),
-                true,
-                HookType::BeforeSearch.get_function_name().to_string(),
-            )
-            .await
-            .map_err(|e| {
-                ReadError::Generic(anyhow::anyhow!("Failed to create JS executor: {e}"))
-            })?;
+        // Hook signature: function beforeSearch(search_params, claim)
+        // - search_params: the search parameters that can be modified
+        // - claim: the extra JWT claims (object) or null if using plain API key
+        let hook_input = (request.search_params.clone(), claims.clone());
+        let log_sender = self.get_hook_logs().get_sender(&collection_id);
+        let result: Option<SearchParams> = collection
+            .run_hook(HookType::BeforeSearch, hook_input, log_sender)
+            .await?;
 
-            let logs = self.get_hook_logs();
-            let log_sender = logs.get_sender(&collection_id);
-
-            let hook_input = (request.search_params.clone(), claims.clone());
-            let output: Option<SearchParams> = js_executor
-                .exec(
-                    hook_input,
-                    log_sender,
-                    ExecOption {
-                        timeout: Duration::from_millis(1000),
-                        allowed_hosts: Some(Vec::new()),
-                    },
-                )
-                .await
-                .map_err(|e| {
-                    ReadError::Generic(anyhow::anyhow!("BeforeSearch hook failed: {e}"))
-                })?;
-
-            drop(js_executor);
-
-            if let Some(modified_params) = output {
-                info!("Search params modified by hook");
-                request.search_params = modified_params;
-            }
+        if let Some(modified_params) = result {
+            info!("Search params modified by hook");
+            request.search_params = modified_params;
         }
 
+        let log_sender = self.get_hook_logs().get_sender(&collection_id);
         let search = Search::new(
             &collection,
             // &self.global_document_storage,
             self.analytics_storage.as_ref(),
             request,
+            log_sender,
         );
 
-        search.execute().await
+        let search_result = search.execute().await?;
+
+        Ok(search_result)
     }
 
     pub async fn nlp_search(
@@ -834,21 +806,6 @@ impl ReadSide {
             self.tools.clone(),
             collection_id,
         ))
-    }
-
-    pub async fn get_hook_storage<'s>(
-        &'s self,
-        read_api_key: &ReadApiKey,
-        collection_id: CollectionId,
-    ) -> Result<HookReaderLock<'s>, ReadError> {
-        let collection = self
-            .collections
-            .get_collection(collection_id)
-            .await
-            .ok_or_else(|| ReadError::NotFound(collection_id))?;
-        collection.check_read_api_key(read_api_key, self.master_api_key)?;
-
-        Ok(HookReaderLock { collection })
     }
 
     pub fn get_hook_logs(&self) -> &HookLogs {
@@ -1128,18 +1085,6 @@ struct ReadInfoV1 {
 #[derive(Deserialize, Serialize, Debug)]
 enum ReadInfo {
     V1(ReadInfoV1),
-}
-
-pub struct HookReaderLock<'guard> {
-    collection: CollectionReadLock<'guard>,
-}
-
-impl Deref for HookReaderLock<'_> {
-    type Target = OramaAsyncLock<HookReader>;
-
-    fn deref(&self) -> &Self::Target {
-        self.collection.get_hook_storage()
-    }
 }
 
 #[cfg(test)]

@@ -8,8 +8,9 @@ use std::{
 use anyhow::{bail, Context, Result};
 use chrono::{DateTime, Utc};
 use futures::{future::join_all, FutureExt};
+use orama_js_pool::{ExecOptions, OutputChannel, Pool};
 use oramacore_lib::{
-    hook_storage::HookWriter,
+    hook_storage::{HookType, HookWriter},
     pin_rules::PinRulesWriter,
     shelves::{Shelf, ShelfId, ShelfOperation, ShelvesWriter},
 };
@@ -60,8 +61,9 @@ pub struct CollectionWriter {
 
     created_at: DateTime<Utc>,
 
-    hook: HookWriter,
+    js_pool: Pool,
 
+    hooks_writer: HookWriter,
     pin_rules_writer: OramaAsyncLock<PinRulesWriter>,
     shelves_writer: OramaAsyncLock<ShelvesWriter>,
 
@@ -92,6 +94,13 @@ impl CollectionWriter {
             .boxed()
         });
 
+        let js_pool = Pool::builder()
+            .with_evaluation_timeout(context.hooks_config.evaluation_timeout)
+            .with_execution_timeout(context.hooks_config.execution_timeout)
+            .with_domain_permission(context.hooks_config.to_domain_permission())
+            .build()
+            .await?;
+
         Ok(Self {
             id,
             description: req.description,
@@ -118,8 +127,9 @@ impl CollectionWriter {
 
             created_at: Utc::now(),
 
-            hook: HookWriter::try_new(data_dir.join("hooks"), send_hook_operation_cb)
+            hooks_writer: HookWriter::try_new(data_dir.join("hooks"), send_hook_operation_cb)
                 .context("Cannot create hook writer")?,
+            js_pool,
 
             pin_rules_writer: OramaAsyncLock::new("pin_rules_writer", PinRulesWriter::empty()?),
             shelves_writer: OramaAsyncLock::new("shelves_writer", ShelvesWriter::empty()?),
@@ -169,6 +179,44 @@ impl CollectionWriter {
 
         let hook_op_sender = context.op_sender.clone();
 
+        let hook_writer = HookWriter::try_new(
+            data_dir.join("hooks"),
+            Box::new(move |op| {
+                let hook_op_sender = hook_op_sender.clone();
+                async move {
+                    let _ = hook_op_sender
+                        .send(WriteOperation::Collection(
+                            id,
+                            CollectionWriteOperation::Hook(op),
+                        ))
+                        .await;
+                }
+                .boxed()
+            }),
+        )
+        .context("Cannot create hook writer")?;
+
+        let js_pool = Pool::builder()
+            .with_evaluation_timeout(context.hooks_config.execution_timeout)
+            .with_execution_timeout(context.hooks_config.execution_timeout)
+            .with_domain_permission(context.hooks_config.to_domain_permission())
+            .build()
+            .await?;
+
+        let hooks = hook_writer.list_hooks()?;
+        for (hook_type, code) in hooks {
+            if let Some(code) = code {
+                js_pool
+                    .add_module(hook_type.get_function_name(), code)
+                    .await
+                    .context(format!("Cannot load hook {hook_type:?} into pool"))?;
+                info!(
+                    "Loaded hook {:?} into pool for collection {}",
+                    hook_type, id
+                );
+            }
+        }
+
         Ok(Self {
             id,
             description,
@@ -194,23 +242,9 @@ impl CollectionWriter {
 
             created_at: dump.created_at,
 
-            hook: HookWriter::try_new(
-                data_dir.join("hooks"),
-                Box::new(move |op| {
-                    let hook_op_sender = hook_op_sender.clone();
-                    async move {
-                        let _ = hook_op_sender
-                            .send(WriteOperation::Collection(
-                                id,
-                                CollectionWriteOperation::Hook(op),
-                            ))
-                            .await;
-                    }
-                    .boxed()
-                }),
-            )
-            .context("Cannot create hook writer")?,
+            js_pool,
 
+            hooks_writer: hook_writer,
             pin_rules_writer: OramaAsyncLock::new(
                 "pin_rules_writer",
                 PinRulesWriter::try_new(data_dir.join("pin_rules"))
@@ -792,8 +826,82 @@ impl CollectionWriter {
         Ok(old)
     }
 
-    pub fn get_hook_storage(&self) -> &HookWriter {
-        &self.hook
+    pub async fn set_hook(&self, hook_type: HookType, code: String) -> Result<(), WriteError> {
+        self.js_pool
+            .add_module(hook_type.get_function_name(), code.clone())
+            .await
+            .map_err(|e| {
+                WriteError::HookExec(format!("Hook {hook_type:?} validation failed: {e}"))
+            })?;
+
+        self.hooks_writer.insert_hook(hook_type, code).await?;
+
+        Ok(())
+    }
+
+    pub async fn delete_hook(&self, hook_type: HookType) -> Result<(), WriteError> {
+        match self
+            .js_pool
+            .remove_module(hook_type.get_function_name())
+            .await
+        {
+            Ok(_) => {}
+            Err(orama_js_pool::RuntimeError::MissingModule(_)) => {
+                // Module doesn't exist treat it as a success
+            }
+            Err(e) => {
+                return Err(WriteError::HookExec(format!(
+                    "Hook {hook_type:?} delete failed: {e}"
+                )));
+            }
+        }
+
+        self.hooks_writer.delete_hook(hook_type).await?;
+
+        Ok(())
+    }
+
+    pub fn list_hooks(&self) -> Result<Vec<(HookType, Option<String>)>, WriteError> {
+        Ok(self.hooks_writer.list_hooks()?)
+    }
+
+    pub fn has_hook(&self, hook_type: HookType) -> Result<bool, WriteError> {
+        let is_present = self.hooks_writer.has_hook(hook_type);
+        Ok(is_present)
+    }
+
+    /// Run a hook if it exists in the pool
+    pub async fn run_hook<Input, Output>(
+        &self,
+        hook_type: HookType,
+        input: &Input,
+        log_sender: Option<Arc<tokio::sync::broadcast::Sender<(OutputChannel, String)>>>,
+    ) -> Result<Option<Output>, WriteError>
+    where
+        Input: orama_js_pool::TryIntoFunctionParameters + Send + Sync + 'static,
+        Output: serde::de::DeserializeOwned + Send + 'static,
+    {
+        let has_hook = self.hooks_writer.has_hook(hook_type);
+        if !has_hook {
+            return Ok(None);
+        }
+
+        let hook_name = hook_type.get_function_name();
+        let exec_opts = if let Some(sender) = log_sender {
+            ExecOptions::new().with_stdout_sender(sender)
+        } else {
+            ExecOptions::new()
+        };
+
+        let result: Option<Output> = self
+            .js_pool
+            .exec(hook_name, hook_name, input, exec_opts)
+            .await
+            .map_err(|e| {
+                WriteError::Generic(anyhow::anyhow!("Hook {hook_type:?} execution failed: {e}"))
+            })?;
+
+        Ok(result)
     }
 
     pub async fn insert_merchandising_pin_rule(

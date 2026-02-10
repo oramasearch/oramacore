@@ -89,6 +89,7 @@ impl CollectionsReader {
                 indexes_config.collection_commit,
                 global_offset,
             )
+            .await
             .with_context(|| format!("Cannot load {collection_id:?} collection"))?;
 
             info!("Collection {:?} loaded", collection_dir);
@@ -247,7 +248,8 @@ impl CollectionsReader {
             self.context.clone(),
             self.indexes_config.offload_field,
             self.indexes_config.collection_commit,
-        )?;
+        )
+        .await?;
 
         let mut guard = self.collections.write("create_collection").await;
 

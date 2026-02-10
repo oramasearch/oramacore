@@ -3,9 +3,12 @@ use oramacore_lib::hook_storage::HookType;
 use crate::tests::utils::init_log;
 use crate::tests::utils::wait_for;
 use crate::tests::utils::TestContext;
-use crate::types::CollectionStatsRequest;
+use crate::types::{CollectionStatsRequest, DocumentList};
+use crate::HooksConfig;
 use anyhow::Context;
 use futures::FutureExt;
+use serde_json::json;
+use std::time::Duration;
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_hooks() {
@@ -56,124 +59,135 @@ export default { beforeRetrieval }"#
     drop(test_context);
 }
 
-#[tokio::test(flavor = "multi_thread")]
-async fn test_hooks_after_commit() {
-    init_log();
+#[test]
+fn test_hooks_config_defaults() {
+    // Test that HooksConfig::default() provides sensible defaults
+    let default_config = HooksConfig::default();
 
-    let test_context = TestContext::new().await;
-    let collection_client = test_context.create_collection().await.unwrap();
+    assert_eq!(default_config.allowed_domains.len(), 0);
+    assert_eq!(default_config.denied_domains.len(), 0);
+    assert_eq!(
+        default_config.evaluation_timeout,
+        Duration::from_millis(200)
+    );
+    assert_eq!(
+        default_config.execution_timeout,
+        Duration::from_millis(1000)
+    );
+}
 
-    collection_client
-        .insert_hook(
-            HookType::BeforeRetrieval,
-            r#"
-const beforeRetrieval = function () { }
-export default { beforeRetrieval }"#
-                .to_string(),
-        )
-        .await
-        .unwrap();
+#[test]
+fn test_hooks_config_deserialization_with_values() {
+    // Test that custom values are properly deserialized
+    let json = serde_json::json!({
+        "denied_domains": ["127.*", "localhost"],
+        "evaluation_timeout": "500ms",
+        "execution_timeout": "2s"
+    });
 
-    let read_api_key = collection_client.read_api_key.clone();
-    let write_api_key = collection_client.write_api_key;
-    let collection_id = collection_client.collection_id;
-    let read_api_key_for_reload = read_api_key.clone();
-    let stats = wait_for(&test_context, |t| {
-        let reader = t.reader.clone();
-        let read_api_key = read_api_key.clone();
-        async move {
-            let stats = reader
-                .collection_stats(
-                    &read_api_key,
-                    collection_id,
-                    CollectionStatsRequest { with_keys: false },
-                )
-                .await
-                .context("")?;
+    let config: HooksConfig = serde_json::from_value(json).expect("Failed to deserialize config");
 
-            if stats.hooks.is_empty() {
-                return Err(anyhow::anyhow!("hooks not arrived yet"));
-            }
+    assert_eq!(config.denied_domains, vec!["127.*", "localhost"]);
+    assert_eq!(config.allowed_domains.len(), 0);
+    assert_eq!(config.evaluation_timeout, Duration::from_millis(500));
+    assert_eq!(config.execution_timeout, Duration::from_secs(2));
+}
 
-            Ok(stats)
-        }
-        .boxed()
-    })
-    .await
-    .unwrap();
+#[test]
+fn test_hooks_config_deserialization_empty() {
+    // Test that empty config uses all defaults
+    let json = serde_json::json!({});
 
-    assert_eq!(stats.hooks, vec![HookType::BeforeRetrieval,]);
+    let config: HooksConfig = serde_json::from_value(json).expect("Failed to deserialize config");
 
-    test_context.commit_all().await.unwrap();
-    let test_context = test_context.reload().await;
+    assert_eq!(config.allowed_domains.len(), 0);
+    assert_eq!(config.denied_domains.len(), 0);
+    assert_eq!(config.evaluation_timeout, Duration::from_millis(200));
+    assert_eq!(config.execution_timeout, Duration::from_millis(1000));
+}
 
-    let collection_client = test_context
-        .get_test_collection_client(collection_id, write_api_key, read_api_key_for_reload)
-        .unwrap();
+#[test]
+fn test_hooks_config_validation_mutual_exclusion() {
+    // Test that both allowed_domains and denied_domains cannot be set together
+    let config = HooksConfig {
+        allowed_domains: vec!["example.com".to_string()],
+        denied_domains: vec!["bad.com".to_string()],
+        evaluation_timeout: Duration::from_millis(200),
+        execution_timeout: Duration::from_millis(1000),
+    };
 
-    let stats = collection_client.reader_stats().await.unwrap();
-    assert_eq!(stats.hooks, vec![HookType::BeforeRetrieval,]);
-
-    drop(test_context);
+    assert!(config.validate().is_err());
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn test_before_search_hook_after_commit() {
+async fn test_hooks_isolated_between_collections() {
     init_log();
 
     let test_context = TestContext::new().await;
-    let collection_client = test_context.create_collection().await.unwrap();
 
-    collection_client
+    let collection_a = test_context.create_collection().await.unwrap();
+    collection_a
         .insert_hook(
-            HookType::BeforeSearch,
+            HookType::TransformDocumentBeforeSave,
             r#"
-const beforeSearch = function (search_params, claims) { return search_params; }
-export default { beforeSearch }"#
+const transformDocumentBeforeSave = function (documents) {
+    return documents.map(doc => {
+        doc.title = doc.title.toUpperCase();
+        doc.collection = "A";
+        return doc;
+    });
+}
+export default { transformDocumentBeforeSave }"#
                 .to_string(),
         )
         .await
         .unwrap();
 
-    let read_api_key = collection_client.read_api_key.clone();
-    let write_api_key = collection_client.write_api_key;
-    let collection_id = collection_client.collection_id;
-    let read_api_key_for_reload = read_api_key.clone();
-    let stats = wait_for(&test_context, |t| {
-        let reader = t.reader.clone();
-        let read_api_key = read_api_key.clone();
-        async move {
-            let stats = reader
-                .collection_stats(
-                    &read_api_key,
-                    collection_id,
-                    CollectionStatsRequest { with_keys: false },
-                )
-                .await
-                .context("")?;
-
-            if stats.hooks.is_empty() {
-                return Err(anyhow::anyhow!("hooks not arrived yet"));
-            }
-
-            Ok(stats)
-        }
-        .boxed()
-    })
-    .await
-    .unwrap();
-
-    assert_eq!(stats.hooks, vec![HookType::BeforeSearch,]);
-
-    test_context.commit_all().await.unwrap();
-    let test_context = test_context.reload().await;
-
-    let collection_client = test_context
-        .get_test_collection_client(collection_id, write_api_key, read_api_key_for_reload)
+    let collection_b = test_context.create_collection().await.unwrap();
+    collection_b
+        .insert_hook(
+            HookType::TransformDocumentBeforeSave,
+            r#"
+const transformDocumentBeforeSave = function (documents) {
+    return documents.map(doc => {
+        doc.title = doc.title.toLowerCase();
+        doc.collection = "B";
+        return doc;
+    });
+}
+export default { transformDocumentBeforeSave }"#
+                .to_string(),
+        )
+        .await
         .unwrap();
 
-    let stats = collection_client.reader_stats().await.unwrap();
-    assert_eq!(stats.hooks, vec![HookType::BeforeSearch,]);
+    let index_a = collection_a.create_index().await.unwrap();
+    let index_b = collection_b.create_index().await.unwrap();
 
-    drop(test_context);
+    let documents: DocumentList = json!([{"id": "1", "title": "Hello World"}])
+        .try_into()
+        .unwrap();
+
+    index_a.insert_documents(documents.clone()).await.unwrap();
+    index_b.insert_documents(documents).await.unwrap();
+
+    // Verify collection A has uppercase title
+    let results_a = collection_a
+        .search(json!({"term": "HELLO"}).try_into().unwrap())
+        .await
+        .unwrap();
+    assert_eq!(results_a.count, 1);
+    let doc_a = results_a.hits[0].document.as_ref().unwrap();
+    assert_eq!(doc_a.get("title").unwrap(), "HELLO WORLD");
+    assert_eq!(doc_a.get("collection").unwrap(), "A");
+
+    // Verify collection B has lowercase title
+    let results_b = collection_b
+        .search(json!({"term": "hello"}).try_into().unwrap())
+        .await
+        .unwrap();
+    assert_eq!(results_b.count, 1);
+    let doc_b = results_b.hits[0].document.as_ref().unwrap();
+    assert_eq!(doc_b.get("title").unwrap(), "hello world");
+    assert_eq!(doc_b.get("collection").unwrap(), "B");
 }

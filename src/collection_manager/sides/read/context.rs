@@ -6,6 +6,7 @@ use crate::{
     ai::llms::LLMService,
     collection_manager::sides::read::{document_storage::DocumentStorage, notify::Notifier},
     python::PythonService,
+    HooksConfig,
 };
 
 #[derive(Clone)]
@@ -15,4 +16,5 @@ pub struct ReadSideContext {
     pub llm_service: Arc<LLMService>,
     pub notifier: Option<Arc<Notifier>>,
     pub global_document_storage: Arc<DocumentStorage>,
+    pub hooks_config: Arc<HooksConfig>,
 }
