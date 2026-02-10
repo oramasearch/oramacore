@@ -4681,9 +4681,9 @@ checksum = "04744f49eae99ab78e0d5c0b603ab218f515ea8cfe5a456d7629ad883a3b6e7d"
 
 [[package]]
 name = "orama-js-pool"
-version = "0.4.1"
+version = "0.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f8bc5a8a2b555f411f9613bf4ee41d39524c63753db259dca7844e7548b73744"
+checksum = "596d036b918d6d492ed38bd9d11947a6f377a9844d209acf00fcf548f0e3967a"
 dependencies = [
  "deadpool",
  "deno_console",
