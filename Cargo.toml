@@ -1,6 +1,6 @@
 [package]
 name = "oramacore"
-version = "1.2.13"
+version = "1.2.20"
 edition = "2021"
 publish = false
 
@@ -54,7 +54,7 @@ strum_macros = "0.26.4"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 
-oramacore_lib = "0.2.3"
+oramacore_lib = "0.3.0"
 
 # JS
 oxc_parser = "0.47.1"
@@ -75,7 +75,7 @@ backoff = { version = "0.4.0", features = ["tokio"] }
 debug_panic = "0.2.1"
 async-openai = "0.28.0"
 
-orama-js-pool = { version = "0.2.1" }
+orama-js-pool = "0.4.1"
 sentry = "0.37.0"
 sentry-tracing = "0.37.0"
 arrayvec = "0.7.6"

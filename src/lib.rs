@@ -1,4 +1,4 @@
-use std::{collections::HashMap, path::PathBuf, sync::Arc};
+use std::{collections::HashMap, path::PathBuf, sync::Arc, time::Duration};
 
 use ai::{
     automatic_embeddings_selector::AutomaticEmbeddingsSelector, gpu::LocalGPUManager,
@@ -11,9 +11,11 @@ use collection_manager::sides::{
     write::{WriteSide, WriteSideConfig},
     InputSideChannelType, OutputSideChannelType,
 };
+use duration_str::deserialize_duration;
 use metrics_exporter_prometheus::PrometheusBuilder;
+use orama_js_pool::{self, DomainPermission};
 use oramacore_lib::nlp;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use tracing::level_filters::LevelFilter;
 #[allow(unused_imports)]
 use tracing::{info, warn};
@@ -69,6 +71,73 @@ where
     }
 
     Ok(ret)
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HooksConfig {
+    /// List of allowed domains for external HTTP calls from hooks
+    #[serde(default)]
+    pub allowed_domains: Vec<String>,
+
+    /// List of denied domains for external HTTP calls from hooks
+    #[serde(default)]
+    pub denied_domains: Vec<String>,
+
+    /// Timeout for hook initialization/builder
+    #[serde(
+        deserialize_with = "deserialize_duration",
+        default = "default_hook_evaluation_timeout"
+    )]
+    pub evaluation_timeout: Duration,
+
+    /// Timeout for hook execution
+    #[serde(
+        deserialize_with = "deserialize_duration",
+        default = "default_hook_execution_timeout"
+    )]
+    pub execution_timeout: Duration,
+}
+
+fn default_hook_evaluation_timeout() -> Duration {
+    Duration::from_millis(200)
+}
+
+fn default_hook_execution_timeout() -> Duration {
+    Duration::from_millis(1000)
+}
+
+impl Default for HooksConfig {
+    fn default() -> Self {
+        Self {
+            allowed_domains: vec![],
+            denied_domains: vec![],
+            evaluation_timeout: Duration::from_millis(200),
+            execution_timeout: Duration::from_millis(1000),
+        }
+    }
+}
+
+impl HooksConfig {
+    /// Validates that both allowed_domains and denied_domains are not set at the same time
+    pub fn validate(&self) -> Result<()> {
+        if !self.allowed_domains.is_empty() && !self.denied_domains.is_empty() {
+            anyhow::bail!(
+                "HooksConfig: Cannot set both allowed_domains and denied_domains. Please configure only one."
+            );
+        }
+        Ok(())
+    }
+
+    /// Converts the HooksConfig into a DomainPermission for the JS pool
+    pub fn to_domain_permission(&self) -> DomainPermission {
+        if !self.allowed_domains.is_empty() {
+            DomainPermission::Allow(self.allowed_domains.clone())
+        } else if !self.denied_domains.is_empty() {
+            DomainPermission::Deny(self.denied_domains.clone())
+        } else {
+            DomainPermission::AllowAll
+        }
+    }
 }
 
 #[derive(Deserialize, Clone)]
@@ -149,6 +218,20 @@ pub async fn build_orama(
             anyhow::bail!("Failed to create LLMService: {err}. Please check your configuration.");
         }
     };
+
+    // Validate hooks configuration
+    #[cfg(feature = "writer")]
+    config
+        .writer_side
+        .hooks
+        .validate()
+        .context("Invalid writer hooks configuration")?;
+    #[cfg(feature = "reader")]
+    config
+        .reader_side
+        .hooks
+        .validate()
+        .context("Invalid reader hooks configuration")?;
 
     #[cfg(feature = "writer")]
     let writer_sender_config: Option<OutputSideChannelType> =

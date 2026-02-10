@@ -4,7 +4,8 @@ mod collections;
 pub mod document_storage;
 mod embedding;
 pub mod index;
-use oramacore_lib::hook_storage::{HookWriter, HookWriterError};
+
+use oramacore_lib::hook_storage::{HookType, HookWriterError};
 use oramacore_lib::nlp::NLPService;
 use oramacore_lib::shelves::ShelvesWriterError;
 use thiserror::Error;
@@ -14,7 +15,6 @@ use std::borrow::Cow;
 use std::collections::HashSet;
 use std::{
     collections::HashMap,
-    ops::Deref,
     path::PathBuf,
     sync::{
         atomic::{AtomicU32, Ordering},
@@ -24,8 +24,8 @@ use std::{
 };
 
 use super::{
-    system_prompts::SystemPromptInterface, Offset, OperationSender, OperationSenderCreator,
-    OutputSideChannelType,
+    logs::HookLogs, system_prompts::SystemPromptInterface, Offset, OperationSender,
+    OperationSenderCreator, OutputSideChannelType,
 };
 
 use anyhow::{Context, Result};
@@ -71,6 +71,7 @@ use crate::{
         IndexEmbeddingsCalculation, IndexId, InsertDocumentsResult, LanguageDTO,
         ReplaceIndexRequest, UpdateDocumentRequest, UpdateDocumentsResult, WriteApiKey,
     },
+    HooksConfig,
 };
 use oramacore_lib::fs::BufferedFile;
 use oramacore_lib::generic_kv::{KVConfig, KVWriteOperation, KV};
@@ -96,8 +97,10 @@ pub enum WriteError {
     IndexNotFound(CollectionId, IndexId),
     #[error("Temp index {1} doesn't exist in collection {0}")]
     TempIndexNotFound(CollectionId, IndexId),
-    #[error("Error in hook")]
-    HookWriterError(#[from] HookWriterError),
+    #[error("Hook error: {0}")]
+    HookExec(String),
+    #[error("Hook storage error: {0}")]
+    HookError(#[from] HookWriterError),
     #[error("Error in pin rule")]
     PinRulesError(#[from] PinRulesWriterError),
     #[error("Error in shelf")]
@@ -136,7 +139,8 @@ pub struct CollectionsWriterConfig {
 #[derive(Deserialize, Clone)]
 pub struct WriteSideConfig {
     pub master_api_key: ApiKey,
-    // pub hooks: HooksRuntimeConfig,
+    #[serde(default)]
+    pub hooks: HooksConfig,
     pub output: OutputSideChannelType,
     pub config: CollectionsWriterConfig,
     pub jwt: Option<JwtConfig>,
@@ -158,6 +162,8 @@ pub struct WriteSide {
     master_api_key: ApiKey,
 
     context: WriteSideContext,
+
+    hook_logs: HookLogs,
 
     stop_sender: tokio::sync::broadcast::Sender<()>,
     stop_done_receiver: OramaAsyncLock<tokio::sync::mpsc::Receiver<()>>,
@@ -191,6 +197,7 @@ impl WriteSide {
         python_service: Arc<PythonService>,
     ) -> Result<Arc<Self>> {
         let master_api_key = config.master_api_key;
+        let hooks_config = Arc::new(config.hooks);
         let collections_writer_config = config.config;
         let data_dir = collections_writer_config.data_dir.clone();
 
@@ -234,6 +241,7 @@ impl WriteSide {
             automatic_embeddings_selector,
             llm_service,
             global_document_storage: document_storage.clone(),
+            hooks_config: hooks_config.clone(),
         };
 
         let kv_op_sender = context.op_sender.clone();
@@ -283,6 +291,7 @@ impl WriteSide {
             tools,
             kv,
             context: context.clone(),
+            hook_logs: HookLogs::new(),
             stop_sender,
             stop_done_receiver: OramaAsyncLock::new("stop_done_receiver", stop_done_receiver),
             write_operation_counter: AtomicU32::new(0),
@@ -755,11 +764,74 @@ impl WriteSide {
         });
 
         debug!("Inserting documents {}", document_count);
+
+        for doc in document_list.0.iter_mut() {
+            Self::ensure_document_id(doc);
+        }
+
+        let has_hook_transform_before_save =
+            collection.has_hook(HookType::TransformDocumentBeforeSave)?;
+
+        // Wrap original documents in Arc to avoid cloning
+        let original_documents = Arc::new(document_list);
+
+        let document_to_store = if has_hook_transform_before_save {
+            // Hook signature: function transformDocumentBeforeSave(documents)
+            // - documents: the list of documents to be transformed before storage
+            let hook_input = vec![(*original_documents).clone()];
+
+            let log_sender = self.get_hook_logs().get_sender(&collection_id);
+            let result: Option<DocumentList> = collection
+                .run_hook(
+                    HookType::TransformDocumentBeforeSave,
+                    &hook_input,
+                    log_sender,
+                )
+                .await?;
+
+            if let Some(modified_documents) = result {
+                if modified_documents.len() != original_documents.len() {
+                    return Err(anyhow::anyhow!(
+                        "Documents cannot be added or removed in Hook: expected {}, got {}",
+                        original_documents.len(),
+                        modified_documents.len()
+                    )
+                    .into());
+                }
+
+                // Validate that document IDs remain in the same order
+                for (i, (original, modified)) in original_documents
+                    .0
+                    .iter()
+                    .zip(modified_documents.0.iter())
+                    .enumerate()
+                {
+                    let original_id = original.inner.get("id");
+                    let modified_id = modified.inner.get("id");
+
+                    if original_id != modified_id {
+                        return Err(anyhow::anyhow!(
+                            "Document IDs cannot be changed or reordered in Hook: document at position {i} has id changed from {original_id:?} to {modified_id:?}"
+                        )
+                        .into());
+                    }
+                }
+
+                info!("Documents modified by TransformDocumentBeforeSave hook and validated");
+                Arc::new(modified_documents)
+            } else {
+                original_documents.clone()
+            }
+        } else {
+            original_documents.clone()
+        };
+
+        debug!("Inserting documents {}", document_count);
         let collection_document_storage = collection.get_document_storage();
         let doc_ids = self
             .add_documents_to_storage(
                 collection_document_storage,
-                &mut document_list,
+                document_to_store,
                 collection_id,
                 target_index_id,
             )
@@ -769,7 +841,7 @@ impl WriteSide {
 
         debug!("Looking for new fields...");
         index
-            .add_fields_if_needed(&document_list)
+            .add_fields_if_needed(&original_documents)
             .await
             .context("Cannot add fields if needed")?;
         debug!("Done");
@@ -779,7 +851,7 @@ impl WriteSide {
 
         debug!("Processing documents {}", document_count);
         let result = self
-            .inner_process_documents(collection_id, index_id, document_list, doc_ids)
+            .inner_process_documents(collection_id, index_id, original_documents, doc_ids)
             .await
             .context("Cannot process documents")?;
         info!("All documents are inserted: {}", document_count);
@@ -876,24 +948,10 @@ impl WriteSide {
             .documents
             .into_iter()
             .map(|mut doc| {
-                let doc_id_str = doc.get("id").and_then(|v| v.as_str());
-                let doc_id_str = if let Some(doc_id_str) = doc_id_str {
-                    if doc_id_str.is_empty() {
-                        cuid2::create_id()
-                    } else {
-                        doc_id_str.to_string()
-                    }
-                } else {
-                    cuid2::create_id()
-                };
                 // Ensure the document contains a valid id
                 // NB: this overwrite the previous id if it is not a string
                 // TODO: is it correct?
-                doc.inner.insert(
-                    "id".to_string(),
-                    serde_json::Value::String(doc_id_str.clone()),
-                );
-
+                let doc_id_str = Self::ensure_document_id(&mut doc);
                 (doc_id_str, doc)
             })
             .collect();
@@ -912,6 +970,11 @@ impl WriteSide {
 
         let mut index_operation_batch = Vec::with_capacity(document_count * 10);
         let mut docs_to_remove = Vec::with_capacity(document_count);
+
+        // Get the hook for transforming documents before save
+        let has_hook_transform_before_save =
+            collection.has_hook(HookType::TransformDocumentBeforeSave)?;
+        let log_sender = self.get_hook_logs().get_sender(&collection_id);
 
         let mut doc_stream = collection_document_storage
             .stream_documents(document_ids)
@@ -960,11 +1023,48 @@ impl WriteSide {
             if let Some(doc_id_str) = document_ids_map.get(&doc_id) {
                 if let Ok(v) = serde_json::from_str(doc.inner.get()) {
                     if let Some(delta) = documents.remove(doc_id_str) {
-                        let new_document = merge(v, delta);
+                        let mut document_for_storage = merge(v, delta);
+
+                        // Apply transformDocumentBeforeSave hook if present
+                        let mut document_for_indexing: Option<Document> = None;
+                        if has_hook_transform_before_save {
+                            // Clone for hook input
+                            let hook_input = document_for_storage.clone();
+                            let document_list = DocumentList(vec![hook_input]);
+                            let hook_params = vec![document_list];
+
+                            let output: Option<DocumentList> = collection
+                                .run_hook(
+                                    HookType::TransformDocumentBeforeSave,
+                                    &hook_params,
+                                    log_sender.clone(),
+                                )
+                                .await?;
+
+                            if let Some(mut modified_documents) = output {
+                                if modified_documents.len() != 1 {
+                                    return Err(anyhow::anyhow!(
+                                        "Documents cannot be added or removed in Hook: expected 1, got {}",
+                                        modified_documents.len()
+                                    )
+                                    .into());
+                                }
+
+                                info!("Document modified by hook and validated");
+                                let doc = document_for_storage;
+                                document_for_storage = modified_documents.0.remove(0);
+                                document_for_indexing = Some(doc);
+                            }
+                        };
+
+                        // If hook didn't modify the document (or no hook), clone for indexing
+                        let document_for_indexing =
+                            document_for_indexing.unwrap_or_else(|| document_for_storage.clone());
 
                         let doc_id = collection_document_storage.get_next_document_id();
 
-                        let doc_str = serde_json::to_string(&doc.inner)
+                        // Serialize the hook-modified document for storage
+                        let doc_str = serde_json::to_string(&document_for_storage)
                             .context("Cannot serialize document")?;
                         collection_document_storage
                             .insert_many(&[(
@@ -982,7 +1082,7 @@ impl WriteSide {
                                         doc_id,
                                         doc_id_str: doc_id_str.clone(),
                                         doc: DocumentToInsert(
-                                            new_document
+                                            document_for_storage
                                                 .clone()
                                                 .into_raw(format!("{target_index_id}:{doc_id_str}"))
                                                 .expect("Cannot get raw document"),
@@ -993,7 +1093,7 @@ impl WriteSide {
                             .await
                             .context("Cannot send document storage operation")?;
 
-                        let doc_id_str = new_document
+                        let doc_id_str = document_for_indexing
                             .inner
                             .get("id")
                             .context("Document does not have an id")?
@@ -1005,7 +1105,7 @@ impl WriteSide {
                             .process_new_document(
                                 doc_id,
                                 doc_id_str,
-                                new_document,
+                                document_for_indexing,
                                 &mut index_operation_batch,
                             )
                             .await
@@ -1149,10 +1249,14 @@ impl WriteSide {
         Ok(collection.as_dto().await)
     }
 
+    pub fn get_hook_logs(&self) -> &HookLogs {
+        &self.hook_logs
+    }
+
     async fn add_documents_to_storage(
         self: &WriteSide,
         collection_document_storage: &CollectionDocumentStorage,
-        document_list: &mut DocumentList,
+        document_list: Arc<DocumentList>,
         collection_id: CollectionId,
         target_index_id: IndexId,
     ) -> Result<Vec<DocumentId>> {
@@ -1164,7 +1268,7 @@ impl WriteSide {
         let mut insert_document_batch = Vec::with_capacity(document_count);
         let mut doc_ids = Vec::with_capacity(document_count);
         let mut docs = Vec::with_capacity(batch_size);
-        for (index, doc) in document_list.0.iter_mut().enumerate() {
+        for (index, doc) in document_list.0.iter().enumerate() {
             if index % 100 == 0 {
                 trace!("Processing document {}/{}", index, document_count);
             }
@@ -1173,7 +1277,7 @@ impl WriteSide {
                 collection_document_storage
                     .insert_many(&docs)
                     .await
-                    .context("Cannot inser document into document storage")?;
+                    .context("Cannot insert document into document storage")?;
                 docs.clear();
 
                 insert_document_batch.push(WriteOperation::Collection(
@@ -1185,25 +1289,13 @@ impl WriteSide {
                 batch = Vec::with_capacity(batch_size);
             }
 
-            // We try to guess the document id from the document
-            // Eventually, we generate a new one
-            let doc_id_str = doc.get("id").and_then(|v| v.as_str());
-            let doc_id_str = if let Some(doc_id_str) = doc_id_str {
-                if doc_id_str.is_empty() {
-                    cuid2::create_id()
-                } else {
-                    doc_id_str.to_string()
-                }
-            } else {
-                cuid2::create_id()
-            };
-            // Ensure the document contains a valid id
-            // NB: this overwrite the previous id if it is not a string
-            // TODO: is it correct?
-            doc.inner.insert(
-                "id".to_string(),
-                serde_json::Value::String(doc_id_str.clone()),
-            );
+            // Extract the document ID string from the document
+            // The ID should already be set if we went through the hook path
+            let doc_id_str = doc
+                .get("id")
+                .and_then(|v| v.as_str())
+                .expect("Document should have a valid ID at this point")
+                .to_string();
 
             let doc_id = collection_document_storage.get_next_document_id();
             doc_ids.push(doc_id);
@@ -1236,7 +1328,7 @@ impl WriteSide {
             collection_document_storage
                 .insert_many(&docs)
                 .await
-                .context("Cannot inser document into document storage")?;
+                .context("Cannot insert document into document storage")?;
         }
 
         trace!("Sending documents");
@@ -1253,7 +1345,7 @@ impl WriteSide {
         &self,
         collection_id: CollectionId,
         index_id: IndexId,
-        document_list: DocumentList,
+        document_list: Arc<DocumentList>,
         doc_ids: Vec<DocumentId>,
     ) -> Result<InsertDocumentsResult, WriteError> {
         let mut result = InsertDocumentsResult {
@@ -1281,7 +1373,7 @@ impl WriteSide {
 
         let mut index_operation_batch = Vec::with_capacity(document_count * 10);
         let mut docs_to_remove = Vec::with_capacity(document_count);
-        for (i, doc) in document_list.0.into_iter().enumerate() {
+        for (i, doc) in document_list.0.iter().enumerate() {
             if i % 100 == 0 {
                 info!("Processing document {}/{}", i, document_count);
             }
@@ -1329,7 +1421,12 @@ impl WriteSide {
                 .to_string();
 
             match index
-                .process_new_document(doc_id, doc_id_str.clone(), doc, &mut index_operation_batch)
+                .process_new_document(
+                    doc_id,
+                    doc_id_str.clone(),
+                    doc.clone(),
+                    &mut index_operation_batch,
+                )
                 .await
                 .context("Cannot process document")
             {
@@ -1444,15 +1541,6 @@ impl WriteSide {
         ))
     }
 
-    pub async fn get_hooks_storage<'s>(
-        &'s self,
-        write_api_key: WriteApiKey,
-        collection_id: CollectionId,
-    ) -> Result<HookWriterLock<'s>, WriteError> {
-        let collection = self.get_collection(collection_id, write_api_key).await?;
-        Ok(HookWriterLock { collection })
-    }
-
     pub async fn get_tools_manager(
         &self,
         write_api_key: WriteApiKey,
@@ -1512,6 +1600,32 @@ impl WriteSide {
         }
 
         Ok(())
+    }
+
+    /// Extracts or generates a document ID from a document.
+    /// If the document has no 'id' field or the 'id' is empty, generates a new ID using cuid2.
+    fn extract_or_generate_doc_id(doc: &Document) -> String {
+        let doc_id_str = doc.get("id").and_then(|v| v.as_str());
+        if let Some(doc_id_str) = doc_id_str {
+            if doc_id_str.is_empty() {
+                cuid2::create_id()
+            } else {
+                doc_id_str.to_string()
+            }
+        } else {
+            cuid2::create_id()
+        }
+    }
+
+    /// Ensures a document has a valid 'id' field by extracting or generating one,
+    /// and inserting it back into the document. Returns the ID as a String.
+    fn ensure_document_id(doc: &mut Document) -> String {
+        let doc_id_str = Self::extract_or_generate_doc_id(doc);
+        doc.inner.insert(
+            "id".to_string(),
+            serde_json::Value::String(doc_id_str.clone()),
+        );
+        doc_id_str
     }
 }
 
@@ -1635,17 +1749,6 @@ fn default_temp_index_cleanup_config() -> TempIndexCleanupConfig {
     TempIndexCleanupConfig {
         cleanup_interval: Duration::from_secs(3600), // 1 hour
         max_age: Duration::from_secs(43200),         // 12 hours
-    }
-}
-
-pub struct HookWriterLock<'guard> {
-    collection: CollectionReadLock<'guard>,
-}
-impl Deref for HookWriterLock<'_> {
-    type Target = HookWriter;
-
-    fn deref(&self) -> &Self::Target {
-        self.collection.get_hook_storage()
     }
 }
 

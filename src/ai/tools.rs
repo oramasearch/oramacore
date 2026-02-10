@@ -2,7 +2,7 @@ use std::{sync::Arc, time::Duration};
 
 use anyhow::{Context, Result};
 use async_openai::types::{ChatCompletionRequestMessage, FunctionObject, FunctionObjectArgs};
-use orama_js_pool::{ExecOption, JSExecutor, JSRunnerError};
+use orama_js_pool::{DomainPermission, ExecOptions, RuntimeError, Worker};
 use oramacore_lib::generic_kv::KV;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -53,7 +53,7 @@ pub enum ToolError {
     #[error("Tool {1} from collection {1} goes in timeout")]
     ExecutionTimeout(CollectionId, String),
     #[error("Tool {1} from collection {1} exited with this error: {2:?}")]
-    ExecutionError(CollectionId, String, JSRunnerError),
+    ExecutionError(CollectionId, String, RuntimeError),
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -276,26 +276,25 @@ impl ToolsRuntime {
                             })?;
 
                         let function_name = full_tool.id.clone();
-                        let mut executor = JSExecutor::try_new(
-                            code,
-                            Some(vec![]),
-                            Duration::from_millis(500), // @todo: make this configurable
-                            true,
-                            function_name.clone(),
-                        )
-                        .await
-                        .map_err(|e| ToolError::ExecutionError(collection_id, function_name, e))?;
+                        let mut worker = Worker::builder()
+                            .with_domain_permission(DomainPermission::DenyAll)
+                            .with_evaluation_timeout(Duration::from_millis(500))
+                            .with_execution_timeout(Duration::from_millis(500))
+                            .add_module(&function_name, code)
+                            .build()
+                            .await
+                            .map_err(|e| {
+                                ToolError::ExecutionError(collection_id, function_name.clone(), e)
+                            })?;
 
-                        // The JSExecutor call can easily fail under different circumstances.
+                        // The Worker exec can easily fail under different circumstances.
                         // We need to handle this error and send it back to the main thread.
-                        let output: Result<Value, JSRunnerError> = executor
+                        let output: Result<Value, RuntimeError> = worker
                             .exec(
-                                arguments_as_json_value,
-                                None,
-                                ExecOption {
-                                    timeout: Duration::from_secs(3), // @todo: make this configurable
-                                    allowed_hosts: Some(vec![]), // @todo: make this configurable
-                                },
+                                &function_name,
+                                &function_name,
+                                &arguments_as_json_value,
+                                ExecOptions::new(),
                             )
                             .await;
 

@@ -10,6 +10,7 @@ log:
     levels:
         oramacore: info
         oramacore_lib: info
+        orama_js_pool: info
 
 writer_side:
     output:
@@ -25,13 +26,17 @@ writer_side:
         # producer_name: write
 
     hooks:
-        select_embeddings_properties:
-            check_interval: 60s
-            max_idle_time: 20s
-            instances_count_per_code: 3
-            queue_capacity: 100
-            max_execution_time: 1s
-            max_startup_time: 100ms
+        # Domain restrictions for hook HTTP calls (mutually exclusive):
+        # 'denied_domains' to blocklist, 'allowed_domains' to allowlist
+        # It supports also ip wildcards: 10.0.0.*
+        # denied_domains: 
+        #     - "example.org"
+        # allowed_domains:
+        #     - "api.example.com"
+        # Timeout for hook JavaScript runtime to initialize
+        evaluation_timeout: 200ms
+        # Timeout for hook execution 
+        execution_timeout: 1s
 
     # Replace the following value with your own API key
     master_api_key: my-master-api-key
@@ -119,6 +124,18 @@ reader_side:
             # group by 2 ^ 4 seconds
             slot_size_exp: 4
 
+    hooks:
+        # Domain restrictions for hook HTTP calls (mutually exclusive):
+        # 'denied_domains' to blocklist, 'allowed_domains' to allowlist
+        # It supports also ip wildcards: 10.0.0.*
+        # denied_domains: 
+        #     - "example.org"
+        # allowed_domains:
+        #     - "api.example.com"
+        # Timeout for hook JavaScript runtime to initialize
+        evaluation_timeout: 200ms
+        # Timeout for hook execution 
+        execution_timeout: 1s
 
     # Uncomment to allow analytics
     analytics:

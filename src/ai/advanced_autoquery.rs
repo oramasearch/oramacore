@@ -2,11 +2,11 @@ use anyhow::{Context, Result};
 use axum::extract::State;
 use futures::{future::join_all, Stream, StreamExt};
 use llm_json::repair_json;
-use orama_js_pool::{ExecOption, OutputChannel};
+use orama_js_pool::{ExecOptions, OutputChannel};
 use regex::Regex;
 use serde::{self, Deserialize, Serialize};
+use std::collections::HashMap;
 use std::sync::Arc;
-use std::{collections::HashMap, time::Duration};
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 
@@ -632,21 +632,17 @@ impl AdvancedAutoQuery {
 
             async move {
                 let search_params = tracked_query.search_params.clone();
-                let hook_storage = read_side
-                    .get_hook_storage(read_api_key, collection_id)
+                let collection = read_side
+                    .get_collection(collection_id, read_api_key)
                     .await?;
-                let lock = hook_storage.read("execute_mapped_searches").await;
+                let js_pool = collection.get_js_pool();
                 let search_params = run_before_retrieval(
-                    &lock,
+                    js_pool,
                     search_params.clone(),
                     log_sender,
-                    ExecOption {
-                        allowed_hosts: Some(vec![]),
-                        timeout: Duration::from_millis(500),
-                    },
+                    ExecOptions::new(),
                 )
                 .await?;
-                drop(lock);
 
                 let search_result = read_side
                     .search(

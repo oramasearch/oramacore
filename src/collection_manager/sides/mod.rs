@@ -1,3 +1,4 @@
+pub mod logs;
 mod operation;
 pub mod read;
 pub mod system_prompts;

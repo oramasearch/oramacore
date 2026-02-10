@@ -1,7 +1,6 @@
 use futures::TryFutureExt;
 use llm_json::{repair_json, JsonRepairError};
-use orama_js_pool::{ExecOption, JSRunnerError, OutputChannel};
-use oramacore_lib::hook_storage::HookReaderError;
+use orama_js_pool::{ExecOptions, OutputChannel, RuntimeError};
 use std::{collections::HashMap, sync::Arc, time::Duration};
 use thiserror::Error;
 use tokio::sync::mpsc::error::SendError;
@@ -53,10 +52,12 @@ pub enum AnswerError {
     ReadError(#[from] ReadError),
     #[error("channel is closed: {0}")]
     ChannelClosed(#[from] SendError<AnswerEvent>),
-    #[error("Hook read error: {0:?}")]
-    HookError(#[from] HookReaderError),
+    #[error("Failed to execute before retrieval hook: {0}")]
+    BeforeRetrievalHookError(String),
+    #[error("Failed to execute before answer hook: {0}")]
+    BeforeAnswerHookError(String),
     #[error("JS run error: {0:?}")]
-    JSError(#[from] JSRunnerError),
+    JSError(#[from] RuntimeError),
     #[error("Failed to get title: {0:?}")]
     TitleError(#[from] TitleError),
 }
@@ -189,22 +190,18 @@ impl Answer {
                 group_by: None,
             };
 
-            let hook_storage = self
+            let collection = self
                 .read_side
-                .get_hook_storage(&self.read_api_key, self.collection_id)
+                .get_collection(self.collection_id, &self.read_api_key)
                 .await?;
-            let lock = hook_storage.read("answer").await;
+            let js_pool = collection.get_js_pool();
             let params = run_before_retrieval(
-                &lock,
+                js_pool,
                 params.clone(),
                 log_sender.clone(),
-                ExecOption {
-                    allowed_hosts: Some(vec![]),
-                    timeout: Duration::from_millis(500),
-                },
+                ExecOptions::new().with_timeout(Duration::from_millis(500)),
             )
             .await?;
-            drop(lock);
 
             let result = self
                 .read_side
@@ -237,22 +234,18 @@ impl Answer {
             ("context".to_string(), search_result_str.clone()),
         ];
 
-        let hook_storage = self
+        let collection = self
             .read_side
-            .get_hook_storage(&self.read_api_key, self.collection_id)
+            .get_collection(self.collection_id, &self.read_api_key)
             .await?;
-        let lock = hook_storage.read("answer").await;
+        let js_pool = collection.get_js_pool();
         let (variables, system_prompt) = run_before_answer(
-            &lock,
+            js_pool,
             (variables, system_prompt),
             log_sender,
-            ExecOption {
-                allowed_hosts: Some(vec![]),
-                timeout: Duration::from_millis(500),
-            },
+            ExecOptions::new().with_timeout(Duration::from_millis(500)),
         )
         .await?;
-        drop(lock);
 
         info!("Variables for LLM: {:?}", variables);
         let answer_stream = llm_service
@@ -539,22 +532,18 @@ impl Answer {
             group_by: None,
         };
 
-        let hook_storage = self
+        let collection = self
             .read_side
-            .get_hook_storage(&self.read_api_key, self.collection_id)
+            .get_collection(self.collection_id, &self.read_api_key)
             .await?;
-        let lock = hook_storage.read("run_before_retrieval").await;
+        let js_pool = collection.get_js_pool();
         let params = run_before_retrieval(
-            &lock,
+            js_pool,
             params.clone(),
             log_sender.clone(),
-            ExecOption {
-                allowed_hosts: Some(vec![]),
-                timeout: Duration::from_millis(500),
-            },
+            ExecOptions::new().with_timeout(Duration::from_millis(500)),
         )
         .await?;
-        drop(lock);
 
         let result = match self
             .read_side
