@@ -4783,7 +4783,9 @@ dependencies = [
 
 [[package]]
 name = "oramacore_lib"
-version = "0.2.3"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "269cec2ad13a94f8722a4d8435302ead055a158fcebb1dea0c9423d2885ebddd"
 dependencies = [
  "anyhow",
  "atomic-write-file",
@@ -4809,7 +4811,6 @@ dependencies = [
  "serde",
  "serde-big-array",
  "serde_json",
- "smallvec",
  "text-splitter",
  "thiserror 2.0.17",
  "tiktoken-rs",
@@ -6943,9 +6944,6 @@ name = "smallvec"
 version = "1.15.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "67b1b7a3b5fe4f1376887184045fcf45c69e92af734b7aaddc05fb777b6fbd03"
-dependencies = [
- "serde",
-]
 
 [[package]]
 name = "smawk"
