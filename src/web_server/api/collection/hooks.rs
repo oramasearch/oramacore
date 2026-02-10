@@ -1,4 +1,4 @@
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::BTreeMap, sync::Arc};
 
 use axum::{
     extract::{Path, State},
@@ -88,7 +88,7 @@ async fn list_hook_v0(
 
     let hooks = collection.list_hooks()?;
 
-    let output: HashMap<_, _> = hooks.into_iter().collect();
+    let output: BTreeMap<_, _> = hooks.into_iter().collect();
 
     Ok(Json(json!({ "hooks": output })))
 }
