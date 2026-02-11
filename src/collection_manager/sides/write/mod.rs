@@ -776,9 +776,11 @@ impl WriteSide {
         let original_documents = Arc::new(document_list);
 
         let document_to_store = if has_hook_transform_before_save {
-            // Hook signature: function transformDocumentBeforeSave(documents)
+            // Hook signature: function transformDocumentBeforeSave(documents, collectionValues)
             // - documents: the list of documents to be transformed before storage
-            let hook_input = vec![(*original_documents).clone()];
+            // - collectionValues: key-value pairs associated with the collection
+            let collection_values = collection.list_values().await;
+            let hook_input = ((*original_documents).clone(), collection_values);
 
             let log_sender = self.get_hook_logs().get_sender(&collection_id);
             let result: Option<DocumentList> = collection
@@ -1031,7 +1033,8 @@ impl WriteSide {
                             // Clone for hook input
                             let hook_input = document_for_storage.clone();
                             let document_list = DocumentList(vec![hook_input]);
-                            let hook_params = vec![document_list];
+                            let collection_values = collection.list_values().await;
+                            let hook_params = (document_list, collection_values);
 
                             let output: Option<DocumentList> = collection
                                 .run_hook(
