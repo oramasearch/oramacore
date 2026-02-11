@@ -483,6 +483,11 @@ where
     }
 }
 
+/// Wraps an error message in a JSON response: `{"error": "<message>"}`
+fn json_error(status: StatusCode, message: impl Into<String>) -> Response {
+    (status, Json(json!({ "error": message.into() }))).into_response()
+}
+
 pub fn print_error(e: &anyhow::Error, msg: &'static str) {
     error!(error = ?e, msg);
     e.chain()
@@ -492,235 +497,219 @@ pub fn print_error(e: &anyhow::Error, msg: &'static str) {
 
 impl IntoResponse for WriteError {
     fn into_response(self) -> Response {
-        match self {
+        let (status, message) = match self {
             Self::Generic(e) => {
                 print_error(&e, "Unhandled error in write side");
                 error!(error = ?e, "Generic write error");
-                let body = format!("Cannot process the request: {e:?}");
-                (StatusCode::INTERNAL_SERVER_ERROR, body).into_response()
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("Cannot process the request: {e:?}"),
+                )
             }
             Self::InvalidMasterApiKey => {
-                let body = "Invalid master API key".to_string();
-                (StatusCode::UNAUTHORIZED, body).into_response()
+                (StatusCode::UNAUTHORIZED, "Invalid master API key".into())
             }
-            Self::CollectionAlreadyExists(collection_id) => {
-                let body = format!("Collection with id {collection_id} already exists");
-                (StatusCode::CONFLICT, body).into_response()
-            }
+            Self::CollectionAlreadyExists(collection_id) => (
+                StatusCode::CONFLICT,
+                format!("Collection with id {collection_id} already exists"),
+            ),
             Self::InvalidWriteApiKey(collection_id)
             | Self::CollectionNotFound(collection_id)
-            | Self::JwtBelongToAnotherCollection(collection_id) => {
-                let body = format!(
-                    "Collection with id {collection_id} not found or invalid write api key"
-                );
-                (StatusCode::BAD_REQUEST, body).into_response()
-            }
-            Self::IndexAlreadyExists(collection_id, index_id) => {
-                let body = format!(
-                    "Index with id {index_id} already exists in collection {collection_id}"
-                );
-                (StatusCode::CONFLICT, body).into_response()
-            }
-            Self::IndexNotFound(collection_id, index_id) => {
-                let body = format!("Index {index_id} not found in collection {collection_id}");
-                (StatusCode::BAD_REQUEST, body).into_response()
-            }
-            Self::TempIndexNotFound(collection_id, index_id) => {
-                let body =
-                    format!("Temporary index {index_id} not found in collection {collection_id}");
-                (StatusCode::BAD_REQUEST, body).into_response()
-            }
-            Self::HookExec(msg) => {
-                let body = format!("Hook error: {msg}");
-                (StatusCode::BAD_REQUEST, body).into_response()
-            }
-            Self::HookError(e) => {
-                let body = format!("Hook storage error: {e}");
-                (StatusCode::INTERNAL_SERVER_ERROR, body).into_response()
-            }
-            Self::PinRulesError(e) => {
-                let body = format!("Invalid pin rule: {e:?}");
-                (StatusCode::BAD_REQUEST, body).into_response()
-            }
-            Self::DocumentLimitExceeded(collection_id, limit) => {
-                let body = format!(
-                    "Document limit exceeded for collection {collection_id}. Limit: {limit}"
-                );
-                (StatusCode::PAYMENT_REQUIRED, body).into_response()
-            }
-            Self::ShelfError(e) => {
-                let body = format!("Invalid shelf: {e:?}");
-                (StatusCode::BAD_REQUEST, body).into_response()
-            }
-            Self::ShelfDocumentLimitExceeded(actual, max) => {
-                let body = format!("Too many documents in shelf: {actual} (max: {max})");
-                (StatusCode::PAYLOAD_TOO_LARGE, body).into_response()
-            }
-        }
+            | Self::JwtBelongToAnotherCollection(collection_id) => (
+                StatusCode::BAD_REQUEST,
+                format!("Collection with id {collection_id} not found or invalid write api key"),
+            ),
+            Self::IndexAlreadyExists(collection_id, index_id) => (
+                StatusCode::CONFLICT,
+                format!("Index with id {index_id} already exists in collection {collection_id}"),
+            ),
+            Self::IndexNotFound(collection_id, index_id) => (
+                StatusCode::BAD_REQUEST,
+                format!("Index {index_id} not found in collection {collection_id}"),
+            ),
+            Self::TempIndexNotFound(collection_id, index_id) => (
+                StatusCode::BAD_REQUEST,
+                format!("Temporary index {index_id} not found in collection {collection_id}"),
+            ),
+            Self::HookExec(msg) => (StatusCode::BAD_REQUEST, format!("Hook error: {msg}")),
+            Self::HookError(e) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Hook storage error: {e}"),
+            ),
+            Self::PinRulesError(e) => (StatusCode::BAD_REQUEST, format!("Invalid pin rule: {e:?}")),
+            Self::DocumentLimitExceeded(collection_id, limit) => (
+                StatusCode::PAYMENT_REQUIRED,
+                format!("Document limit exceeded for collection {collection_id}. Limit: {limit}"),
+            ),
+            Self::ShelfError(e) => (StatusCode::BAD_REQUEST, format!("Invalid shelf: {e:?}")),
+            Self::ShelfDocumentLimitExceeded(actual, max) => (
+                StatusCode::PAYLOAD_TOO_LARGE,
+                format!("Too many documents in shelf: {actual} (max: {max})"),
+            ),
+        };
+
+        json_error(status, message)
     }
 }
 
 impl IntoResponse for ToolError {
     fn into_response(self) -> Response {
+        // Delegate to inner error types that already produce json_error responses
         match self {
+            ToolError::WriteError(e) => return e.into_response(),
+            ToolError::ReadError(e) => return e.into_response(),
+            _ => {}
+        }
+
+        let (status, message) = match self {
             ToolError::Generic(e) => {
                 print_error(&e, "Unhandled error in tool side");
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
                     format!("Cannot process the request: {e:?}"),
                 )
-                    .into_response()
             }
-            ToolError::WriteError(e) => e.into_response(),
-            ToolError::ReadError(e) => e.into_response(),
             ToolError::ValidationError(tool_id, msg) => (
                 StatusCode::BAD_REQUEST,
                 format!("Tool {tool_id} contains invalid code: {msg}"),
-            )
-                .into_response(),
+            ),
             ToolError::CompilationError(tool_id, msg) => (
                 StatusCode::BAD_REQUEST,
                 format!("Tool {tool_id} doesn't compile: {msg}"),
-            )
-                .into_response(),
+            ),
             ToolError::Duplicate(tool_id) => (
                 StatusCode::CONFLICT,
                 format!("Tool {tool_id} already exists"),
-            )
-                .into_response(),
+            ),
             ToolError::NotFound(tool_id, collection_id) => (
                 StatusCode::BAD_REQUEST,
                 format!("Tool {tool_id} not found in collection {collection_id}"),
-            )
-                .into_response(),
+            ),
             ToolError::NoTools(collection_id) => (
                 StatusCode::BAD_REQUEST,
                 format!("Collection {collection_id} doesn't have any tool"),
-            )
-                .into_response(),
+            ),
             ToolError::ExecutionSerializationError(collection_id, tool_id, e) => (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 format!(
                     "Tool {tool_id} from collection {collection_id} returns an JSON error: {e:?}"
                 ),
-            )
-                .into_response(),
+            ),
             ToolError::ExecutionTimeout(collection_id, tool_id) => (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 format!("Tool {tool_id} from collection {collection_id} goes in timeout"),
-            )
-                .into_response(),
+            ),
             ToolError::ExecutionError(collection_id, tool_id, e) => (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 format!(
                     "Tool {tool_id} from collection {collection_id} exited with this error: {e:?}"
                 ),
-            )
-                .into_response(),
-        }
+            ),
+            // Already handled above
+            ToolError::WriteError(_) | ToolError::ReadError(_) => unreachable!(),
+        };
+
+        json_error(status, message)
     }
 }
 
 impl IntoResponse for ReadError {
     fn into_response(self) -> Response {
-        match self {
+        let (status, message) = match self {
             Self::Generic(e) => {
                 print_error(&e, "Unhandled error in read side");
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
                     format!("Cannot process the request: {e:?}"),
                 )
-                    .into_response()
             }
             Self::NotFound(collection_id) => (
                 StatusCode::BAD_REQUEST,
                 format!("Collection {collection_id} not found"),
-            )
-                .into_response(),
-            Self::Hook(e) => {
-                (StatusCode::BAD_REQUEST, format!("Hook error: {e:?}")).into_response()
-            }
+            ),
+            Self::Hook(e) => (
+                StatusCode::BAD_REQUEST,
+                format!("Hook error: {e:?}"),
+            ),
             Self::IndexNotFound(collection_id, index_id) => (
                 StatusCode::BAD_REQUEST,
                 format!("Index {index_id:?} not found in Collection {collection_id:?}"),
-            )
-                .into_response(),
+            ),
             Self::FilterFieldNotFound(field_name) => (
                 StatusCode::BAD_REQUEST,
                 format!("Cannot filter by \"{field_name}\": unknown field"),
-            )
-                .into_response(),
+            ),
             Self::InvalidSortField(field_name, field_type) => (
                 StatusCode::BAD_REQUEST,
                 format!("Cannot sort by \"{field_name}\": only number, date or boolean fields are supported for sorting, but got {field_type}"),
-            )
-                .into_response(),
+            ),
             Self::SortFieldNotFound(field_name) => (
                 StatusCode::BAD_REQUEST,
                 format!("Cannot sort by \"{field_name}\": no index has that field"),
-            )
-                .into_response(),
+            ),
             Self::FacetFieldNotFound(field_names) => (
                 StatusCode::BAD_REQUEST,
                 format!("Cannot facet by \"{field_names:?}\": no index has that field"),
-            )
-                .into_response(),
+            ),
             Self::UnknownIndex(unknown_index_ids, available_index_ids) => (
                 StatusCode::BAD_REQUEST,
                 format!(
                     "Unknown indexes requested: {unknown_index_ids:?}. Available indexes: {available_index_ids:?}"
                 ),
-            )
-                .into_response(),
+            ),
             Self::ShelfNotFound(shelf_id) => (
                 StatusCode::BAD_REQUEST,
-                format!("Shelf '{shelf_id}' not found")
-            ).into_response(),
-        }
+                format!("Shelf '{shelf_id}' not found"),
+            ),
+        };
+
+        json_error(status, message)
     }
 }
 
 impl IntoResponse for AnswerError {
     fn into_response(self) -> Response {
-        match self {
+        // Delegate to ReadError which already produces json_error responses
+        if let AnswerError::ReadError(e) = self {
+            return e.into_response();
+        }
+
+        let (status, message) = match self {
             AnswerError::Generic(e) => {
                 print_error(&e, "Unhandled error in answer side");
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
                     format!("Cannot process the request: {e:?}"),
                 )
-                    .into_response()
             }
-            AnswerError::ReadError(e) => e.into_response(),
             AnswerError::ChannelClosed(e) => {
                 print_error(&anyhow::anyhow!(e), "Channel closed in answer side");
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
-                    "Channel closed unexpectedly",
+                    "Channel closed unexpectedly".into(),
                 )
-                    .into_response()
             }
             AnswerError::BeforeRetrievalHookError(e) => (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 format!("Before retrieval hook error: {e}"),
-            )
-                .into_response(),
+            ),
             AnswerError::BeforeAnswerHookError(e) => (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 format!("Before answer hook error: {e}"),
-            )
-                .into_response(),
+            ),
             AnswerError::JSError(e) => (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 format!("Error running JS code: {e:?}"),
-            )
-                .into_response(),
+            ),
             AnswerError::TitleError(e) => (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 format!("Error generating title: {e:?}"),
-            )
-                .into_response(),
-        }
+            ),
+            // Already handled above
+            AnswerError::ReadError(_) => unreachable!(),
+        };
+
+        json_error(status, message)
     }
 }
 
@@ -729,22 +718,19 @@ impl IntoResponse for SuggestionsError {
         match self {
             SuggestionsError::Generic(e) => {
                 print_error(&e, "Unhandled error in suggestions side");
-                (
+                json_error(
                     StatusCode::INTERNAL_SERVER_ERROR,
                     format!("Cannot process the request: {e:?}"),
                 )
-                    .into_response()
             }
-            SuggestionsError::RepairError(e) => (
+            SuggestionsError::RepairError(e) => json_error(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 format!("Error repairing suggestions: {e:?}"),
-            )
-                .into_response(),
-            SuggestionsError::ParseError(e) => (
+            ),
+            SuggestionsError::ParseError(e) => json_error(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 format!("Error parsing suggestions: {e:?}"),
-            )
-                .into_response(),
+            ),
         }
     }
 }
