@@ -1,4 +1,4 @@
-use std::{collections::HashMap, sync::Arc};
+use std::sync::Arc;
 
 use axum::{
     extract::{Path, State},
@@ -103,7 +103,7 @@ async fn list_values(
         .get_collection(collection_id, write_api_key)
         .await?;
 
-    let values: HashMap<String, String> = collection.list_values().await;
+    let values = collection.list_values().await;
 
     Ok(Json(json!({ "values": values })))
 }
