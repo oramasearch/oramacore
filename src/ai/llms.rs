@@ -38,6 +38,12 @@ pub enum KnownPrompts {
     TrainingSetsQueriesGenerator,
     TrainingSetsQueriesOptimizer,
     TitleGenerator,
+    // v1.1 prompt variants with improved constraint handling
+    V1_1DetermineQueryStrategy,
+    V1_1AdvancedAutoqueryQueryAnalyzer,
+    V1_1AdvancedAutoQueryPropertiesSelector,
+    V1_1AdvancedAutoQueryQueryComposer,
+    V1_1AdvancedAutoQueryBudgetPlanner,
 }
 
 #[derive(Debug, Clone)]
@@ -66,6 +72,20 @@ impl TryFrom<&str> for KnownPrompts {
             "SUGGESTIONS" => Ok(Self::Suggestions),
             "DETERMINE_QUERY_STRATEGY" => Ok(Self::DetermineQueryStrategy),
             "TITLE" => Ok(Self::TitleGenerator),
+            // v1.1 variants
+            "V1_1_DETERMINE_QUERY_STRATEGY" => Ok(Self::V1_1DetermineQueryStrategy),
+            "V1_1_ADVANCED_AUTOQUERY_QUERY_ANALYZER" => {
+                Ok(Self::V1_1AdvancedAutoqueryQueryAnalyzer)
+            }
+            "V1_1_ADVANCED_AUTOQUERY_PROPERTIES_SELECTOR" => {
+                Ok(Self::V1_1AdvancedAutoQueryPropertiesSelector)
+            }
+            "V1_1_ADVANCED_AUTOQUERY_QUERY_COMPOSER" => {
+                Ok(Self::V1_1AdvancedAutoQueryQueryComposer)
+            }
+            "V1_1_ADVANCED_AUTOQUERY_BUDGET_PLANNER" => {
+                Ok(Self::V1_1AdvancedAutoQueryBudgetPlanner)
+            }
             _ => Err(format!("Unknown prompt type: {s}")),
         }
     }
@@ -158,6 +178,40 @@ impl KnownPrompts {
             KnownPrompts::TitleGenerator => KnownPrompt {
                 system: include_str!("../prompts/v1/title_generator/system.md").to_string(),
                 user: include_str!("../prompts/v1/title_generator/user.md").to_string(),
+            },
+            // v1.1 prompt variants with improved constraint handling
+            KnownPrompts::V1_1DetermineQueryStrategy => KnownPrompt {
+                system: include_str!("../prompts/v1.1/determine_query_strategy/system.md")
+                    .to_string(),
+                user: include_str!("../prompts/v1.1/determine_query_strategy/user.md").to_string(),
+            },
+            KnownPrompts::V1_1AdvancedAutoqueryQueryAnalyzer => KnownPrompt {
+                system: include_str!("../prompts/v1.1/advanced_autoquery/query_analyzer/system.md")
+                    .to_string(),
+                user: include_str!("../prompts/v1.1/advanced_autoquery/query_analyzer/user.md")
+                    .to_string(),
+            },
+            KnownPrompts::V1_1AdvancedAutoQueryPropertiesSelector => KnownPrompt {
+                system: include_str!(
+                    "../prompts/v1.1/advanced_autoquery/properties_selector/system.md"
+                )
+                .to_string(),
+                user: include_str!(
+                    "../prompts/v1.1/advanced_autoquery/properties_selector/user.md"
+                )
+                .to_string(),
+            },
+            KnownPrompts::V1_1AdvancedAutoQueryQueryComposer => KnownPrompt {
+                system: include_str!("../prompts/v1.1/advanced_autoquery/query_composer/system.md")
+                    .to_string(),
+                user: include_str!("../prompts/v1.1/advanced_autoquery/query_composer/user.md")
+                    .to_string(),
+            },
+            KnownPrompts::V1_1AdvancedAutoQueryBudgetPlanner => KnownPrompt {
+                system: include_str!("../prompts/v1.1/advanced_autoquery/budget_planner/system.md")
+                    .to_string(),
+                user: include_str!("../prompts/v1.1/advanced_autoquery/budget_planner/user.md")
+                    .to_string(),
             },
         }
     }
