@@ -162,15 +162,17 @@ impl<'collection, 'analytics_storage> Search<'collection, 'analytics_storage> {
             .get_documents_by_ids(all_docs_ids.collect())
             .await?;
 
-        // Hook signature: function transformDocumentAfterSearch(documents)
+        // Hook signature: function transformDocumentAfterSearch(documents, collectionValues)
         // - documents: the fetched documents from storage
+        // - collectionValues: key-value pairs associated with the collection
         // Note: We must clone here because, if hook returns None (null/undefined in JS),
         // we need to preserve original docs.
         let hook_input = docs.clone();
+        let collection_values = collection.list_values().await;
         let result: Option<Vec<(DocumentId, Arc<RawJSONDocument>)>> = collection
             .run_hook(
                 HookType::TransformDocumentAfterSearch,
-                vec![hook_input],
+                (hook_input, collection_values),
                 log_sender,
             )
             .await?;
