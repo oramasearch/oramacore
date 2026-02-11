@@ -80,7 +80,8 @@ class EmbeddingsModels:
         except Exception as e:
             if "NO_SUCHFILE" in str(e) or "File doesn't exist" in str(e):
                 name = friendly_name or model_name
-                logger.error(f"ERROR: Model '{name}' not found in {self.config.models_cache_dir}, FastEmbed will download it automatically.")
+                logger.error(f"Model '{name}' not found in '{self.config.models_cache_dir}'.")
+                raise RuntimeError(f"Model '{name}' not found in '{self.config.models_cache_dir}'.") from None
             raise
 
     def load_models(self):
