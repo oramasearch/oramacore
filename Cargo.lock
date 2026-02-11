@@ -4681,9 +4681,9 @@ checksum = "04744f49eae99ab78e0d5c0b603ab218f515ea8cfe5a456d7629ad883a3b6e7d"
 
 [[package]]
 name = "orama-js-pool"
-version = "0.4.1"
+version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f8bc5a8a2b555f411f9613bf4ee41d39524c63753db259dca7844e7548b73744"
+checksum = "ff476a4f5a753840e3d83410adfe05e2485d6f69ea24938e469ef249b518a8d3"
 dependencies = [
  "deadpool",
  "deno_console",
@@ -4783,9 +4783,9 @@ dependencies = [
 
 [[package]]
 name = "oramacore_lib"
-version = "0.3.0"
+version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "269cec2ad13a94f8722a4d8435302ead055a158fcebb1dea0c9423d2885ebddd"
+checksum = "fade02f0baee766e03627acb95a5a107fcb3c818058f8eb6886ec8cec7a97c01"
 dependencies = [
  "anyhow",
  "atomic-write-file",

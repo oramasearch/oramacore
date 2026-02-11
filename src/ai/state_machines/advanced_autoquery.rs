@@ -14,6 +14,10 @@ use tokio::time::sleep;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use tracing::{error, info, warn};
 
+use crate::ai::constraint_extractor::{
+    extract_constraints, format_constraints_for_prompt, inject_constraints, validate_search_params,
+    BudgetAllocation, ExtractedConstraint, FieldInfo,
+};
 use crate::ai::llms::{KnownPrompts, LLMService};
 use crate::types::{
     CollectionId, IndexId, InteractionLLMConfig, InteractionMessage, ReadApiKey, SearchParams,
@@ -164,6 +168,19 @@ pub enum AdvancedAutoqueryFlow {
         collection_id: CollectionId,
         read_api_key: ReadApiKey,
     },
+    /// Plan budget allocations when a shared budget is detected across sub-queries
+    PlanBudget {
+        optimized_queries: Vec<String>,
+        collection_id: CollectionId,
+        read_api_key: ReadApiKey,
+    },
+    /// Budget planning complete, proceed to property selection
+    BudgetPlanned {
+        optimized_queries: Vec<String>,
+        budget_allocations: Option<Vec<BudgetAllocation>>,
+        collection_id: CollectionId,
+        read_api_key: ReadApiKey,
+    },
     SelectProperties {
         queries: Vec<String>,
         collection_id: CollectionId,
@@ -219,6 +236,16 @@ pub enum AdvancedAutoqueryFlow {
 
 // ==== Configuration ====
 
+/// Selects which generation of prompts the state machine uses.
+/// `V1` is the original set; `V1_1` activates improved prompts that enforce
+/// mandatory query splitting for multi-product requests.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub enum PromptVersion {
+    #[default]
+    V1,
+    V1_1,
+}
+
 #[derive(Debug, Clone)]
 pub struct AdvancedAutoqueryConfig {
     pub max_retries: usize,
@@ -227,6 +254,7 @@ pub struct AdvancedAutoqueryConfig {
     pub max_concurrent_operations: usize,
     pub timeout: Duration,
     pub llm_timeout: Duration,
+    pub prompt_version: PromptVersion,
 }
 
 impl Default for AdvancedAutoqueryConfig {
@@ -238,6 +266,7 @@ impl Default for AdvancedAutoqueryConfig {
             max_concurrent_operations: 5,
             timeout: Duration::from_secs(60),
             llm_timeout: Duration::from_secs(30),
+            prompt_version: PromptVersion::default(),
         }
     }
 }
@@ -281,6 +310,14 @@ impl AdvancedAutoqueryStateMachine {
         }
     }
 
+    /// Return the prompt variant that matches the configured prompt version.
+    fn prompt_for(&self, v1: KnownPrompts, v1_1: KnownPrompts) -> KnownPrompts {
+        match self.config.prompt_version {
+            PromptVersion::V1 => v1,
+            PromptVersion::V1_1 => v1_1,
+        }
+    }
+
     /// Send an event if the event sender is available
     async fn send_event(&self, event: AdvancedAutoqueryEvent) {
         if let Some(sender) = &self.event_sender {
@@ -308,6 +345,25 @@ impl AdvancedAutoqueryStateMachine {
                 serde_json::json!({
                     "type": "QueryOptimized",
                     "queries_count": optimized_queries.len()
+                })
+            }
+            AdvancedAutoqueryFlow::PlanBudget {
+                optimized_queries, ..
+            } => {
+                serde_json::json!({
+                    "type": "PlanBudget",
+                    "queries_count": optimized_queries.len()
+                })
+            }
+            AdvancedAutoqueryFlow::BudgetPlanned {
+                optimized_queries,
+                budget_allocations,
+                ..
+            } => {
+                serde_json::json!({
+                    "type": "BudgetPlanned",
+                    "queries_count": optimized_queries.len(),
+                    "has_allocations": budget_allocations.is_some()
                 })
             }
             AdvancedAutoqueryFlow::SelectProperties { queries, .. } => {
@@ -491,6 +547,39 @@ impl AdvancedAutoqueryStateMachine {
                     optimized_queries,
                     collection_id,
                     read_api_key,
+                } => {
+                    self.send_event(AdvancedAutoqueryEvent::StateChanged {
+                        state: "plan_budget".to_string(),
+                        message: "Planning budget allocations".to_string(),
+                        data: Some(serde_json::json!({
+                            "optimized_queries": optimized_queries.clone(),
+                        })),
+                    })
+                    .await;
+                    self.transition_to_plan_budget(optimized_queries, collection_id, read_api_key)
+                        .await?;
+                }
+                AdvancedAutoqueryFlow::PlanBudget {
+                    optimized_queries,
+                    collection_id,
+                    read_api_key,
+                } => {
+                    // This state should not be reached directly since
+                    // transition_to_plan_budget sets state to BudgetPlanned.
+                    // If we somehow end up here, transition to BudgetPlanned.
+                    let mut state = self.state.lock().await;
+                    *state = AdvancedAutoqueryFlow::BudgetPlanned {
+                        optimized_queries,
+                        budget_allocations: None,
+                        collection_id,
+                        read_api_key,
+                    };
+                }
+                AdvancedAutoqueryFlow::BudgetPlanned {
+                    optimized_queries,
+                    collection_id,
+                    read_api_key,
+                    ..
                 } => {
                     self.send_event(AdvancedAutoqueryEvent::StateChanged {
                         state: "select_properties".to_string(),
@@ -875,6 +964,29 @@ impl AdvancedAutoqueryStateMachine {
         Ok(optimized_queries)
     }
 
+    /// Transition to the PlanBudget state.
+    ///
+    /// Checks if the original queries imply a shared budget and, if so,
+    /// calls the budget planner LLM to allocate budget across sub-queries.
+    async fn transition_to_plan_budget(
+        &self,
+        optimized_queries: Vec<String>,
+        collection_id: CollectionId,
+        read_api_key: ReadApiKey,
+    ) -> Result<(), AdvancedAutoqueryError> {
+        // For now, budget planning is a pass-through -- the actual budget planning
+        // logic will be invoked during query composition when constraints are available.
+        // We transition directly to BudgetPlanned with no allocations.
+        let mut state = self.state.lock().await;
+        *state = AdvancedAutoqueryFlow::BudgetPlanned {
+            optimized_queries,
+            budget_allocations: None,
+            collection_id,
+            read_api_key,
+        };
+        Ok(())
+    }
+
     async fn transition_to_select_properties(
         &self,
         optimized_queries: Vec<String>,
@@ -1162,15 +1274,14 @@ impl AdvancedAutoqueryStateMachine {
             ),
         ];
 
+        let prompt = self.prompt_for(
+            KnownPrompts::AdvancedAutoqueryQueryAnalyzer,
+            KnownPrompts::V1_1AdvancedAutoqueryQueryAnalyzer,
+        );
+
         let result = self
             .llm_service
-            .run_known_prompt(
-                KnownPrompts::AdvancedAutoqueryQueryAnalyzer,
-                vec![],
-                variables,
-                None,
-                self.llm_config.clone(),
-            )
+            .run_known_prompt(prompt, vec![], variables, None, self.llm_config.clone())
             .await
             .map_err(|e| AdvancedAutoqueryError::LLMServiceError(e.to_string()))?;
 
@@ -1188,6 +1299,11 @@ impl AdvancedAutoqueryStateMachine {
         let selectable_props = serde_json::to_string(&self.format_collection_stats())
             .map_err(|e| AdvancedAutoqueryError::CollectionStatsError(e.to_string()))?;
 
+        let prompt = self.prompt_for(
+            KnownPrompts::AdvancedAutoQueryPropertiesSelector,
+            KnownPrompts::V1_1AdvancedAutoQueryPropertiesSelector,
+        );
+
         let futures: Vec<_> = queries
             .iter()
             .map(|query| {
@@ -1196,7 +1312,7 @@ impl AdvancedAutoqueryStateMachine {
                     ("properties_list".to_string(), selectable_props.clone()),
                 ];
                 self.llm_service.run_known_prompt(
-                    KnownPrompts::AdvancedAutoQueryPropertiesSelector,
+                    prompt.clone(),
                     vec![],
                     variables,
                     None,
@@ -1245,6 +1361,12 @@ impl AdvancedAutoqueryStateMachine {
             .collect()
     }
 
+    /// Generates search queries with tracking information.
+    ///
+    /// Integrates schema-aware constraint extraction: before calling the LLM,
+    /// extracts numeric, string enum, and boolean constraints from the query text
+    /// and passes them as hard constraints to the prompt. After the LLM responds,
+    /// validates that all constraints are present and injects any that are missing.
     async fn generate_tracked_search_queries(
         &self,
         mut query_plan: Vec<QueryAndProperties>,
@@ -1257,13 +1379,47 @@ impl AdvancedAutoqueryStateMachine {
             query_and_props.filter_properties = filter_properties.clone();
         }
 
-        // Convert to LLM variables and run queries in parallel
-        let variables_list = self.create_llm_variables(&query_plan);
+        // Extract schema field info and number fields for constraint matching
+        let schema_fields = self.extract_schema_fields();
+        let number_fields = self.extract_number_fields();
+
+        info!(
+            "Constraint extraction: {} schema fields, {} number fields ({:?})",
+            schema_fields.len(),
+            number_fields.len(),
+            number_fields
+        );
+
+        // Extract constraints for each query
+        let per_query_constraints: Vec<Vec<ExtractedConstraint>> = query_plan
+            .iter()
+            .map(|qp| {
+                let constraints =
+                    extract_constraints(&qp.query, &schema_fields, &filter_properties);
+                if !constraints.is_empty() {
+                    info!(
+                        "Extracted {} constraint(s) from query '{}': {:?}",
+                        constraints.len(),
+                        qp.query,
+                        constraints
+                    );
+                }
+                constraints
+            })
+            .collect();
+
+        // Convert to LLM variables (includes hard_constraints)
+        let variables_list =
+            self.create_llm_variables(&query_plan, &per_query_constraints, &number_fields);
+        let prompt = self.prompt_for(
+            KnownPrompts::AdvancedAutoQueryQueryComposer,
+            KnownPrompts::V1_1AdvancedAutoQueryQueryComposer,
+        );
         let futures: Vec<_> = variables_list
             .into_iter()
             .map(|variables| {
                 self.llm_service.run_known_prompt(
-                    KnownPrompts::AdvancedAutoQueryQueryComposer,
+                    prompt.clone(),
                     vec![],
                     variables,
                     None,
@@ -1274,7 +1430,7 @@ impl AdvancedAutoqueryStateMachine {
 
         let results = join_all(futures).await;
 
-        // Process results with tracking
+        // Process results with tracking and constraint validation
         let tracked_queries: Result<Vec<TrackedQuery>, AdvancedAutoqueryError> = results
             .into_iter()
             .enumerate()
@@ -1284,8 +1440,32 @@ impl AdvancedAutoqueryStateMachine {
                     .and_then(|response| {
                         let cleaned = repair_json(&response, &Default::default())
                             .map_err(|e| AdvancedAutoqueryError::JsonParsingError(e.to_string()))?;
-                        let search_params = serde_json::from_str::<SearchParams>(&cleaned)
+                        let mut search_params = serde_json::from_str::<SearchParams>(&cleaned)
                             .map_err(|e| AdvancedAutoqueryError::JsonParsingError(e.to_string()))?;
+
+                        // Validate and inject missing constraints
+                        let constraints = &per_query_constraints[index];
+                        let missing =
+                            validate_search_params(&search_params, constraints, &number_fields);
+                        if !missing.is_empty() {
+                            warn!(
+                                "LLM omitted {} constraint(s) for query '{}', injecting",
+                                missing.len(),
+                                query_plan[index].query
+                            );
+                            inject_constraints(&mut search_params, &missing, &number_fields);
+                            info!(
+                                "Post-injection where filter for query '{}': {:?}",
+                                query_plan[index].query,
+                                search_params.where_filter.filter_on_fields
+                            );
+                        } else if !constraints.is_empty() {
+                            info!(
+                                "All {} constraint(s) already present in LLM output for query '{}'",
+                                constraints.len(),
+                                query_plan[index].query
+                            );
+                        }
 
                         Ok(TrackedQuery {
                             index,
@@ -1674,13 +1854,20 @@ impl AdvancedAutoqueryStateMachine {
         properties_map
     }
 
+    /// Creates LLM variables from queries, properties, and extracted constraints.
+    ///
+    /// Includes a `hard_constraints` variable that lists pre-extracted constraints
+    /// for the LLM to include in its generated search parameters.
     fn create_llm_variables(
         &self,
         queries_and_properties: &[QueryAndProperties],
+        per_query_constraints: &[Vec<ExtractedConstraint>],
+        number_fields: &[String],
     ) -> Vec<Vec<(String, String)>> {
         queries_and_properties
             .iter()
-            .map(|qp| {
+            .enumerate()
+            .map(|(i, qp)| {
                 let mut variables = vec![("query".to_string(), qp.query.clone())];
 
                 // Flatten all properties from all collections
@@ -1697,6 +1884,14 @@ impl AdvancedAutoqueryStateMachine {
                 if let Ok(filter_json) = serde_json::to_string(&qp.filter_properties) {
                     variables.push(("filter_properties".to_string(), filter_json));
                 }
+
+                // Add hard constraints from the constraint extractor
+                let constraints = per_query_constraints
+                    .get(i)
+                    .map(|c| c.as_slice())
+                    .unwrap_or(&[]);
+                let hard_constraints = format_constraints_for_prompt(constraints, number_fields);
+                variables.push(("hard_constraints".to_string(), hard_constraints));
 
                 variables
             })
@@ -1786,6 +1981,51 @@ impl AdvancedAutoqueryStateMachine {
         result
     }
 
+    /// Extract schema field info (name + type) from collection stats.
+    ///
+    /// Used to provide schema context to the constraint extractor.
+    fn extract_schema_fields(&self) -> Vec<FieldInfo> {
+        let prefix_regex = Regex::new(r"^(committed|uncommitted)_").expect("Valid regex pattern");
+        let mut fields = Vec::new();
+        let mut seen = HashMap::new();
+
+        for index in &self.collection_stats.indexes_stats {
+            if index.is_temp {
+                continue;
+            }
+            for stat in &index.fields_stats {
+                let field_path = prefix_regex.replace(&stat.field_path, "").to_string();
+                if field_path == "___orama_auto_embedding" || seen.contains_key(&field_path) {
+                    continue;
+                }
+                if let Ok(stat_json) = serde_json::to_string(&stat.stats) {
+                    if let Ok(field_stat_type) = serde_json::from_str::<FieldStatType>(&stat_json) {
+                        if !field_stat_type.is_unfilterable_string()
+                            && field_stat_type.document_count() > 0
+                        {
+                            seen.insert(field_path.clone(), true);
+                            fields.push(FieldInfo {
+                                name: field_path,
+                                field_type: field_stat_type.field_type_name().to_string(),
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        fields
+    }
+
+    /// Extract the names of all number-typed fields from collection stats.
+    fn extract_number_fields(&self) -> Vec<String> {
+        self.extract_schema_fields()
+            .iter()
+            .filter(|f| f.field_type == "number")
+            .map(|f| f.name.clone())
+            .collect()
+    }
+
     /// Get current state for monitoring/debugging
     pub async fn current_state(&self) -> AdvancedAutoqueryFlow {
         let state = self.state.lock().await;
@@ -1833,9 +2073,21 @@ enum FieldStatType {
         true_count: usize,
     },
     #[serde(rename = "uncommitted_number")]
-    UncommittedNumber { _min: f64, _max: f64, count: usize },
+    UncommittedNumber {
+        #[serde(default)]
+        _min: Option<f64>,
+        #[serde(default)]
+        _max: Option<f64>,
+        #[serde(default)]
+        count: usize,
+    },
     #[serde(rename = "committed_number")]
-    CommittedNumber { _min: f64, _max: f64 },
+    CommittedNumber {
+        #[serde(default)]
+        _min: Option<f64>,
+        #[serde(default)]
+        _max: Option<f64>,
+    },
     #[serde(rename = "uncommitted_string_filter")]
     UncommittedStringFilter {
         key_count: usize,
@@ -1883,14 +2135,17 @@ impl FieldStatType {
                 true_count,
             } => false_count + true_count,
             UncommittedNumber { count, .. } => *count,
-            CommittedNumber { .. } => 0,
+            // Committed number/vector fields don't carry a count, but if
+            // they exist they contain documents. Return 1 so they pass the
+            // "document_count > 0" filter in extract_schema_fields.
+            CommittedNumber { .. } => 1,
             UncommittedStringFilter { document_count, .. }
             | CommittedStringFilter { document_count, .. } => *document_count,
             UncommittedString { global_info, .. } | CommittedString { global_info, .. } => {
                 global_info.total_documents
             }
             UncommittedVector { document_count, .. } => *document_count,
-            CommittedVector { .. } => 0,
+            CommittedVector { .. } => 1,
         }
     }
 
@@ -1899,7 +2154,7 @@ impl FieldStatType {
         match self {
             UncommittedBoolean { .. } | CommittedBoolean { .. } => "boolean",
             UncommittedNumber { .. } | CommittedNumber { .. } => "number",
-            UncommittedStringFilter { .. } | CommittedStringFilter { .. } => "string",
+            UncommittedStringFilter { .. } | CommittedStringFilter { .. } => "string_filter",
             UncommittedString { .. } | CommittedString { .. } => "string",
             UncommittedVector { .. } | CommittedVector { .. } => "vector",
         }
