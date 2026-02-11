@@ -826,8 +826,10 @@ pub fn has_shared_budget(query: &str) -> bool {
         "spend",
     ];
 
+    // Allow optional filler words (e.g. "of", "around", "about") between the
+    // budget keyword and the currency/amount so "Budget of $500" matches.
     let has_budget_number = Regex::new(
-        r"(?i)(?:under|below|max|budget|up\s+to|no\s+more\s+than)\s*(?:\$|usd|eur|gbp|£|€)?\s*\d+",
+        r"(?i)(?:under|below|max|budget|up\s+to|no\s+more\s+than)\s+(?:\w+\s+)*?(?:\$|usd|eur|gbp|£|€)?\s*\d+",
     )
     .expect("Valid regex")
     .is_match(&lower);
