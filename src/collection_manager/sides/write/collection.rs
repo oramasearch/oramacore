@@ -1203,10 +1203,10 @@ impl CollectionWriter {
         Ok(removed)
     }
 
-    /// Returns all collection values.
-    pub async fn list_values(&self) -> HashMap<String, String> {
+    /// Returns all collection values as a shared reference.
+    pub async fn list_values(&self) -> Arc<HashMap<String, String>> {
         let lock = self.values_writer.read("list_values").await;
-        lock.list().clone()
+        lock.list()
     }
 
     /// Returns the count of collection values.

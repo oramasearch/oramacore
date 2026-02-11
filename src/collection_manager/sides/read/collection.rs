@@ -1167,8 +1167,8 @@ impl CollectionReader {
         self.values_reader.read("get_value").await.get(key)
     }
 
-    /// Returns all collection values from the reader.
-    pub async fn list_values(&self) -> HashMap<String, String> {
+    /// Returns all collection values from the reader as a shared reference.
+    pub async fn list_values(&self) -> Arc<HashMap<String, String>> {
         self.values_reader.read("list_values").await.list()
     }
 
