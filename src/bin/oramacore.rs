@@ -36,6 +36,15 @@ fn load_config() -> Result<OramacoreConfig> {
 }
 
 fn main() -> anyhow::Result<()> {
+    // Fork guard: HuggingFace Hub triggers a C-level fork during first model
+    // download, spawning duplicate processes. PID sentinel detects and
+    // kills forked children before they compete for ports and resources.
+    let my_pid = std::process::id().to_string();
+    match std::env::var("_ORAMACORE_ORIGINAL_PID") {
+        Ok(original_pid) if original_pid != my_pid => std::process::exit(0),
+        _ => std::env::set_var("_ORAMACORE_ORIGINAL_PID", &my_pid),
+    }
+
     // `initialize` invocation is required to setup the Python interpreter correctly.
     // We do it here to ensure it is called from the main thread.
     // If it doesn't initialize on the main thread,
