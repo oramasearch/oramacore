@@ -225,6 +225,7 @@ fn get_python_config(py: Python<'_>, orama_config: AIServiceConfig) -> PyResult<
             .map(|e| e.default_model_group.clone())
             .unwrap_or("all".to_string()),
     )?;
+    kwargs.set_item("models_cache_dir", orama_config.models_cache_dir)?;
     Ok(kwargs)
 }
 
