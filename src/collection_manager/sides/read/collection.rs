@@ -50,6 +50,7 @@ use super::{
     ReadSide, UncommittedBoolFieldStats, UncommittedNumberFieldStats, UncommittedStringFieldStats,
     UncommittedStringFilterFieldStats, UncommittedVectorFieldStats,
 };
+use oramacore_lib::values::ValuesReader;
 
 use crate::types::NLPSearchRequest;
 use oramacore_lib::fs::*;
@@ -156,6 +157,7 @@ pub struct CollectionReader {
 
     pin_rules_reader: OramaAsyncLock<PinRulesReader<DocumentId>>,
     shelves_reader: OramaAsyncLock<ShelvesReader<DocumentId>>,
+    values_reader: OramaAsyncLock<ValuesReader>,
 
     document_storage: Arc<CollectionDocumentStorage>,
 }
@@ -229,6 +231,8 @@ impl CollectionReader {
 
             pin_rules_reader: OramaAsyncLock::new("pin_rules_reader", PinRulesReader::empty()),
             shelves_reader: OramaAsyncLock::new("shelves_reader", ShelvesReader::empty()),
+
+            values_reader: OramaAsyncLock::new("values_reader", ValuesReader::empty()),
 
             data_dir,
 
@@ -395,6 +399,11 @@ impl CollectionReader {
                     .context("Cannot create shelves reader")?,
             ),
 
+            values_reader: OramaAsyncLock::new(
+                "values_reader",
+                ValuesReader::try_load(data_dir.clone()).context("Cannot load values reader")?,
+            ),
+
             data_dir,
 
             document_storage,
@@ -524,6 +533,12 @@ impl CollectionReader {
             .commit(self.data_dir.join("shelves"))
             .context("Cannot commit shelves")?;
         drop(shelves_reader);
+
+        let mut values_lock = self.values_reader.write("commit").await;
+        values_lock
+            .commit(self.data_dir.clone())
+            .context("Cannot commit values")?;
+        drop(values_lock);
 
         // Save DumpV2 with single offset
         let dump = Dump::V2(DumpV2 {
@@ -1114,6 +1129,11 @@ impl CollectionReader {
                     .await
                     .context("Cannot apply document storage operation")?;
             }
+            CollectionWriteOperation::Value(op) => {
+                let mut lock = self.values_reader.write("update_value").await;
+                lock.update(op);
+                drop(lock);
+            }
         }
 
         // Update offset after successful operation
@@ -1140,6 +1160,16 @@ impl CollectionReader {
 
     pub fn get_document_storage(&self) -> &CollectionDocumentStorage {
         &self.document_storage
+    }
+
+    /// Gets a collection value by key from the reader.
+    pub async fn get_value(&self, key: &str) -> Option<String> {
+        self.values_reader.read("get_value").await.get(key)
+    }
+
+    /// Returns all collection values from the reader.
+    pub async fn list_values(&self) -> HashMap<String, String> {
+        self.values_reader.read("list_values").await.list()
     }
 
     pub async fn stats(&self, _req: CollectionStatsRequest) -> Result<CollectionStats, ReadError> {
@@ -1180,6 +1210,8 @@ impl CollectionReader {
             .collect();
         drop(lock);
 
+        let values_count = self.values_reader.read("stats").await.count();
+
         Ok(CollectionStats {
             id: self.get_id(),
             document_count: indexes_stats
@@ -1192,6 +1224,7 @@ impl CollectionReader {
             embedding_model,
             indexes_stats,
             hooks,
+            values_count,
             created_at: self.created_at,
             updated_at: **self.updated_at.read("stats").await,
         })
@@ -1625,6 +1658,7 @@ pub struct CollectionStats {
     pub embedding_model: Option<String>,
     pub indexes_stats: Vec<IndexStats>,
     pub hooks: Vec<HookType>,
+    pub values_count: usize,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }

@@ -23,6 +23,7 @@ mod groupby;
 mod hook_transform_after_search;
 mod hook_transform_before_save;
 mod hooks;
+mod values;
 // mod hurl;
 mod index_rebuild;
 mod list_documents;
