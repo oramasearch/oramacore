@@ -40,11 +40,13 @@ MODEL_PASSAGE_INSTRUCTIONS_MAP = {
     "JinaEmbeddingsV2BaseCode": JINAEMBEDDINGSV2BASECODE_PASSAGE_INSTRUCTIONS,
 }
 
+
 class EmbeddingsModelsConfiguration(BaseModel):
     """EmbeddingsModels configuration."""
     execution_providers: List[str] = Field(description="execution_providers for the model")
     dynamically_load_models: bool = Field(description="Whether to dynamically load models on demand")
     default_model_group: str = Field(default="all", description="Default model group to use if no models are specified")
+    models_cache_dir: str = Field(default="/tmp/fastembed_cache", description="Directory to cache the downloaded models")
 
 
 class EmbeddingsModels:
@@ -57,11 +59,9 @@ class EmbeddingsModels:
 
         logger.info(f"Configured execution providers: {self.config.execution_providers}")
 
-        logger.info(f"Creating cache directory: /tmp/fastembed_cache")
-        os.makedirs("/tmp/fastembed_cache", exist_ok=True)
-
-        logger.info("Setting FastEmbed cache directory...")
-        os.environ["FASTEMBED_CACHE_DIR"] = os.path.abspath("/tmp/fastembed_cache")
+        cache_dir = self.config.models_cache_dir
+        os.makedirs(cache_dir, exist_ok=True)
+        logger.info(f"Using models cache directory: {cache_dir}")
 
         logger.info("Loading models...")
         self.loaded_models = self.load_models()
@@ -70,16 +70,27 @@ class EmbeddingsModels:
         self.model_loading_lock = threading.RLock()
         self.model_last_used = {}
 
+    def _load_text_embedding(self, model_name: str, friendly_name: str | None = None):
+        try:
+            return TextEmbedding(
+                model_name=model_name,
+                cache_dir=self.config.models_cache_dir,
+                providers=self.config.execution_providers,
+            )
+        except Exception as e:
+            if "NO_SUCHFILE" in str(e) or "File doesn't exist" in str(e):
+                name = friendly_name or model_name
+                logger.error(f"Model '{name}' not found in '{self.config.models_cache_dir}'.")
+                raise RuntimeError(f"Model '{name}' not found in '{self.config.models_cache_dir}'.") from None
+            raise
+
     def load_models(self):
         loaded_models = {}
 
         if not getattr(self.config, "dynamically_load_models", False):
             logger.info(f"Pre-loading models with execution providers: {self.config.execution_providers}")
             loaded_models = {
-                item.name: TextEmbedding(
-                    model_name=item.value["model_name"],
-                    providers=self.config.execution_providers,
-                )
+                item.name: self._load_text_embedding(item.value["model_name"], item.name)
                 for item in self.selected_models
             }
         else:
@@ -110,9 +121,8 @@ class EmbeddingsModels:
         if self.config.dynamically_load_models:
             with self.model_loading_lock:
                 if model_name not in self.loaded_models:
-                    self.loaded_models[model_name] = TextEmbedding(
-                        model_name=OramaModelInfo[model_name].value["model_name"],
-                        providers=self.config.execution_providers,
+                    self.loaded_models[model_name] = self._load_text_embedding(
+                        OramaModelInfo[model_name].value["model_name"], model_name
                     )
 
                 return list(embed_alternative(self.loaded_models[model_name], input_with_instructions))
