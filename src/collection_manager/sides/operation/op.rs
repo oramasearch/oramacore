@@ -1,3 +1,5 @@
+use oramacore_lib::values::ValueOperation;
+
 use crate::{
     collection_manager::sides::write::index::{EnumStrategy, IndexedValue},
     python::embeddings::Model,
@@ -254,6 +256,7 @@ pub enum CollectionWriteOperation {
     PinRule(PinRuleOperation<DocumentId>),
     Shelf(ShelfOperation<DocumentId>),
     DocumentStorage(DocumentStorageWriteOperation),
+    Value(ValueOperation),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -514,6 +517,7 @@ impl WriteOperation {
                     DocumentStorageWriteOperation::DeleteDocumentsWithDocIdStr { .. },
                 ),
             ) => "collection_document_storage_delete_documents_with_doc_id_str",
+            WriteOperation::Collection(_, CollectionWriteOperation::Value(_)) => "value",
             #[allow(deprecated)]
             WriteOperation::DocumentStorage(DocumentStorageWriteOperation::InsertDocument {
                 ..
