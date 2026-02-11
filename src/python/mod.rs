@@ -57,6 +57,24 @@ impl PythonService {
 
         if std::path::Path::new(&venv_dir).exists() {
             path.call_method1("insert", (0, &venv_dir))?;
+
+            // Fix sys.executable: PyO3 sets it to the host Rust binary, but
+            // Python's multiprocessing "spawn" method (default on macOS) uses
+            // sys.executable to create worker processes. Without this fix, it
+            // re-executes the Rust binary instead of Python, causing a process
+            // cascade. See: https://github.com/PyO3/pyo3/issues/4215
+            //
+            // Note: on first model download, a harmless "leaked semaphore"
+            // warning may appear at shutdown from multiprocessing's
+            // resource_tracker. This is a one-time cosmetic issue — the OS
+            // cleans up the semaphore automatically.
+            if let Some(venv_base) = std::path::Path::new(&venv_dir).ancestors().nth(3) {
+                let python_exe = venv_base.join("bin").join("python3");
+                if python_exe.exists() {
+                    sys.setattr("executable", python_exe.to_string_lossy().as_ref())?;
+                    info!("Set sys.executable to: {:?}", python_exe);
+                }
+            }
         } else {
             warn!(
                 "Specified Python venv directory does not exist: {}. Continuing without it.",
