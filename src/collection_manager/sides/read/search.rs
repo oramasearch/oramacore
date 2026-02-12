@@ -72,6 +72,9 @@ pub struct Search<'collection, 'analytics_storage> {
     analytics_storage: Option<&'analytics_storage OramaCoreAnalytics>,
     request: SearchRequest,
     log_sender: Option<Arc<tokio::sync::broadcast::Sender<(OutputChannel, String)>>>,
+    /// Secrets fetched from external providers (e.g. AWS Secrets Manager), filtered for this collection.
+    /// Passed to hooks as a third argument.
+    secrets: Arc<HashMap<String, String>>,
 }
 
 impl<'collection, 'analytics_storage> Search<'collection, 'analytics_storage> {
@@ -80,12 +83,14 @@ impl<'collection, 'analytics_storage> Search<'collection, 'analytics_storage> {
         analytics_storage: Option<&'analytics_storage OramaCoreAnalytics>,
         request: SearchRequest,
         log_sender: Option<Arc<tokio::sync::broadcast::Sender<(OutputChannel, String)>>>,
+        secrets: Arc<HashMap<String, String>>,
     ) -> Self {
         Self {
             collection,
             analytics_storage,
             request,
             log_sender,
+            secrets,
         }
     }
 
@@ -97,6 +102,7 @@ impl<'collection, 'analytics_storage> Search<'collection, 'analytics_storage> {
             analytics_storage,
             request,
             log_sender,
+            secrets,
         } = self;
         let SearchRequest {
             search_params,
@@ -162,9 +168,10 @@ impl<'collection, 'analytics_storage> Search<'collection, 'analytics_storage> {
             .get_documents_by_ids(all_docs_ids.collect())
             .await?;
 
-        // Hook signature: function transformDocumentAfterSearch(documents, collectionValues)
+        // Hook signature: function transformDocumentAfterSearch(documents, collectionValues, secrets)
         // - documents: the fetched documents from storage
         // - collectionValues: key-value pairs associated with the collection
+        // - secrets: secrets fetched from external providers (e.g. AWS Secrets Manager)
         // Note: We must clone here because, if hook returns None (null/undefined in JS),
         // we need to preserve original docs.
         let hook_input = docs.clone();
@@ -172,7 +179,7 @@ impl<'collection, 'analytics_storage> Search<'collection, 'analytics_storage> {
         let result: Option<Vec<(DocumentId, Arc<RawJSONDocument>)>> = collection
             .run_hook(
                 HookType::TransformDocumentAfterSearch,
-                (hook_input, collection_values),
+                (hook_input, collection_values, secrets),
                 log_sender,
             )
             .await?;

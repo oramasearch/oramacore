@@ -99,6 +99,7 @@ pub fn create_minimal_config() -> OramacoreConfig {
             analytics: None,
             hooks: Default::default(),
             jwt: None,
+            secrets_manager: None,
         },
     }
 }

@@ -162,6 +162,7 @@ pub fn create_oramacore_config() -> OramacoreConfig {
             hooks: HooksConfig::default(),
             analytics: None,
             jwt: None,
+            secrets_manager: None,
         },
     }
 }
