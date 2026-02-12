@@ -19,6 +19,7 @@ pub use collection::CollectionStats;
 use duration_str::deserialize_duration;
 use notify::NotifierConfig;
 use orama_js_pool::OutputChannel;
+use oramacore_lib::secrets::SecretsService;
 use oramacore_lib::shelves::ShelfId;
 use std::sync::Arc;
 use std::time::Duration;
@@ -82,6 +83,9 @@ pub struct ReadSideConfig {
     #[serde(default)]
     pub hooks: HooksConfig,
     pub jwt: Option<JwtConfig>,
+    /// Optional secrets manager configuration for fetching secrets from external providers.
+    /// Secrets are passed to hooks as a third argument alongside collectionValues.
+    pub secrets_manager: Option<oramacore_lib::secrets::SecretsManagerConfig>,
 }
 
 #[derive(Debug, Deserialize, Clone, Copy)]
@@ -182,6 +186,10 @@ pub struct ReadSide {
     python_service: Arc<PythonService>,
 
     jwt_manager: JwtManager<CustomerClaims>,
+
+    /// Optional secrets service for fetching secrets from external providers (e.g. AWS Secrets Manager).
+    /// When configured, secrets are fetched per-collection and passed to hooks.
+    secrets_service: Option<Arc<SecretsService>>,
 }
 
 impl ReadSide {
@@ -265,6 +273,19 @@ impl ReadSide {
             .await
             .context("Cannot create JWT manager")?;
 
+        // Initialize secrets service if configured
+        let secrets_service = match config.secrets_manager {
+            Some(secrets_config) => {
+                info!("Initializing secrets service");
+                Some(
+                    SecretsService::try_new(secrets_config)
+                        .await
+                        .context("Cannot create secrets service")?,
+                )
+            }
+            None => None,
+        };
+
         let read_side = ReadSide {
             collections: collections_reader,
             _global_document_storage: global_document_storage,
@@ -290,6 +311,8 @@ impl ReadSide {
             python_service,
 
             jwt_manager,
+
+            secrets_service,
         };
 
         let operation_receiver = operation_receiver_creator.create(last_offset).await?;
@@ -577,13 +600,23 @@ impl ReadSide {
             request.search_params = modified_params;
         }
 
+        // Fetch secrets for this collection (empty map if no secrets service configured)
+        let secrets = match &self.secrets_service {
+            Some(service) => {
+                service
+                    .get_secrets_for_collection(collection_id.as_str())
+                    .await
+            }
+            None => oramacore_lib::secrets::empty_secrets(),
+        };
+
         let log_sender = self.get_hook_logs().get_sender(&collection_id);
         let search = Search::new(
             &collection,
-            // &self.global_document_storage,
             self.analytics_storage.as_ref(),
             request,
             log_sender,
+            secrets,
         );
 
         let search_result = search.execute().await?;

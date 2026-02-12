@@ -153,6 +153,7 @@ fn create_test_config(build: bool) -> OramacoreConfig {
             hooks: HooksConfig::default(),
             analytics: None,
             jwt: None,
+            secrets_manager: None,
         },
     }
 }
