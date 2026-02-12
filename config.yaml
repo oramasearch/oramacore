@@ -93,7 +93,6 @@ writer_side:
     #         #   audiences:
     #         #       - https://api.yourservice.com
 
-
 reader_side:
     # Optional on the reader side
     master_api_key: my-master-api-key
