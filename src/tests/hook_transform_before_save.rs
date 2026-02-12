@@ -563,3 +563,86 @@ export default { transformDocumentBeforeSave }"#
         "Expected error about document reordering, got: {err_msg}"
     );
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_transform_before_save_receives_values_and_secrets() {
+    init_log();
+
+    let test_context = TestContext::new().await;
+    let collection_client = test_context.create_collection().await.unwrap();
+
+    // Set collection values before the hook is installed
+    let collection = collection_client
+        .writer
+        .get_collection(
+            collection_client.collection_id,
+            collection_client.write_api_key,
+        )
+        .await
+        .unwrap();
+    collection
+        .set_value("env".to_string(), "testing".to_string())
+        .await
+        .unwrap();
+    drop(collection);
+
+    // Hook uses collectionValues (2nd arg) and secrets (3rd arg) to annotate documents.
+    // Since no secrets manager is configured in tests, secrets will be an empty object.
+    collection_client
+        .insert_hook(
+            HookType::TransformDocumentBeforeSave,
+            r#"
+const transformDocumentBeforeSave = function (documents, collectionValues, secrets) {
+    return documents.map(doc => {
+        doc.from_values = collectionValues.env || "missing";
+        doc.secrets_type = typeof secrets;
+        doc.secrets_empty = Object.keys(secrets).length === 0;
+        return doc;
+    });
+}
+export default { transformDocumentBeforeSave }"#
+                .to_string(),
+        )
+        .await
+        .unwrap();
+
+    let index_client = collection_client.create_index().await.unwrap();
+
+    let documents: DocumentList = json!([
+        {"id": "1", "title": "hello"}
+    ])
+    .try_into()
+    .unwrap();
+    index_client.insert_documents(documents).await.unwrap();
+
+    let results = collection_client
+        .search(
+            json!({
+                "term": "hello",
+            })
+            .try_into()
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(results.count, 1);
+    let document = results.hits[0].document.as_ref().unwrap();
+    // Verify the hook received collection values
+    assert_eq!(
+        document.get("from_values").unwrap(),
+        "testing",
+        "Hook should receive collection values as second argument"
+    );
+    // Verify the hook received secrets (empty object since no secrets manager configured)
+    assert_eq!(
+        document.get("secrets_type").unwrap(),
+        "object",
+        "Hook should receive secrets as third argument"
+    );
+    assert_eq!(
+        document.get("secrets_empty").unwrap(),
+        true,
+        "Secrets should be empty when no secrets manager is configured"
+    );
+}

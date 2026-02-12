@@ -489,6 +489,136 @@ export default { transformDocumentAfterSearch }"#
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn test_transform_after_search_receives_values_and_secrets() {
+    init_log();
+
+    let test_context = TestContext::new().await;
+    let collection_client = test_context.create_collection().await.unwrap();
+    let index_client = collection_client.create_index().await.unwrap();
+
+    let documents: DocumentList = json!([
+        {"id": "1", "title": "hello"},
+        {"id": "2", "title": "world"}
+    ])
+    .try_into()
+    .unwrap();
+    index_client.insert_documents(documents).await.unwrap();
+
+    // Set collection values that the hook should receive
+    let collection = collection_client
+        .writer
+        .get_collection(
+            collection_client.collection_id,
+            collection_client.write_api_key,
+        )
+        .await
+        .unwrap();
+    collection
+        .set_value("visibility".to_string(), "public".to_string())
+        .await
+        .unwrap();
+    drop(collection);
+
+    // Hook uses collectionValues (2nd arg) and secrets (3rd arg) to annotate documents.
+    // Since no secrets manager is configured in tests, secrets will be an empty object.
+    collection_client
+        .insert_hook(
+            HookType::TransformDocumentAfterSearch,
+            r#"
+const transformDocumentAfterSearch = function (documents, collectionValues, secrets) {
+    return documents.map(doc => {
+        doc[1].from_values = collectionValues.visibility || "missing";
+        doc[1].secrets_type = typeof secrets;
+        doc[1].secrets_empty = Object.keys(secrets).length === 0;
+        return doc;
+    });
+}
+export default { transformDocumentAfterSearch }"#
+                .to_string(),
+        )
+        .await
+        .unwrap();
+
+    let read_api_key = collection_client.read_api_key.clone();
+    let collection_id = collection_client.collection_id;
+    wait_for(&test_context, |t| {
+        let reader = t.reader.clone();
+        let read_api_key = read_api_key.clone();
+        async move {
+            let stats = reader
+                .collection_stats(
+                    &read_api_key,
+                    collection_id,
+                    CollectionStatsRequest { with_keys: false },
+                )
+                .await
+                .context("")?;
+
+            if !stats
+                .hooks
+                .contains(&HookType::TransformDocumentAfterSearch)
+            {
+                return Err(anyhow::anyhow!("hook not arrived yet"));
+            }
+
+            Ok(())
+        }
+        .boxed()
+    })
+    .await
+    .unwrap();
+
+    // Wait for collection value to propagate to the reader
+    wait_for(&collection_client, |c| {
+        let reader = c.reader;
+        let read_api_key = c.read_api_key.clone();
+        let collection_id = c.collection_id;
+        async move {
+            let collection = reader.get_collection(collection_id, &read_api_key).await?;
+            let value = collection.get_value("visibility").await;
+            if value.is_none() {
+                return Err(anyhow::anyhow!("collection value not yet available"));
+            }
+            Ok(())
+        }
+        .boxed()
+    })
+    .await
+    .unwrap();
+
+    let results = collection_client
+        .search(
+            json!({
+                "term": "hello",
+            })
+            .try_into()
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(results.count, 1);
+    let document = results.hits[0].document.as_ref().unwrap();
+    // Verify the hook received collection values
+    assert_eq!(
+        document.get("from_values").unwrap(),
+        "public",
+        "Hook should receive collection values as second argument"
+    );
+    // Verify the hook received secrets (empty object since no secrets manager configured)
+    assert_eq!(
+        document.get("secrets_type").unwrap(),
+        "object",
+        "Hook should receive secrets as third argument"
+    );
+    assert_eq!(
+        document.get("secrets_empty").unwrap(),
+        true,
+        "Secrets should be empty when no secrets manager is configured"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn test_transform_after_search_hook_invalid_return_type() {
     init_log();
 

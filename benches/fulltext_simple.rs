@@ -81,6 +81,7 @@ pub fn create_oramacore_config() -> OramacoreConfig {
             },
             hooks: Default::default(),
             jwt: None,
+            secrets_manager: None,
         },
         reader_side: ReadSideConfig {
             master_api_key: None,
