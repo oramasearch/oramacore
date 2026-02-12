@@ -76,6 +76,7 @@ use crate::{
 use oramacore_lib::fs::BufferedFile;
 use oramacore_lib::generic_kv::{KVConfig, KVWriteOperation, KV};
 use oramacore_lib::pin_rules::PinRulesWriterError;
+use oramacore_lib::secrets::SecretsService;
 
 #[derive(Error, Debug)]
 pub enum WriteError {
@@ -144,6 +145,9 @@ pub struct WriteSideConfig {
     pub output: OutputSideChannelType,
     pub config: CollectionsWriterConfig,
     pub jwt: Option<JwtConfig>,
+    /// Optional secrets manager configuration for fetching secrets from external providers.
+    /// Secrets are passed to hooks as a third argument alongside collectionValues.
+    pub secrets_manager: Option<oramacore_lib::secrets::SecretsManagerConfig>,
 }
 
 pub struct WriteSide {
@@ -185,6 +189,10 @@ pub struct WriteSide {
 
     #[allow(dead_code)]
     python_service: Arc<PythonService>,
+
+    /// Optional secrets service for fetching secrets from external providers (e.g. AWS Secrets Manager).
+    /// When configured, secrets are fetched per-collection and passed to hooks.
+    secrets_service: Option<Arc<SecretsService>>,
 }
 
 impl WriteSide {
@@ -278,6 +286,19 @@ impl WriteSide {
 
         let training_sets = TrainingSetInterface::new(kv.clone());
 
+        // Initialize secrets service if configured
+        let secrets_service = match config.secrets_manager {
+            Some(secrets_config) => {
+                info!("Initializing secrets service");
+                Some(
+                    SecretsService::try_new(secrets_config)
+                        .await
+                        .context("Cannot create secrets service")?,
+                )
+            }
+            None => None,
+        };
+
         let write_side = Self {
             collections: collections_writer,
             _document_storage: document_storage,
@@ -297,6 +318,7 @@ impl WriteSide {
             write_operation_counter: AtomicU32::new(0),
             jwt_manager,
             python_service,
+            secrets_service,
         };
 
         let write_side = Arc::new(write_side);
@@ -776,11 +798,20 @@ impl WriteSide {
         let original_documents = Arc::new(document_list);
 
         let document_to_store = if has_hook_transform_before_save {
-            // Hook signature: function transformDocumentBeforeSave(documents, collectionValues)
+            // Hook signature: function transformDocumentBeforeSave(documents, collectionValues, secrets)
             // - documents: the list of documents to be transformed before storage
             // - collectionValues: key-value pairs associated with the collection
+            // - secrets: key-value pairs fetched from the secrets provider for this collection
             let collection_values = collection.list_values().await;
-            let hook_input = ((*original_documents).clone(), collection_values);
+            let secrets = match &self.secrets_service {
+                Some(service) => {
+                    service
+                        .get_secrets_for_collection(collection_id.as_str())
+                        .await
+                }
+                None => oramacore_lib::secrets::empty_secrets(),
+            };
+            let hook_input = ((*original_documents).clone(), collection_values, secrets);
 
             let log_sender = self.get_hook_logs().get_sender(&collection_id);
             let result: Option<DocumentList> = collection
@@ -1034,7 +1065,15 @@ impl WriteSide {
                             let hook_input = document_for_storage.clone();
                             let document_list = DocumentList(vec![hook_input]);
                             let collection_values = collection.list_values().await;
-                            let hook_params = (document_list, collection_values);
+                            let secrets = match &self.secrets_service {
+                                Some(service) => {
+                                    service
+                                        .get_secrets_for_collection(collection_id.as_str())
+                                        .await
+                                }
+                                None => oramacore_lib::secrets::empty_secrets(),
+                            };
+                            let hook_params = (document_list, collection_values, secrets);
 
                             let output: Option<DocumentList> = collection
                                 .run_hook(

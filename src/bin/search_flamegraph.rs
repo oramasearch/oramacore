@@ -130,6 +130,7 @@ fn create_test_config(build: bool) -> OramacoreConfig {
             },
             hooks: HooksConfig::default(),
             jwt: None,
+            secrets_manager: None,
         },
         reader_side: ReadSideConfig {
             master_api_key: None,
