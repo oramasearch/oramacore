@@ -50,7 +50,7 @@ use crate::collection_manager::sides::logs::HookLogs;
 use crate::collection_manager::sides::read::collection::FilterableFieldsStats;
 pub use crate::collection_manager::sides::read::context::ReadSideContext;
 use crate::collection_manager::sides::read::notify::Notifier;
-use crate::collection_manager::sides::read::search::Search;
+use crate::collection_manager::sides::read::search::{HookConfig, Search};
 use crate::lock::{OramaAsyncLock, OramaAsyncMutex};
 use crate::metrics::operations::OPERATION_COUNT;
 use crate::metrics::Empty;
@@ -611,8 +611,10 @@ impl ReadSide {
             &collection,
             self.analytics_storage.as_ref(),
             request,
-            log_sender,
-            secrets,
+            HookConfig {
+                log_sender,
+                secrets,
+            },
         );
 
         let search_result = search.execute().await?;
