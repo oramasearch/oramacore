@@ -930,4 +930,377 @@ mod tests {
 
         assert_eq!(scorer.get_scores().len(), 2);
     }
+
+    // ---- Scoring parity tests ----
+    // These tests verify that BM25 scores from oramacore match those from oramacore_fields
+    // when given identical data and parameters.
+    //
+    // IMPORTANT: oramacore derives per-doc field_length as max(stemmed_positions) + 1.
+    // All test data satisfies: field_length_param = max(stemmed_positions) + 1.
+    //
+    // Run corresponding oramacore_fields tests:
+    //   cd /path/to/oramacore_fields && cargo test test_scoring_parity -- --nocapture
+
+    fn commit_and_search(
+        uncommitted: &UncommittedStringField,
+        tokens: &[String],
+        exact_match: bool,
+        boost: f32,
+        tolerance: Option<u8>,
+        corpus_df: usize,
+    ) -> HashMap<DocumentId, f32> {
+        let data_dir = generate_new_path();
+        let committed = CommittedStringField::from_uncommitted(
+            uncommitted,
+            data_dir,
+            &HashSet::new(),
+            crate::collection_manager::sides::read::OffloadFieldConfig {
+                unload_window: std::time::Duration::from_secs(30 * 60).into(),
+                slot_count_exp: 8,
+                slot_size_exp: 4,
+            },
+        )
+        .unwrap();
+
+        let global_info = committed.stats().global_info;
+        let total_documents = global_info.total_documents as f32;
+
+        let search_params = StringSearchParams {
+            tokens,
+            exact_match,
+            boost,
+            field_id: FieldId(1),
+            global_info,
+            filtered_doc_ids: None,
+            tolerance,
+        };
+
+        let mut scorer: BM25Scorer<DocumentId> = BM25Scorer::plain();
+        committed.search(&search_params, &mut scorer).unwrap();
+        scorer.finalize_term_plain(corpus_df, total_documents, 1.2, 1.0);
+        scorer.get_scores()
+    }
+
+    #[test]
+    fn test_scoring_parity_basic_bm25() {
+        init_log();
+
+        let path = Box::new(["test".to_string()]);
+        let mut uncommitted = UncommittedStringField::empty(path);
+        // Doc1: field_length=5, "term1" exact=[0,1] stemmed=[0,4]
+        // oramacore doc_length = max(stemmed=[0,4])+1 = 5
+        uncommitted.insert(
+            DocumentId(1),
+            5,
+            HashMap::from([(
+                Term("term1".to_string()),
+                TermStringField {
+                    exact_positions: vec![0, 1],
+                    positions: vec![0, 4],
+                },
+            )]),
+        );
+        // Doc2: field_length=3, "term1" exact=[0] stemmed=[2]
+        // oramacore doc_length = max(stemmed=[2])+1 = 3
+        uncommitted.insert(
+            DocumentId(2),
+            3,
+            HashMap::from([(
+                Term("term1".to_string()),
+                TermStringField {
+                    exact_positions: vec![0],
+                    positions: vec![2],
+                },
+            )]),
+        );
+
+        let tokens = vec!["term1".to_string()];
+        // corpus_df = 2 (both docs contain "term1")
+        let scores = commit_and_search(&uncommitted, &tokens, false, 1.0, None, 2);
+
+        let score1 = scores[&DocumentId(1)];
+        let score2 = scores[&DocumentId(2)];
+
+        println!("test_scoring_parity_basic_bm25:");
+        println!("  doc1 score = {score1:.10}");
+        println!("  doc2 score = {score2:.10}");
+
+        assert!(
+            score1 > score2,
+            "Doc1 (tf=4) should rank higher than Doc2 (tf=2)"
+        );
+        // Cross-repo parity: these values must match oramacore_fields' test_scoring_parity_basic_bm25
+        assert!(
+            (score1 - 0.358_531_8).abs() < 1e-6,
+            "doc1 score mismatch: {score1}"
+        );
+        assert!(
+            (score2 - 0.34503868).abs() < 1e-6,
+            "doc2 score mismatch: {score2}"
+        );
+    }
+
+    #[test]
+    fn test_scoring_parity_exact_match() {
+        init_log();
+
+        // NOTE: oramacore always applies 3x exact_match_boost when search_exact returns
+        // is_exact=true. oramacore_fields with tolerance=Some(0) does NOT apply the boost.
+        // Scores here will be higher than the oramacore_fields counterpart.
+        let path = Box::new(["test".to_string()]);
+        let mut uncommitted = UncommittedStringField::empty(path);
+        uncommitted.insert(
+            DocumentId(1),
+            5,
+            HashMap::from([(
+                Term("term1".to_string()),
+                TermStringField {
+                    exact_positions: vec![0, 1],
+                    positions: vec![0, 4],
+                },
+            )]),
+        );
+        uncommitted.insert(
+            DocumentId(2),
+            3,
+            HashMap::from([(
+                Term("term1".to_string()),
+                TermStringField {
+                    exact_positions: vec![0],
+                    positions: vec![2],
+                },
+            )]),
+        );
+
+        let tokens = vec!["term1".to_string()];
+        // exact_match=true: oramacore uses search_exact, tolerance is ignored
+        let scores = commit_and_search(&uncommitted, &tokens, true, 1.0, None, 2);
+
+        let score1 = scores[&DocumentId(1)];
+        let score2 = scores[&DocumentId(2)];
+
+        println!("test_scoring_parity_exact_match:");
+        println!("  doc1 score = {score1:.10} (oramacore_fields will be lower, no 3x boost)");
+        println!("  doc2 score = {score2:.10} (oramacore_fields will be lower, no 3x boost)");
+
+        // Doc1: tf=2 (exact only), Doc2: tf=1 (exact only), with 3x boost
+        assert!(score1 > score2);
+        // These are HIGHER than oramacore_fields (0.2342, 0.2031) due to 3x exact_match_boost
+        assert!(
+            (score1 - 0.32412723).abs() < 1e-6,
+            "doc1 score mismatch: {score1}"
+        );
+        assert!(
+            (score2 - 0.302_722_6).abs() < 1e-6,
+            "doc2 score mismatch: {score2}"
+        );
+    }
+
+    #[test]
+    fn test_scoring_parity_field_boost() {
+        init_log();
+
+        let path = Box::new(["test".to_string()]);
+        let mut uncommitted = UncommittedStringField::empty(path);
+        uncommitted.insert(
+            DocumentId(1),
+            5,
+            HashMap::from([(
+                Term("term1".to_string()),
+                TermStringField {
+                    exact_positions: vec![0, 1],
+                    positions: vec![0, 4],
+                },
+            )]),
+        );
+        uncommitted.insert(
+            DocumentId(2),
+            3,
+            HashMap::from([(
+                Term("term1".to_string()),
+                TermStringField {
+                    exact_positions: vec![0],
+                    positions: vec![2],
+                },
+            )]),
+        );
+
+        let tokens = vec!["term1".to_string()];
+        // boost=2.0
+        let scores = commit_and_search(&uncommitted, &tokens, false, 2.0, None, 2);
+
+        let score1 = scores[&DocumentId(1)];
+        let score2 = scores[&DocumentId(2)];
+
+        println!("test_scoring_parity_field_boost:");
+        println!("  doc1 score = {score1:.10}");
+        println!("  doc2 score = {score2:.10}");
+
+        assert!(score1 > score2);
+        // Cross-repo parity: must match oramacore_fields' test_scoring_parity_field_boost
+        assert!(
+            (score1 - 0.37862647).abs() < 1e-6,
+            "doc1 score mismatch: {score1}"
+        );
+        assert!(
+            (score2 - 0.37096643).abs() < 1e-6,
+            "doc2 score mismatch: {score2}"
+        );
+    }
+
+    #[test]
+    fn test_scoring_parity_single_doc() {
+        init_log();
+
+        let path = Box::new(["test".to_string()]);
+        let mut uncommitted = UncommittedStringField::empty(path);
+        // Doc1: field_length=3, "hello" exact=[0] stemmed=[2]
+        // oramacore doc_length = max(stemmed=[2])+1 = 3
+        uncommitted.insert(
+            DocumentId(1),
+            3,
+            HashMap::from([(
+                Term("hello".to_string()),
+                TermStringField {
+                    exact_positions: vec![0],
+                    positions: vec![2],
+                },
+            )]),
+        );
+
+        let tokens = vec!["hello".to_string()];
+        // corpus_df = 1
+        let scores = commit_and_search(&uncommitted, &tokens, false, 1.0, None, 1);
+
+        let score1 = scores[&DocumentId(1)];
+
+        println!("test_scoring_parity_single_doc:");
+        println!("  doc1 score = {score1:.10}");
+
+        // Cross-repo parity: must match oramacore_fields' test_scoring_parity_single_doc
+        assert!(
+            (score1 - 0.527_417_2).abs() < 1e-6,
+            "doc1 score mismatch: {score1}"
+        );
+    }
+
+    #[test]
+    fn test_scoring_parity_stemmed_only() {
+        init_log();
+
+        let path = Box::new(["test".to_string()]);
+        let mut uncommitted = UncommittedStringField::empty(path);
+        // Doc1: field_length=4, "run" exact=[] stemmed=[0,1,3]
+        // oramacore doc_length = max(stemmed=[0,1,3])+1 = 4
+        uncommitted.insert(
+            DocumentId(1),
+            4,
+            HashMap::from([(
+                Term("run".to_string()),
+                TermStringField {
+                    exact_positions: vec![],
+                    positions: vec![0, 1, 3],
+                },
+            )]),
+        );
+
+        let tokens = vec!["run".to_string()];
+
+        // exact_match=false → tf=3 (stemmed only), corpus_df=1
+        let scores = commit_and_search(&uncommitted, &tokens, false, 1.0, None, 1);
+
+        let score1 = scores[&DocumentId(1)];
+        println!("test_scoring_parity_stemmed_only (exact_match=false):");
+        println!("  doc1 score = {score1:.10}");
+        // Cross-repo parity: must match oramacore_fields' test_scoring_parity_stemmed_only
+        assert!(
+            (score1 - 0.558_441_7).abs() < 1e-6,
+            "doc1 score mismatch: {score1}"
+        );
+
+        // exact_match=true → tf=0, no results
+        let scores = commit_and_search(&uncommitted, &tokens, true, 1.0, None, 0);
+
+        println!("test_scoring_parity_stemmed_only (exact_match=true):");
+        println!("  scores = {scores:?}");
+
+        assert!(
+            scores.is_empty(),
+            "exact_match=true with stemmed-only should yield no results"
+        );
+    }
+
+    #[test]
+    fn test_scoring_parity_varying_lengths() {
+        init_log();
+
+        let path = Box::new(["test".to_string()]);
+        let mut uncommitted = UncommittedStringField::empty(path);
+        // Doc1: field_length=10, "word" exact=[0,1,2] stemmed=[9]
+        // oramacore doc_length = max(stemmed=[9])+1 = 10, tf=4
+        uncommitted.insert(
+            DocumentId(1),
+            10,
+            HashMap::from([(
+                Term("word".to_string()),
+                TermStringField {
+                    exact_positions: vec![0, 1, 2],
+                    positions: vec![9],
+                },
+            )]),
+        );
+        // Doc2: field_length=2, "word" exact=[0] stemmed=[1]
+        // oramacore doc_length = max(stemmed=[1])+1 = 2, tf=2
+        uncommitted.insert(
+            DocumentId(2),
+            2,
+            HashMap::from([(
+                Term("word".to_string()),
+                TermStringField {
+                    exact_positions: vec![0],
+                    positions: vec![1],
+                },
+            )]),
+        );
+        // Doc3: field_length=20, "word" exact=[0,1] stemmed=[0,19]
+        // oramacore doc_length = max(stemmed=[0,19])+1 = 20, tf=4
+        uncommitted.insert(
+            DocumentId(3),
+            20,
+            HashMap::from([(
+                Term("word".to_string()),
+                TermStringField {
+                    exact_positions: vec![0, 1],
+                    positions: vec![0, 19],
+                },
+            )]),
+        );
+
+        let tokens = vec!["word".to_string()];
+        // corpus_df = 3 (all docs contain "word")
+        let scores = commit_and_search(&uncommitted, &tokens, false, 1.0, None, 3);
+
+        let score1 = scores[&DocumentId(1)];
+        let score2 = scores[&DocumentId(2)];
+        let score3 = scores[&DocumentId(3)];
+
+        println!("test_scoring_parity_varying_lengths:");
+        println!("  doc1 (fl=10, tf=4) score = {score1:.10}");
+        println!("  doc2 (fl=2,  tf=2) score = {score2:.10}");
+        println!("  doc3 (fl=20, tf=4) score = {score3:.10}");
+
+        // Cross-repo parity: must match oramacore_fields' test_scoring_parity_varying_lengths
+        assert!(
+            (score1 - 0.268_205_7).abs() < 1e-6,
+            "doc1 score mismatch: {score1}"
+        );
+        assert!(
+            (score2 - 0.27248147).abs() < 1e-6,
+            "doc2 score mismatch: {score2}"
+        );
+        assert!(
+            (score3 - 0.252_027_1).abs() < 1e-6,
+            "doc3 score mismatch: {score3}"
+        );
+    }
 }
