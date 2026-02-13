@@ -1,12 +1,14 @@
-use oramacore_lib::hook_storage::HookType;
+use std::collections::HashMap;
 
-use crate::tests::utils::init_log;
-use crate::tests::utils::wait_for;
-use crate::tests::utils::TestContext;
-use crate::types::{CollectionStatsRequest, DocumentList};
 use anyhow::Context;
 use futures::FutureExt;
+use oramacore_lib::hook_storage::HookType;
+use oramacore_lib::secrets::local::LocalSecretsConfig;
+use oramacore_lib::secrets::SecretsManagerConfig;
 use serde_json::json;
+
+use crate::tests::utils::{create_oramacore_config, init_log, wait_for, TestContext};
+use crate::types::{CollectionStatsRequest, DocumentList, ReadApiKey, WriteApiKey};
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_transform_after_search_happy_path() {
@@ -492,13 +494,79 @@ export default { transformDocumentAfterSearch }"#
 async fn test_transform_after_search_receives_values_and_secrets() {
     init_log();
 
-    let test_context = TestContext::new().await;
-    let collection_client = test_context.create_collection().await.unwrap();
+    // Generate the collection ID upfront so we can seed matching secrets
+    let collection_id = TestContext::generate_collection_id();
+    let col_id_str = collection_id.to_string();
+
+    let secrets_config = SecretsManagerConfig {
+        aws: None,
+        local: Some(LocalSecretsConfig {
+            secrets: HashMap::from([(
+                format!("{col_id_str}_TOKEN"),
+                "search_token_789".to_string(),
+            )]),
+        }),
+    };
+
+    let mut config = create_oramacore_config();
+    config.writer_side.master_api_key = TestContext::generate_api_key();
+    config.writer_side.secrets_manager = Some(secrets_config.clone());
+    config.reader_side.secrets_manager = Some(secrets_config);
+    let test_context = TestContext::new_with_config(config).await;
+
+    // Create the collection with the known ID so secrets prefix matches
+    let write_api_key = TestContext::generate_api_key();
+    let read_api_key_raw = TestContext::generate_api_key();
+    let read_api_key = ReadApiKey::from_api_key(read_api_key_raw);
+
+    test_context
+        .writer
+        .create_collection(
+            test_context.master_api_key,
+            crate::types::CreateCollection {
+                id: collection_id,
+                description: None,
+                mcp_description: None,
+                read_api_key: read_api_key_raw,
+                write_api_key,
+                language: None,
+                embeddings_model: Some(crate::python::embeddings::Model::BGESmall),
+            },
+        )
+        .await
+        .unwrap();
+
+    let read_api_key_for_wait = read_api_key.clone();
+    wait_for(&test_context, |t| {
+        let reader = t.reader.clone();
+        let read_api_key = read_api_key_for_wait.clone();
+        async move {
+            reader
+                .collection_stats(
+                    &read_api_key,
+                    collection_id,
+                    CollectionStatsRequest { with_keys: false },
+                )
+                .await
+                .context("Collection not ready yet")
+        }
+        .boxed()
+    })
+    .await
+    .unwrap();
+
+    let collection_client = test_context
+        .get_test_collection_client(
+            collection_id,
+            WriteApiKey::from_api_key(write_api_key),
+            read_api_key,
+        )
+        .unwrap();
+
     let index_client = collection_client.create_index().await.unwrap();
 
     let documents: DocumentList = json!([
-        {"id": "1", "title": "hello"},
-        {"id": "2", "title": "world"}
+        {"id": "1", "title": "hello world"}
     ])
     .try_into()
     .unwrap();
@@ -520,7 +588,6 @@ async fn test_transform_after_search_receives_values_and_secrets() {
     drop(collection);
 
     // Hook uses collectionValues (2nd arg) and secrets (3rd arg) to annotate documents.
-    // Since no secrets manager is configured in tests, secrets will be an empty object.
     collection_client
         .insert_hook(
             HookType::TransformDocumentAfterSearch,
@@ -528,8 +595,9 @@ async fn test_transform_after_search_receives_values_and_secrets() {
 const transformDocumentAfterSearch = function (documents, collectionValues, secrets) {
     return documents.map(doc => {
         doc[1].from_values = collectionValues.visibility || "missing";
-        doc[1].secrets_type = typeof secrets;
-        doc[1].secrets_empty = Object.keys(secrets).length === 0;
+        doc[1].values_count = Object.keys(collectionValues).length;
+        doc[1].secret_token = secrets.TOKEN || "missing";
+        doc[1].secret_count = Object.keys(secrets).length;
         return doc;
     });
 }
@@ -605,16 +673,21 @@ export default { transformDocumentAfterSearch }"#
         "public",
         "Hook should receive collection values as second argument"
     );
-    // Verify the hook received secrets (empty object since no secrets manager configured)
     assert_eq!(
-        document.get("secrets_type").unwrap(),
-        "object",
-        "Hook should receive secrets as third argument"
+        document.get("values_count").unwrap(),
+        1,
+        "Only 1 collection value should be present"
+    );
+    // Verify the hook received secrets
+    assert_eq!(
+        document.get("secret_token").unwrap(),
+        "search_token_789",
+        "After-search hook should receive TOKEN secret"
     );
     assert_eq!(
-        document.get("secrets_empty").unwrap(),
-        true,
-        "Secrets should be empty when no secrets manager is configured"
+        document.get("secret_count").unwrap(),
+        1,
+        "Only 1 secret should match this collection"
     );
 }
 
