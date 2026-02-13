@@ -67,12 +67,16 @@ pub struct SearchRequest {
     pub interaction_id: Option<String>,
 }
 
+pub struct HookConfig {
+    pub log_sender: Option<Arc<tokio::sync::broadcast::Sender<(OutputChannel, String)>>>,
+    pub secrets: Arc<HashMap<String, String>>,
+}
+
 pub struct Search<'collection, 'analytics_storage> {
     collection: &'collection CollectionReader,
     analytics_storage: Option<&'analytics_storage OramaCoreAnalytics>,
     request: SearchRequest,
-    log_sender: Option<Arc<tokio::sync::broadcast::Sender<(OutputChannel, String)>>>,
-    secrets: Arc<HashMap<String, String>>,
+    hook_config: HookConfig,
 }
 
 impl<'collection, 'analytics_storage> Search<'collection, 'analytics_storage> {
@@ -80,15 +84,13 @@ impl<'collection, 'analytics_storage> Search<'collection, 'analytics_storage> {
         collection: &'collection CollectionReader,
         analytics_storage: Option<&'analytics_storage OramaCoreAnalytics>,
         request: SearchRequest,
-        log_sender: Option<Arc<tokio::sync::broadcast::Sender<(OutputChannel, String)>>>,
-        secrets: Arc<HashMap<String, String>>,
+        hook_config: HookConfig,
     ) -> Self {
         Self {
             collection,
             analytics_storage,
             request,
-            log_sender,
-            secrets,
+            hook_config,
         }
     }
 
@@ -99,9 +101,12 @@ impl<'collection, 'analytics_storage> Search<'collection, 'analytics_storage> {
             collection,
             analytics_storage,
             request,
+            hook_config,
+        } = self;
+        let HookConfig {
             log_sender,
             secrets,
-        } = self;
+        } = hook_config;
         let SearchRequest {
             search_params,
             search_analytics_event_origin,
