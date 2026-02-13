@@ -185,7 +185,7 @@ pub struct ReadSide {
 
     jwt_manager: JwtManager<CustomerClaims>,
 
-    secrets_service: Option<Arc<SecretsService>>,
+    secrets_service: Arc<SecretsService>,
 }
 
 impl ReadSide {
@@ -269,17 +269,15 @@ impl ReadSide {
             .await
             .context("Cannot create JWT manager")?;
 
-        // Initialize secrets service if configured
+        // Initialize secrets service if configured, otherwise use an empty fallback
         let secrets_service = match config.secrets_manager {
             Some(secrets_config) => {
                 info!("Initializing secrets service");
-                Some(
-                    SecretsService::try_new(secrets_config)
-                        .await
-                        .context("Cannot create secrets service")?,
-                )
+                SecretsService::try_new(secrets_config)
+                    .await
+                    .context("Cannot create secrets service")?
             }
-            None => None,
+            None => SecretsService::empty(),
         };
 
         let read_side = ReadSide {
@@ -597,14 +595,10 @@ impl ReadSide {
         }
 
         // Fetch secrets for this collection (empty map if no secrets service configured)
-        let secrets = match &self.secrets_service {
-            Some(service) => {
-                service
-                    .get_secrets_for_collection(collection_id.as_str())
-                    .await
-            }
-            None => Arc::new(HashMap::new()),
-        };
+        let secrets = self
+            .secrets_service
+            .get_secrets_for_collection(collection_id.as_str())
+            .await;
 
         let log_sender = self.get_hook_logs().get_sender(&collection_id);
         let search = Search::new(

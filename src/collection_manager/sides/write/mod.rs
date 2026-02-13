@@ -188,7 +188,7 @@ pub struct WriteSide {
     #[allow(dead_code)]
     python_service: Arc<PythonService>,
 
-    secrets_service: Option<Arc<SecretsService>>,
+    secrets_service: Arc<SecretsService>,
 }
 
 impl WriteSide {
@@ -282,17 +282,15 @@ impl WriteSide {
 
         let training_sets = TrainingSetInterface::new(kv.clone());
 
-        // Initialize secrets service if configured
+        // Initialize secrets service if configured, otherwise use an empty fallback
         let secrets_service = match config.secrets_manager {
             Some(secrets_config) => {
                 info!("Initializing secrets service");
-                Some(
-                    SecretsService::try_new(secrets_config)
-                        .await
-                        .context("Cannot create secrets service")?,
-                )
+                SecretsService::try_new(secrets_config)
+                    .await
+                    .context("Cannot create secrets service")?
             }
-            None => None,
+            None => SecretsService::empty(),
         };
 
         let write_side = Self {
@@ -799,14 +797,10 @@ impl WriteSide {
             // - collectionValues: key-value pairs associated with the collection
             // - secrets: key-value pairs fetched from the secrets provider for this collection
             let collection_values = collection.list_values().await;
-            let secrets = match &self.secrets_service {
-                Some(service) => {
-                    service
-                        .get_secrets_for_collection(collection_id.as_str())
-                        .await
-                }
-                None => Arc::new(HashMap::new()),
-            };
+            let secrets = self
+                .secrets_service
+                .get_secrets_for_collection(collection_id.as_str())
+                .await;
             let hook_input = ((*original_documents).clone(), collection_values, secrets);
 
             let log_sender = self.get_hook_logs().get_sender(&collection_id);
@@ -1061,14 +1055,10 @@ impl WriteSide {
                             let hook_input = document_for_storage.clone();
                             let document_list = DocumentList(vec![hook_input]);
                             let collection_values = collection.list_values().await;
-                            let secrets = match &self.secrets_service {
-                                Some(service) => {
-                                    service
-                                        .get_secrets_for_collection(collection_id.as_str())
-                                        .await
-                                }
-                                None => Arc::new(HashMap::new()),
-                            };
+                            let secrets = self
+                                .secrets_service
+                                .get_secrets_for_collection(collection_id.as_str())
+                                .await;
                             let hook_params = (document_list, collection_values, secrets);
 
                             let output: Option<DocumentList> = collection
