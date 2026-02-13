@@ -494,7 +494,6 @@ export default { transformDocumentAfterSearch }"#
 async fn test_transform_after_search_receives_values_and_secrets() {
     init_log();
 
-    // Generate the collection ID upfront so we can seed matching secrets
     let collection_id = TestContext::generate_collection_id();
     let col_id_str = collection_id.to_string();
 
@@ -514,7 +513,6 @@ async fn test_transform_after_search_receives_values_and_secrets() {
     config.reader_side.secrets_manager = Some(secrets_config);
     let test_context = TestContext::new_with_config(config).await;
 
-    // Create the collection with the known ID so secrets prefix matches
     let write_api_key = TestContext::generate_api_key();
     let read_api_key_raw = TestContext::generate_api_key();
     let read_api_key = ReadApiKey::from_api_key(read_api_key_raw);
@@ -572,7 +570,6 @@ async fn test_transform_after_search_receives_values_and_secrets() {
     .unwrap();
     index_client.insert_documents(documents).await.unwrap();
 
-    // Set collection values that the hook should receive
     let collection = collection_client
         .writer
         .get_collection(
@@ -636,7 +633,6 @@ export default { transformDocumentAfterSearch }"#
     .await
     .unwrap();
 
-    // Wait for collection value to propagate to the reader
     wait_for(&collection_client, |c| {
         let reader = c.reader;
         let read_api_key = c.read_api_key.clone();
@@ -667,7 +663,6 @@ export default { transformDocumentAfterSearch }"#
 
     assert_eq!(results.count, 1);
     let document = results.hits[0].document.as_ref().unwrap();
-    // Verify the hook received collection values
     assert_eq!(
         document.get("from_values").unwrap(),
         "public",
@@ -678,7 +673,6 @@ export default { transformDocumentAfterSearch }"#
         1,
         "Only 1 collection value should be present"
     );
-    // Verify the hook received secrets
     assert_eq!(
         document.get("secret_token").unwrap(),
         "search_token_789",
