@@ -170,18 +170,24 @@ impl Field for CommittedDateField {
     fn stats(&self) -> CommittedDateFieldStats {
         let min = self.vec.first().map(|(num, _)| *num);
         let max = self.vec.last().map(|(num, _)| *num);
+        let document_count: usize = self.vec.iter().map(|(_, ids)| ids.len()).sum();
 
         let (Some(min), Some(max)) = (min, max) else {
             return CommittedDateFieldStats {
                 min: None,
                 max: None,
+                document_count: 0,
             };
         };
 
         let min = OramaDate::try_from_i64(min);
         let max = OramaDate::try_from_i64(max);
 
-        CommittedDateFieldStats { min, max }
+        CommittedDateFieldStats {
+            min,
+            max,
+            document_count,
+        }
     }
 }
 
@@ -230,6 +236,7 @@ pub struct DateFieldInfo {
 pub struct CommittedDateFieldStats {
     pub min: Option<OramaDate>,
     pub max: Option<OramaDate>,
+    pub document_count: usize,
 }
 
 impl CommittedFieldMetadata for DateFieldInfo {
