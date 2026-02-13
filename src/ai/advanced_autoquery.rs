@@ -176,6 +176,8 @@ enum FieldStatType {
         _min: Option<f64>,
         #[serde(default)]
         _max: Option<f64>,
+        #[serde(default)]
+        document_count: usize,
     },
     #[serde(rename = "uncommitted_string_filter")]
     UncommittedStringFilter {
@@ -232,10 +234,7 @@ impl FieldStatType {
                 true_count,
             } => false_count + true_count,
             UncommittedNumber { count, .. } => *count,
-            // Committed number/vector fields don't carry a count, but if
-            // they exist they contain documents. Return 1 so they pass the
-            // "document_count > 0" filter in extract_schema_fields.
-            CommittedNumber { .. } => 1,
+            CommittedNumber { document_count, .. } => *document_count,
             UncommittedStringFilter { document_count, .. }
             | CommittedStringFilter { document_count, .. } => *document_count,
             UncommittedString { global_info, .. } | CommittedString { global_info, .. } => {
