@@ -1319,7 +1319,11 @@ impl CollectionReader {
                             }
                         }
                     }
-                    IndexFieldStatsType::CommittedDate(CommittedDateFieldStats { min, max }) => {
+                    IndexFieldStatsType::CommittedDate(CommittedDateFieldStats {
+                        min,
+                        max,
+                        ..
+                    }) => {
                         final_stats.insert(
                             field.field_id,
                             FilterableField::Date(FilterableFieldDate {
@@ -1368,6 +1372,7 @@ impl CollectionReader {
                     IndexFieldStatsType::CommittedNumber(CommittedNumberFieldStats {
                         min,
                         max,
+                        ..
                     }) => {
                         final_stats.insert(
                             field.field_id,

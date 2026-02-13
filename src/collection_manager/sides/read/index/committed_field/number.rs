@@ -221,15 +221,21 @@ impl Field for CommittedNumberField {
     fn stats(&self) -> CommittedNumberFieldStats {
         let min = self.vec.first().map(|(num, _)| num.0);
         let max = self.vec.last().map(|(num, _)| num.0);
+        let document_count: usize = self.vec.iter().map(|(_, ids)| ids.len()).sum();
 
         let (Some(min), Some(max)) = (min, max) else {
             return CommittedNumberFieldStats {
                 min: Number::F32(f32::INFINITY),
                 max: Number::F32(f32::NEG_INFINITY),
+                document_count: 0,
             };
         };
 
-        CommittedNumberFieldStats { min, max }
+        CommittedNumberFieldStats {
+            min,
+            max,
+            document_count,
+        }
     }
 }
 
@@ -345,6 +351,7 @@ pub struct NumberFieldInfo {
 pub struct CommittedNumberFieldStats {
     pub min: Number,
     pub max: Number,
+    pub document_count: usize,
 }
 
 impl CommittedFieldMetadata for NumberFieldInfo {
