@@ -72,8 +72,6 @@ pub struct Search<'collection, 'analytics_storage> {
     analytics_storage: Option<&'analytics_storage OramaCoreAnalytics>,
     request: SearchRequest,
     log_sender: Option<Arc<tokio::sync::broadcast::Sender<(OutputChannel, String)>>>,
-    /// Secrets fetched from external providers (e.g. AWS Secrets Manager), filtered for this collection.
-    /// Passed to hooks as a third argument.
     secrets: Arc<HashMap<String, String>>,
 }
 

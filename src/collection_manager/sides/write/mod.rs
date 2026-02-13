@@ -76,7 +76,7 @@ use crate::{
 use oramacore_lib::fs::BufferedFile;
 use oramacore_lib::generic_kv::{KVConfig, KVWriteOperation, KV};
 use oramacore_lib::pin_rules::PinRulesWriterError;
-use oramacore_lib::secrets::SecretsService;
+use oramacore_lib::secrets::{SecretsManagerConfig, SecretsService};
 
 #[derive(Error, Debug)]
 pub enum WriteError {
@@ -145,9 +145,7 @@ pub struct WriteSideConfig {
     pub output: OutputSideChannelType,
     pub config: CollectionsWriterConfig,
     pub jwt: Option<JwtConfig>,
-    /// Optional secrets manager configuration for fetching secrets from external providers.
-    /// Secrets are passed to hooks as a third argument alongside collectionValues.
-    pub secrets_manager: Option<oramacore_lib::secrets::SecretsManagerConfig>,
+    pub secrets_manager: Option<SecretsManagerConfig>,
 }
 
 pub struct WriteSide {
@@ -190,8 +188,6 @@ pub struct WriteSide {
     #[allow(dead_code)]
     python_service: Arc<PythonService>,
 
-    /// Optional secrets service for fetching secrets from external providers (e.g. AWS Secrets Manager).
-    /// When configured, secrets are fetched per-collection and passed to hooks.
     secrets_service: Option<Arc<SecretsService>>,
 }
 
@@ -809,7 +805,7 @@ impl WriteSide {
                         .get_secrets_for_collection(collection_id.as_str())
                         .await
                 }
-                None => oramacore_lib::secrets::empty_secrets(),
+                None => Arc::new(HashMap::new()),
             };
             let hook_input = ((*original_documents).clone(), collection_values, secrets);
 
@@ -1071,7 +1067,7 @@ impl WriteSide {
                                         .get_secrets_for_collection(collection_id.as_str())
                                         .await
                                 }
-                                None => oramacore_lib::secrets::empty_secrets(),
+                                None => Arc::new(HashMap::new()),
                             };
                             let hook_params = (document_list, collection_values, secrets);
 
