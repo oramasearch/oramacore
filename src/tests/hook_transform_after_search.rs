@@ -4,7 +4,7 @@ use anyhow::Context;
 use futures::FutureExt;
 use oramacore_lib::hook_storage::HookType;
 use oramacore_lib::secrets::local::LocalSecretsConfig;
-use oramacore_lib::secrets::SecretsManagerConfig;
+use oramacore_lib::secrets::SecretsProviderConfig;
 use serde_json::json;
 
 use crate::tests::utils::{create_oramacore_config, init_log, wait_for, TestContext};
@@ -497,15 +497,12 @@ async fn test_transform_after_search_receives_values_and_secrets() {
     let collection_id = TestContext::generate_collection_id();
     let col_id_str = collection_id.to_string();
 
-    let secrets_config = SecretsManagerConfig {
-        aws: None,
-        local: Some(LocalSecretsConfig {
-            secrets: HashMap::from([(
-                format!("{col_id_str}_TOKEN"),
-                "search_token_789".to_string(),
-            )]),
-        }),
-    };
+    let secrets_config = vec![SecretsProviderConfig::Local(LocalSecretsConfig {
+        secrets: HashMap::from([(
+            format!("{col_id_str}_TOKEN"),
+            "search_token_789".to_string(),
+        )]),
+    })];
 
     let mut config = create_oramacore_config();
     config.writer_side.master_api_key = TestContext::generate_api_key();

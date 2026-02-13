@@ -76,7 +76,7 @@ use crate::{
 use oramacore_lib::fs::BufferedFile;
 use oramacore_lib::generic_kv::{KVConfig, KVWriteOperation, KV};
 use oramacore_lib::pin_rules::PinRulesWriterError;
-use oramacore_lib::secrets::{SecretsManagerConfig, SecretsService};
+use oramacore_lib::secrets::{SecretsProviderConfig, SecretsService};
 
 #[derive(Error, Debug)]
 pub enum WriteError {
@@ -145,7 +145,7 @@ pub struct WriteSideConfig {
     pub output: OutputSideChannelType,
     pub config: CollectionsWriterConfig,
     pub jwt: Option<JwtConfig>,
-    pub secrets_manager: Option<SecretsManagerConfig>,
+    pub secrets_manager: Option<Vec<SecretsProviderConfig>>,
 }
 
 pub struct WriteSide {
@@ -282,15 +282,14 @@ impl WriteSide {
 
         let training_sets = TrainingSetInterface::new(kv.clone());
 
-        // Initialize secrets service if configured, otherwise use an empty fallback
         let secrets_service = match config.secrets_manager {
-            Some(secrets_config) => {
+            Some(configs) if !configs.is_empty() => {
                 info!("Initializing secrets service");
-                SecretsService::try_new(secrets_config)
+                SecretsService::try_new(configs)
                     .await
                     .context("Cannot create secrets service")?
             }
-            None => SecretsService::empty(),
+            _ => SecretsService::empty(),
         };
 
         let write_side = Self {

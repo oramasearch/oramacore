@@ -41,12 +41,16 @@ writer_side:
     # Uncomment to enable secrets fetched from external providers (e.g. AWS Secrets Manager).
     # Secrets are cached in memory with configurable TTL and passed to hooks as a third argument.
     # Key pattern: oramacore_<collection_uuid>_<secretKey>
+    # Multiple providers can be specified as a list; secrets are merged (later entries override).
     # secrets_manager:
-    #     aws:
+    #     - aws:
     #         region: us-east-1
     #         ttl: 5m
     #         access_key_id: test
     #         secret_access_key: test
+    #     - local:
+    #         secrets:
+    #             col1_TOKEN: my-token
 
 
     # Replace the following value with your own API key
@@ -169,12 +173,16 @@ reader_side:
     # Uncomment to enable secrets fetched from external providers (e.g. AWS Secrets Manager).
     # Secrets are cached in memory with configurable TTL and passed to hooks as a third argument.
     # Key pattern: oramacore_<collection_uuid>_<secretKey>
+    # Multiple providers can be specified as a list; secrets are merged (later entries override).
     # secrets_manager:
-    #     aws:
+    #     - aws:
     #         region: us-east-1
     #         ttl: 5m
     #         access_key_id: test
     #         secret_access_key: test
+    #     - local:
+    #         secrets:
+    #             col1_TOKEN: my-token
 
     # Uncomment to enable customer JWT validation for search requests.
     # This allows customers to use their own identity provider (IdP) for authentication.

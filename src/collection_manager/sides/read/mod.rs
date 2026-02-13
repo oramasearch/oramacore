@@ -19,7 +19,7 @@ pub use collection::CollectionStats;
 use duration_str::deserialize_duration;
 use notify::NotifierConfig;
 use orama_js_pool::OutputChannel;
-use oramacore_lib::secrets::{SecretsManagerConfig, SecretsService};
+use oramacore_lib::secrets::{SecretsProviderConfig, SecretsService};
 use oramacore_lib::shelves::ShelfId;
 use std::sync::Arc;
 use std::time::Duration;
@@ -83,7 +83,7 @@ pub struct ReadSideConfig {
     #[serde(default)]
     pub hooks: HooksConfig,
     pub jwt: Option<JwtConfig>,
-    pub secrets_manager: Option<SecretsManagerConfig>,
+    pub secrets_manager: Option<Vec<SecretsProviderConfig>>,
 }
 
 #[derive(Debug, Deserialize, Clone, Copy)]
@@ -269,15 +269,14 @@ impl ReadSide {
             .await
             .context("Cannot create JWT manager")?;
 
-        // Initialize secrets service if configured, otherwise use an empty fallback
         let secrets_service = match config.secrets_manager {
-            Some(secrets_config) => {
+            Some(configs) if !configs.is_empty() => {
                 info!("Initializing secrets service");
-                SecretsService::try_new(secrets_config)
+                SecretsService::try_new(configs)
                     .await
                     .context("Cannot create secrets service")?
             }
-            None => SecretsService::empty(),
+            _ => SecretsService::empty(),
         };
 
         let read_side = ReadSide {
