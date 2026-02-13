@@ -1368,6 +1368,7 @@ impl CollectionReader {
                     IndexFieldStatsType::CommittedNumber(CommittedNumberFieldStats {
                         min,
                         max,
+                        ..
                     }) => {
                         final_stats.insert(
                             field.field_id,
