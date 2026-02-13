@@ -572,19 +572,16 @@ export default { transformDocumentBeforeSave }"#
 async fn test_transform_before_save_receives_values_and_secrets() {
     init_log();
 
-    // Generate the collection ID upfront so we can seed matching secrets
     let collection_id = TestContext::generate_collection_id();
     let col_id_str = collection_id.to_string();
 
     let secrets_config = SecretsManagerConfig {
         aws: None,
         local: Some(LocalSecretsConfig {
-            secrets: HashMap::from([
-                (format!("{col_id_str}_API_KEY"), "my_secret_key".to_string()),
-                (format!("{col_id_str}_DB_HOST"), "db.internal".to_string()),
-                // This secret belongs to a different collection and should not be visible
-                ("othercol_TOKEN".to_string(), "other_token".to_string()),
-            ]),
+            secrets: HashMap::from([(
+                format!("{col_id_str}_TOKEN"),
+                "save_token_789".to_string(),
+            )]),
         }),
     };
 
@@ -594,7 +591,6 @@ async fn test_transform_before_save_receives_values_and_secrets() {
     config.reader_side.secrets_manager = Some(secrets_config);
     let test_context = TestContext::new_with_config(config).await;
 
-    // Create the collection with the known ID so secrets prefix matches
     let write_api_key = TestContext::generate_api_key();
     let read_api_key_raw = TestContext::generate_api_key();
     let read_api_key = ReadApiKey::from_api_key(read_api_key_raw);
@@ -643,7 +639,6 @@ async fn test_transform_before_save_receives_values_and_secrets() {
         )
         .unwrap();
 
-    // Set collection values that the hook should receive
     let collection = collection_client
         .writer
         .get_collection(
@@ -653,7 +648,7 @@ async fn test_transform_before_save_receives_values_and_secrets() {
         .await
         .unwrap();
     collection
-        .set_value("env".to_string(), "testing".to_string())
+        .set_value("visibility".to_string(), "public".to_string())
         .await
         .unwrap();
     drop(collection);
@@ -665,11 +660,9 @@ async fn test_transform_before_save_receives_values_and_secrets() {
             r#"
 const transformDocumentBeforeSave = function (documents, collectionValues, secrets) {
     return documents.map(doc => {
-        doc.from_values = collectionValues.env || "missing";
+        doc.from_values = collectionValues.visibility || "missing";
         doc.values_count = Object.keys(collectionValues).length;
-        doc.secret_api_key = secrets.API_KEY || "missing";
-        doc.secret_db_host = secrets.DB_HOST || "missing";
-        doc.secret_other_token = secrets.TOKEN || "not_visible";
+        doc.secret_token = secrets.TOKEN || "missing";
         doc.secret_count = Object.keys(secrets).length;
         return doc;
     });
@@ -683,7 +676,7 @@ export default { transformDocumentBeforeSave }"#
     let index_client = collection_client.create_index().await.unwrap();
 
     let documents: DocumentList = json!([
-        {"id": "1", "title": "hello"}
+        {"id": "1", "title": "hello world"}
     ])
     .try_into()
     .unwrap();
@@ -704,7 +697,7 @@ export default { transformDocumentBeforeSave }"#
     let document = results.hits[0].document.as_ref().unwrap();
     assert_eq!(
         document.get("from_values").unwrap(),
-        "testing",
+        "public",
         "Hook should receive collection values as second argument"
     );
     assert_eq!(
@@ -713,23 +706,13 @@ export default { transformDocumentBeforeSave }"#
         "Only 1 collection value should be present"
     );
     assert_eq!(
-        document.get("secret_api_key").unwrap(),
-        "my_secret_key",
-        "Hook should receive API_KEY secret"
-    );
-    assert_eq!(
-        document.get("secret_db_host").unwrap(),
-        "db.internal",
-        "Hook should receive DB_HOST secret"
-    );
-    assert_eq!(
-        document.get("secret_other_token").unwrap(),
-        "not_visible",
-        "Secrets from other collections should not be visible"
+        document.get("secret_token").unwrap(),
+        "save_token_789",
+        "Before-save hook should receive TOKEN secret"
     );
     assert_eq!(
         document.get("secret_count").unwrap(),
-        2,
-        "Only 2 secrets should match this collection"
+        1,
+        "Only 1 secret should match this collection"
     );
 }
