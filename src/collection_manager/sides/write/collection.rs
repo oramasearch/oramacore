@@ -39,6 +39,7 @@ use oramacore_lib::fs::BufferedFile;
 use super::index::Index;
 use oramacore_lib::nlp::{locales::Locale, TextParser};
 use oramacore_lib::pin_rules::{PinRule, PinRuleOperation};
+use oramacore_lib::values::{ValueOperation, ValuesWriter};
 
 pub const DEFAULT_EMBEDDING_FIELD_NAME: &str = "___orama_auto_embedding";
 
@@ -70,6 +71,8 @@ pub struct CollectionWriter {
     is_new: bool,
 
     document_storage: CollectionDocumentStorage,
+
+    values_writer: OramaAsyncLock<ValuesWriter>,
 }
 
 impl CollectionWriter {
@@ -135,6 +138,8 @@ impl CollectionWriter {
             shelves_writer: OramaAsyncLock::new("shelves_writer", ShelvesWriter::empty()?),
 
             is_new: true,
+
+            values_writer: OramaAsyncLock::new("values_writer", ValuesWriter::empty()),
         })
     }
 
@@ -257,6 +262,11 @@ impl CollectionWriter {
             ),
 
             is_new: false,
+
+            values_writer: OramaAsyncLock::new(
+                "values_writer",
+                ValuesWriter::try_load(data_dir.clone()).context("Cannot load values")?,
+            ),
         })
     }
 
@@ -269,11 +279,13 @@ impl CollectionWriter {
         let temp_indexes_lock = self.temp_indexes.get_mut();
         let pin_rules_lock = self.pin_rules_writer.get_mut();
         let shelves_lock = self.shelves_writer.get_mut();
+        let values_lock = self.values_writer.get_mut();
 
         let is_dirty = indexes_lock.values().any(|i| i.is_dirty())
             || temp_indexes_lock.values().any(|i| i.is_dirty())
             || pin_rules_lock.has_pending_changes()
-            || shelves_lock.has_pending_changes();
+            || shelves_lock.has_pending_changes()
+            || values_lock.has_pending_changes();
 
         if !self.is_new && !is_dirty {
             info!("Collection is not dirty, skipping commit");
@@ -306,6 +318,12 @@ impl CollectionWriter {
         shelves_lock
             .commit(data_dir.join("shelves"))
             .context("Cannot commit shelves")?;
+
+        let mut values_lock = self.values_writer.write("commit").await;
+        values_lock
+            .commit(data_dir.clone())
+            .context("Cannot commit values")?;
+        drop(values_lock);
 
         let temporary_indexes = temp_indexes_lock.keys().copied().collect::<Vec<_>>();
         let indexes_path = data_dir.join("temp_indexes");
@@ -1136,6 +1154,65 @@ impl CollectionWriter {
     pub async fn list_shelves(&self) -> Result<Vec<Shelf<String>>, WriteError> {
         let shelves_writer = self.shelves_writer.read("list_shelves").await;
         Ok(shelves_writer.list_shelves().to_vec())
+    }
+
+    /// Sets a collection value and sends the operation to the reader via the channel.
+    pub async fn set_value(&self, key: String, value: String) -> Result<(), WriteError> {
+        let mut lock = self.values_writer.write("set_value").await;
+        lock.set(key.clone(), value.clone())
+            .context("Cannot set value")?;
+        drop(lock);
+
+        self.context
+            .op_sender
+            .send(WriteOperation::Collection(
+                self.id,
+                CollectionWriteOperation::Value(ValueOperation::Set { key, value }),
+            ))
+            .await
+            .context("Cannot send value set operation")?;
+
+        Ok(())
+    }
+
+    /// Gets a collection value by key.
+    pub async fn get_value(&self, key: &str) -> Option<String> {
+        let lock = self.values_writer.read("get_value").await;
+        lock.get(key)
+    }
+
+    /// Deletes a collection value and sends the operation to the reader via the channel.
+    pub async fn delete_value(&self, key: &str) -> Result<bool, WriteError> {
+        let mut lock = self.values_writer.write("delete_value").await;
+        let removed = lock.delete(key);
+        drop(lock);
+
+        if removed {
+            self.context
+                .op_sender
+                .send(WriteOperation::Collection(
+                    self.id,
+                    CollectionWriteOperation::Value(ValueOperation::Delete {
+                        key: key.to_string(),
+                    }),
+                ))
+                .await
+                .context("Cannot send value delete operation")?;
+        }
+
+        Ok(removed)
+    }
+
+    /// Returns all collection values as a shared reference.
+    pub async fn list_values(&self) -> Arc<HashMap<String, String>> {
+        let lock = self.values_writer.read("list_values").await;
+        lock.list()
+    }
+
+    /// Returns the count of collection values.
+    pub async fn values_count(&self) -> usize {
+        let lock = self.values_writer.read("values_count").await;
+        lock.count()
     }
 }
 

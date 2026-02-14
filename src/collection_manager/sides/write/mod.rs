@@ -76,6 +76,7 @@ use crate::{
 use oramacore_lib::fs::BufferedFile;
 use oramacore_lib::generic_kv::{KVConfig, KVWriteOperation, KV};
 use oramacore_lib::pin_rules::PinRulesWriterError;
+use oramacore_lib::secrets::{SecretsProviderConfig, SecretsService};
 
 #[derive(Error, Debug)]
 pub enum WriteError {
@@ -144,6 +145,7 @@ pub struct WriteSideConfig {
     pub output: OutputSideChannelType,
     pub config: CollectionsWriterConfig,
     pub jwt: Option<JwtConfig>,
+    pub secrets_manager: Option<Vec<SecretsProviderConfig>>,
 }
 
 pub struct WriteSide {
@@ -185,6 +187,8 @@ pub struct WriteSide {
 
     #[allow(dead_code)]
     python_service: Arc<PythonService>,
+
+    secrets_service: Arc<SecretsService>,
 }
 
 impl WriteSide {
@@ -278,6 +282,16 @@ impl WriteSide {
 
         let training_sets = TrainingSetInterface::new(kv.clone());
 
+        let secrets_service = match config.secrets_manager {
+            Some(configs) if !configs.is_empty() => {
+                info!("Initializing secrets service");
+                SecretsService::try_new(configs)
+                    .await
+                    .context("Cannot create secrets service")?
+            }
+            _ => SecretsService::empty(),
+        };
+
         let write_side = Self {
             collections: collections_writer,
             _document_storage: document_storage,
@@ -297,6 +311,7 @@ impl WriteSide {
             write_operation_counter: AtomicU32::new(0),
             jwt_manager,
             python_service,
+            secrets_service,
         };
 
         let write_side = Arc::new(write_side);
@@ -776,9 +791,16 @@ impl WriteSide {
         let original_documents = Arc::new(document_list);
 
         let document_to_store = if has_hook_transform_before_save {
-            // Hook signature: function transformDocumentBeforeSave(documents)
+            // Hook signature: function transformDocumentBeforeSave(documents, collectionValues, secrets)
             // - documents: the list of documents to be transformed before storage
-            let hook_input = vec![(*original_documents).clone()];
+            // - collectionValues: key-value pairs associated with the collection
+            // - secrets: key-value pairs fetched from the secrets provider for this collection
+            let collection_values = collection.list_values().await;
+            let secrets = self
+                .secrets_service
+                .get_secrets_for_collection(collection_id.as_str())
+                .await;
+            let hook_input = ((*original_documents).clone(), collection_values, secrets);
 
             let log_sender = self.get_hook_logs().get_sender(&collection_id);
             let result: Option<DocumentList> = collection
@@ -1031,7 +1053,12 @@ impl WriteSide {
                             // Clone for hook input
                             let hook_input = document_for_storage.clone();
                             let document_list = DocumentList(vec![hook_input]);
-                            let hook_params = vec![document_list];
+                            let collection_values = collection.list_values().await;
+                            let secrets = self
+                                .secrets_service
+                                .get_secrets_for_collection(collection_id.as_str())
+                                .await;
+                            let hook_params = (document_list, collection_values, secrets);
 
                             let output: Option<DocumentList> = collection
                                 .run_hook(

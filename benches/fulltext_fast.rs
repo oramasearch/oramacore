@@ -80,6 +80,7 @@ pub fn create_minimal_config() -> OramacoreConfig {
             },
             hooks: Default::default(),
             jwt: None,
+            secrets_manager: None,
         },
         reader_side: ReadSideConfig {
             master_api_key: None,
@@ -100,6 +101,7 @@ pub fn create_minimal_config() -> OramacoreConfig {
             hooks: Default::default(),
             analytics: None,
             jwt: None,
+            secrets_manager: None,
         },
     }
 }

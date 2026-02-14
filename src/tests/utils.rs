@@ -135,6 +135,7 @@ pub fn create_oramacore_config() -> OramacoreConfig {
                 },
             },
             jwt: None,
+            secrets_manager: None,
         },
         reader_side: ReadSideConfig {
             master_api_key: None,
@@ -162,6 +163,7 @@ pub fn create_oramacore_config() -> OramacoreConfig {
             hooks: HooksConfig::default(),
             analytics: None,
             jwt: None,
+            secrets_manager: None,
         },
     }
 }

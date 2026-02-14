@@ -18,6 +18,7 @@ mod shelves;
 mod system_prompts;
 mod tools;
 mod training_sets;
+mod values;
 
 pub fn apis(write_side: Option<Arc<WriteSide>>, read_side: Option<Arc<ReadSide>>) -> Router {
     let collection_router = Router::new();
@@ -32,6 +33,7 @@ pub fn apis(write_side: Option<Arc<WriteSide>>, read_side: Option<Arc<ReadSide>>
             .merge(pin_rules::write_apis(write_side.clone()))
             .merge(mcp::write_apis(write_side.clone()))
             .merge(shelves::write_apis(write_side.clone()))
+            .merge(values::write_apis(write_side.clone()))
     } else {
         collection_router
     };
