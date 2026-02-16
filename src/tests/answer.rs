@@ -390,8 +390,11 @@ export default { beforeAnswer }
     wait_for(&collection_client, |collection_client| {
         async {
             let stats = collection_client.reader_stats().await.expect("Failed to get reader stats");
-            let index_stats = stats.indexes_stats.first()
-                .expect("No index stats found");
+            let index_stats = stats
+                .indexes_stats
+                .iter()
+                .find(|index| index.id == index_client.index_id)
+                .ok_or_else(|| anyhow!("Index stats not found for {}", index_client.index_id))?;
             let field_stats = index_stats
                 .fields_stats
                 .iter()
@@ -401,16 +404,17 @@ export default { beforeAnswer }
                 return Err(anyhow!("Auto embedding field not found yet"));
             };
 
-            let IndexFieldStatsType::UncommittedVector(field_stats) = &field_stats.stats else {
-                return Err(anyhow!("Expected UncommittedVector field stats type"));
+            let vector_count = match &field_stats.stats {
+                IndexFieldStatsType::UncommittedVector(field_stats) => field_stats.document_count,
+                IndexFieldStatsType::CommittedVector(field_stats) => field_stats.vector_count,
+                _ => return Err(anyhow!("Expected vector field stats type")),
             };
 
-            if field_stats.document_count == 2 {
+            if vector_count == 2 {
                 Ok(())
             } else {
                 Err(anyhow!(
-                    "Waiting for embeddings: expected 2 documents with embeddings, got {}",
-                    field_stats.document_count
+                    "Waiting for embeddings: expected 2 documents with embeddings, got {vector_count}"
                 ))
             }
         }
