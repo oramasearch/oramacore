@@ -19,6 +19,7 @@ pub use collection::CollectionStats;
 use duration_str::deserialize_duration;
 use notify::NotifierConfig;
 use orama_js_pool::OutputChannel;
+use oramacore_lib::secrets::{SecretsProviderConfig, SecretsService};
 use oramacore_lib::shelves::ShelfId;
 use std::sync::Arc;
 use std::time::Duration;
@@ -49,7 +50,7 @@ use crate::collection_manager::sides::logs::HookLogs;
 use crate::collection_manager::sides::read::collection::FilterableFieldsStats;
 pub use crate::collection_manager::sides::read::context::ReadSideContext;
 use crate::collection_manager::sides::read::notify::Notifier;
-use crate::collection_manager::sides::read::search::Search;
+use crate::collection_manager::sides::read::search::{HookConfig, Search};
 use crate::lock::{OramaAsyncLock, OramaAsyncMutex};
 use crate::metrics::operations::OPERATION_COUNT;
 use crate::metrics::Empty;
@@ -82,6 +83,7 @@ pub struct ReadSideConfig {
     #[serde(default)]
     pub hooks: HooksConfig,
     pub jwt: Option<JwtConfig>,
+    pub secrets_manager: Option<Vec<SecretsProviderConfig>>,
 }
 
 #[derive(Debug, Deserialize, Clone, Copy)]
@@ -182,6 +184,8 @@ pub struct ReadSide {
     python_service: Arc<PythonService>,
 
     jwt_manager: JwtManager<CustomerClaims>,
+
+    secrets_service: Arc<SecretsService>,
 }
 
 impl ReadSide {
@@ -265,6 +269,16 @@ impl ReadSide {
             .await
             .context("Cannot create JWT manager")?;
 
+        let secrets_service = match config.secrets_manager {
+            Some(configs) if !configs.is_empty() => {
+                info!("Initializing secrets service");
+                SecretsService::try_new(configs)
+                    .await
+                    .context("Cannot create secrets service")?
+            }
+            _ => SecretsService::empty(),
+        };
+
         let read_side = ReadSide {
             collections: collections_reader,
             _global_document_storage: global_document_storage,
@@ -290,6 +304,8 @@ impl ReadSide {
             python_service,
 
             jwt_manager,
+
+            secrets_service,
         };
 
         let operation_receiver = operation_receiver_creator.create(last_offset).await?;
@@ -577,13 +593,21 @@ impl ReadSide {
             request.search_params = modified_params;
         }
 
+        // Fetch secrets for this collection (empty map if no secrets service configured)
+        let secrets = self
+            .secrets_service
+            .get_secrets_for_collection(collection_id.as_str())
+            .await;
+
         let log_sender = self.get_hook_logs().get_sender(&collection_id);
         let search = Search::new(
             &collection,
-            // &self.global_document_storage,
             self.analytics_storage.as_ref(),
             request,
-            log_sender,
+            HookConfig {
+                log_sender,
+                secrets,
+            },
         );
 
         let search_result = search.execute().await?;
