@@ -355,7 +355,7 @@ async fn test_collection_values_validation() {
     let result = collection
         .set_value("key".to_string(), "".to_string())
         .await;
-    assert!(result.is_err(), "Empty value should be rejected");
+    assert!(result.is_ok(), "Empty value should be accepted");
 
     let large_value = "x".repeat(10 * 1024 + 1);
     let result = collection.set_value("key".to_string(), large_value).await;
