@@ -140,7 +140,11 @@ impl<'collection, 'analytics_storage> Search<'collection, 'analytics_storage> {
             .get_index_read_locks(search_params.indexes.as_ref())
             .await?;
 
-        search_params.mode = determine_search_mode(&indexes, &search_params.mode).await?;
+        search_params.mode = TokenScoreContext::determine_search_mode(
+            collection.get_read_side_context(),
+            &search_params.mode,
+        )
+        .await?;
 
         let pin_rule_consequences = extract_pin_rules(
             &*collection.get_pin_rules_reader("search").await,
@@ -286,18 +290,6 @@ impl<'collection, 'analytics_storage> Search<'collection, 'analytics_storage> {
 
         Ok(result)
     }
-}
-
-async fn determine_search_mode(
-    indexes: &ReadIndexesLockGuard<'_>,
-    mode: &SearchMode,
-) -> Result<SearchMode, ReadError> {
-    let Some(index) = indexes.iter().next() else {
-        return Ok(mode.clone());
-    };
-
-    let search_store = index.get_search_store().await;
-    Ok(TokenScoreContext::determine_search_mode(search_store.read_side_context, mode).await?)
 }
 
 pub fn extract_term_from_search_mode(search_mode: &SearchMode) -> &str {

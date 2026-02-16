@@ -658,6 +658,10 @@ impl CollectionReader {
         self.id
     }
 
+    pub fn get_read_side_context(&self) -> &ReadSideContext {
+        &self.context
+    }
+
     pub fn is_deleted(&self) -> bool {
         self.deleted
     }
