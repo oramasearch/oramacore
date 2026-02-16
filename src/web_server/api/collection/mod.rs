@@ -10,7 +10,6 @@ mod analytics;
 mod answer;
 mod generate;
 mod hooks;
-mod mcp;
 pub mod openai_chat;
 mod pin_rules;
 mod search;
@@ -30,7 +29,6 @@ pub fn apis(write_side: Option<Arc<WriteSide>>, read_side: Option<Arc<ReadSide>>
             .merge(system_prompts::write_apis(write_side.clone()))
             .merge(training_sets::write_apis(write_side.clone()))
             .merge(pin_rules::write_apis(write_side.clone()))
-            .merge(mcp::write_apis(write_side.clone()))
             .merge(shelves::write_apis(write_side.clone()))
     } else {
         collection_router
@@ -47,7 +45,6 @@ pub fn apis(write_side: Option<Arc<WriteSide>>, read_side: Option<Arc<ReadSide>>
             .merge(tools::read_apis(read_side.clone()))
             .merge(system_prompts::read_apis(read_side.clone()))
             .merge(training_sets::read_apis(read_side.clone()))
-            .merge(mcp::apis(read_side.clone()))
             .merge(pin_rules::read_apis(read_side.clone()))
             .merge(shelves::read_apis(read_side.clone()))
     } else {

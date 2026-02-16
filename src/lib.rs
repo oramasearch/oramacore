@@ -43,8 +43,6 @@ pub mod ai;
 
 pub mod embeddings;
 
-pub mod python;
-
 #[cfg(test)]
 pub mod tests;
 
@@ -256,11 +254,6 @@ pub async fn build_orama(
         embeddings::EmbeddingsService::new(config.ai_server.clone())
             .context("Cannot create embeddings service")?,
     );
-
-    // Initialize Python for MCP service (embeddings no longer use Python)
-    info!("Initializing Python for MCP service");
-    python::initialize_for_mcp()
-        .map_err(|e| anyhow::anyhow!("Failed to initialize Python for MCP: {e}"))?;
 
     #[cfg(feature = "writer")]
     let write_side = {

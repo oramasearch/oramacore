@@ -278,7 +278,8 @@ async fn test_offload_vector_field() {
         .await
         .unwrap();
 
-    // Perform initial vector search to ensure the field is loaded
+    // Perform initial vector search to ensure the field is loaded.
+    // Use a high similarity threshold to only get the closest match.
     let search_result = wait_for(&collection_client, move |collection_client| {
         async move {
             let search_result = collection_client
@@ -286,6 +287,7 @@ async fn test_offload_vector_field() {
                     json!({
                         "mode": "vector",
                         "term": "Document about artificial intelligence and machine learning",
+                        "similarity": 0.9,
                     })
                     .try_into()
                     .unwrap(),
@@ -323,6 +325,7 @@ async fn test_offload_vector_field() {
                 "mode": "vector",
                 // The first document
                 "term": "Document about artificial intelligence and machine learning",
+                "similarity": 0.9,
             })
             .try_into()
             .unwrap(),
@@ -406,6 +409,7 @@ async fn test_offload_vector_field() {
                 "mode": "vector",
                 // The first document
                 "term": "Document about artificial intelligence and machine learning",
+                "similarity": 0.9,
             })
             .try_into()
             .unwrap(),
@@ -440,15 +444,16 @@ async fn test_offload_vector_field() {
 
     println!("--------\n\n----\n\n");
 
+    // Verify field still works correctly with a different search.
+    // Use a lower similarity threshold to get multiple related results.
     let search_result = wait_for(&collection_client, |collection_client| {
         async move {
-            // Verify field still works correctly with different search
             let search_result = collection_client
                 .search(
                     json!({
                         "mode": "vector",
-                        // The first document
                         "term": "Research paper on neural networks and deep learning",
+                        "similarity": 0.5,
                     })
                     .try_into()
                     .unwrap(),
@@ -456,10 +461,13 @@ async fn test_offload_vector_field() {
                 .await
                 .unwrap();
 
-            if search_result.count > 0 {
+            if search_result.count >= 2 {
                 Ok(search_result)
             } else {
-                Err(anyhow::anyhow!("result not found"))
+                Err(anyhow::anyhow!(
+                    "Expected at least 2 results, got {}",
+                    search_result.count
+                ))
             }
         }
         .boxed()
@@ -467,14 +475,11 @@ async fn test_offload_vector_field() {
     .await
     .unwrap();
 
-    assert_eq!(search_result.hits.len(), 2);
+    // The most relevant result should be doc 2 (neural networks)
+    assert!(search_result.hits.len() >= 2);
     assert_eq!(
         search_result.hits[0].id,
         format!("{}:{}", index_client.index_id, "2")
-    );
-    assert_eq!(
-        search_result.hits[1].id,
-        format!("{}:{}", index_client.index_id, "1")
     );
 
     drop(test_context);

@@ -2,19 +2,24 @@ use std::sync::Arc;
 
 use axum::{
     extract::{Path, State},
+    http::StatusCode,
     response::IntoResponse,
-    routing::{get, post},
+    routing::{get, post, put},
     Json, Router,
 };
 use serde_json::json;
 use tracing::info;
 
 use crate::{
-    collection_manager::sides::{write::WriteSide, ReplaceIndexReason},
+    collection_manager::sides::{
+        write::{WriteError, WriteSide},
+        ReplaceIndexReason,
+    },
     types::{
         ApiKey, CollectionId, CreateCollection, CreateIndexRequest, DeleteCollection,
         DeleteDocuments, DeleteIndex, DocumentList, IndexId, ListDocumentInCollectionRequest,
-        ReindexConfig, ReplaceIndexRequest, UpdateDocumentRequest, WriteApiKey,
+        ReindexConfig, ReplaceIndexRequest, UpdateCollectionMcpRequest, UpdateDocumentRequest,
+        WriteApiKey,
     },
 };
 
@@ -53,6 +58,10 @@ pub fn apis(write_side: Arc<WriteSide>) -> Router {
         .route(
             "/v1/collections/{collection_id}/replace-index",
             post(replace_index),
+        )
+        .route(
+            "/v1/collections/{collection_id}/mcp/update",
+            put(update_mcp_endpoint),
         )
         .with_state(write_side)
 }
@@ -218,4 +227,33 @@ async fn replace_index(
         )
         .await
         .map(|_| Json(json!({ "message": "Index replaced" })))
+}
+
+async fn update_mcp_endpoint(
+    Path(collection_id): Path<CollectionId>,
+    State(write_side): State<Arc<WriteSide>>,
+    write_api_key: WriteApiKey,
+    Json(request): Json<UpdateCollectionMcpRequest>,
+) -> impl IntoResponse {
+    match write_side
+        .update_collection_mcp_description(write_api_key, collection_id, request.mcp_description)
+        .await
+    {
+        Ok(()) => (
+            StatusCode::OK,
+            Json(json!({ "message": "MCP description updated successfully" })),
+        ),
+        Err(WriteError::CollectionNotFound(_)) => (
+            StatusCode::NOT_FOUND,
+            Json(json!({ "error": "Collection not found" })),
+        ),
+        Err(WriteError::InvalidWriteApiKey(_)) => (
+            StatusCode::UNAUTHORIZED,
+            Json(json!({ "error": "Unauthorized" })),
+        ),
+        Err(err) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": format!("Internal server error: {}", err) })),
+        ),
+    }
 }

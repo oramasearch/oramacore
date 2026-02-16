@@ -13,7 +13,6 @@ use fake::Fake;
 use fake::Faker;
 use futures::{future::BoxFuture, FutureExt};
 use oramacore_lib::hook_storage::HookType;
-use pyo3::Python;
 use tokio::{
     sync::{mpsc, RwLock},
     time::sleep,
@@ -50,19 +49,11 @@ use anyhow::Context;
 use oramacore_lib::pin_rules::PinRule;
 use oramacore_lib::shelves::{Shelf, ShelfId};
 
-// Ensure Python is initialized only once across all tests.
-// Python::initialize() must be called from a consistent thread and only once
-// to avoid race conditions that can cause SIGSEGV.
-static PYTHON_INIT: Once = Once::new();
 // Ensure logging and environment variables are set only once to avoid
 // race conditions with unsafe std::env::set_var in multi-threaded tests.
 static LOG_INIT: Once = Once::new();
 
 pub fn init_log() {
-    PYTHON_INIT.call_once(|| {
-        Python::initialize();
-    });
-
     LOG_INIT.call_once(|| {
         if let Ok(a) = std::env::var("LOG") {
             if a == "info" {
@@ -100,7 +91,6 @@ pub fn create_oramacore_config() -> OramacoreConfig {
             total_threads: 4,
             embeddings: Some(AIServiceEmbeddingsConfig {
                 automatic_embeddings_selector: None,
-                execution_providers: vec!["CPUExecutionProvider".to_string()],
                 default_model_group: "all".to_string(),
                 total_threads: 4,
                 dynamically_load_models: true,
@@ -399,7 +389,6 @@ impl TestContext {
 
 impl Drop for TestContext {
     fn drop(&mut self) {
-        // First, stop the reader while in tokio context
         let output = tokio::task::block_in_place(|| {
             tokio::runtime::Handle::current().block_on(async {
                 // Some tests may close the connection intentionally
@@ -411,12 +400,6 @@ impl Drop for TestContext {
         if let Err(err) = output {
             warn!("Error stopping reader: {}", err);
         }
-
-        // Then acquire GIL to ensure Python objects are properly cleaned up
-        // This must happen after the async cleanup to avoid deadlocks
-        Python::attach(|_py| {
-            // GIL is held, any Python object drops that happen now are safe
-        });
     }
 }
 

@@ -1,8 +1,0 @@
-.venv
-.idea
-.pytest_cache
-.embeddins_models_cache
-__pycache__
-loader.py
-output.txt
-image.jpg

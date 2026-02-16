@@ -84,9 +84,6 @@ pub struct AIServiceEmbeddingsConfig {
     #[serde(default = "dynamically_load_models")]
     pub dynamically_load_models: bool,
 
-    #[serde(default = "default_execution_providers")]
-    pub execution_providers: Vec<String>,
-
     #[serde(default = "default_embedding_total_threads")]
     pub total_threads: u8,
 
@@ -99,10 +96,6 @@ fn dynamically_load_models() -> bool {
 
 fn default_embedding_total_threads() -> u8 {
     8
-}
-
-fn default_execution_providers() -> Vec<String> {
-    vec!["CUDAExecutionProvider".to_string()]
 }
 
 fn default_default_model_group() -> String {
