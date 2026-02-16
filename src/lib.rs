@@ -41,6 +41,8 @@ pub mod build_info;
 
 pub mod ai;
 
+pub mod embeddings;
+
 pub mod python;
 
 #[cfg(test)]
@@ -249,8 +251,16 @@ pub async fn build_orama(
     info!("Building nlp_service");
     let nlp_service = Arc::new(nlp::NLPService::new());
 
-    info!("Building Python service");
-    let python_service = Arc::new(python::PythonService::new(config.ai_server.clone())?);
+    info!("Building embeddings service");
+    let embeddings_service = Arc::new(
+        embeddings::EmbeddingsService::new(config.ai_server.clone())
+            .context("Cannot create embeddings service")?,
+    );
+
+    // Initialize Python for MCP service (embeddings no longer use Python)
+    info!("Initializing Python for MCP service");
+    python::initialize_for_mcp()
+        .map_err(|e| anyhow::anyhow!("Failed to initialize Python for MCP: {e}"))?;
 
     #[cfg(feature = "writer")]
     let write_side = {
@@ -271,7 +281,7 @@ pub async fn build_orama(
             nlp_service.clone(),
             llm_service.clone(),
             automatic_embeddings_selector,
-            python_service.clone(),
+            embeddings_service.clone(),
         )
         .await
         .context("Cannot create write side")?;
@@ -295,7 +305,7 @@ pub async fn build_orama(
             llm_service,
             config.reader_side,
             local_gpu_manager,
-            python_service.clone(),
+            embeddings_service.clone(),
         )
         .await
         .context("Cannot create read side")?;

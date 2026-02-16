@@ -22,7 +22,6 @@ use tokio_stream::wrappers::ReceiverStream;
 use tracing::warn;
 
 use crate::ai::AIServiceEmbeddingsConfig;
-use crate::ai::PythonLoggingLevel;
 use crate::{
     ai::{AIServiceConfig, AIServiceLLMConfig},
     build_orama,
@@ -36,7 +35,7 @@ use crate::{
         },
         InputSideChannelType, OutputSideChannelType, ReplaceIndexReason,
     },
-    python::embeddings::Model,
+    embeddings::Model,
     types::{
         ApiKey, CollectionId, CollectionStatsRequest, CreateCollection, CreateIndexRequest,
         DescribeCollectionResponse, Document, DocumentList, IndexId, InsertDocumentsResult,
@@ -105,7 +104,6 @@ pub fn create_oramacore_config() -> OramacoreConfig {
                 default_model_group: "all".to_string(),
                 total_threads: 4,
                 dynamically_load_models: true,
-                level: PythonLoggingLevel::Error,
             }),
             llm: AIServiceLLMConfig {
                 local: true,

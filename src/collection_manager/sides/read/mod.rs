@@ -50,10 +50,10 @@ use crate::collection_manager::sides::read::collection::FilterableFieldsStats;
 pub use crate::collection_manager::sides::read::context::ReadSideContext;
 use crate::collection_manager::sides::read::notify::Notifier;
 use crate::collection_manager::sides::read::search::Search;
+use crate::embeddings::EmbeddingsService;
 use crate::lock::{OramaAsyncLock, OramaAsyncMutex};
 use crate::metrics::operations::OPERATION_COUNT;
 use crate::metrics::Empty;
-use crate::python::PythonService;
 use crate::types::{
     ApiKey, CollectionStatsRequest, CustomerClaims, Document, InteractionLLMConfig, ReadApiKey,
     SearchMode, SearchModeResult, SearchResult,
@@ -179,7 +179,7 @@ pub struct ReadSide {
     stop_done_receiver: OramaAsyncLock<tokio::sync::mpsc::Receiver<()>>,
 
     #[allow(dead_code)]
-    python_service: Arc<PythonService>,
+    embeddings_service: Arc<EmbeddingsService>,
 
     jwt_manager: JwtManager<CustomerClaims>,
 }
@@ -191,7 +191,7 @@ impl ReadSide {
         llm_service: Arc<LLMService>,
         config: ReadSideConfig,
         local_gpu_manager: Arc<LocalGPUManager>,
-        python_service: Arc<PythonService>,
+        embeddings_service: Arc<EmbeddingsService>,
     ) -> Result<Arc<Self>> {
         let document_storage = DocumentStorage::try_new(DocumentStorageConfig {
             data_dir: config.config.data_dir.join("docs"),
@@ -213,7 +213,7 @@ impl ReadSide {
         }
 
         let context = ReadSideContext {
-            python_service: python_service.clone(),
+            embeddings_service: embeddings_service.clone(),
             nlp_service: nlp_service.clone(),
             llm_service: llm_service.clone(),
             notifier,
@@ -287,7 +287,7 @@ impl ReadSide {
 
             stop_sender,
             stop_done_receiver: OramaAsyncLock::new("stop_done_receiver", stop_done_receiver),
-            python_service,
+            embeddings_service,
 
             jwt_manager,
         };

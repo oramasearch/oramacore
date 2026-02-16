@@ -11,7 +11,7 @@ use crate::{
         bm25::BM25Scorer,
         sides::read::index::committed_field::{StringSearchParams, VectorSearchParams},
     },
-    python::embeddings::Intent,
+    embeddings::Intent,
     types::{
         DocumentId, FieldId, FulltextMode, HybridMode, IndexId, Limit, Properties, SearchMode,
         SearchModeResult, Similarity, Threshold, VectorMode,
@@ -378,7 +378,6 @@ impl<'index> TokenScoreContext<'index> {
             // TODO: think about this.
             let targets = self
                 .context
-                .python_service
                 .embeddings_service
                 .calculate_embeddings(vec![term.to_string()], Intent::Query, model)
                 .context("Cannot calculate embeddings")?;

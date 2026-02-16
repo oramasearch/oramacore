@@ -20,7 +20,7 @@ use oramacore::{
         write::{CollectionsWriterConfig, TempIndexCleanupConfig, WriteSideConfig},
         InputSideChannelType, OutputSideChannelType,
     },
-    python::embeddings::Model,
+    embeddings::Model,
     types::{
         ApiKey, CollectionId, CreateCollection, CreateIndexRequest, DeleteDocuments, DocumentList,
         IndexEmbeddingsCalculation, IndexId, LanguageDTO, ReadApiKey, SearchParams, WriteApiKey,

@@ -9,13 +9,13 @@ use crate::{
         write::{document_storage::DocumentStorage, embedding::MultiEmbeddingCalculationRequest},
         OperationSender,
     },
-    python::PythonService,
+    embeddings::EmbeddingsService,
     HooksConfig,
 };
 
 #[derive(Clone)]
 pub struct WriteSideContext {
-    pub python_service: Arc<PythonService>,
+    pub embeddings_service: Arc<EmbeddingsService>,
     pub embedding_sender: Sender<MultiEmbeddingCalculationRequest>,
     pub op_sender: OperationSender,
     pub nlp_service: Arc<NLPService>,

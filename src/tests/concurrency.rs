@@ -101,7 +101,7 @@ async fn test_insert_create_collection_concurrency() {
                             read_api_key,
                             write_api_key,
                             language: None,
-                            embeddings_model: Some(crate::python::embeddings::Model::BGESmall),
+                            embeddings_model: Some(crate::embeddings::Model::BGESmall),
                         },
                     )
                     .await

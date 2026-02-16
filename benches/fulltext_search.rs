@@ -88,7 +88,7 @@ pub fn create_oramacore_config() -> OramacoreConfig {
             config: CollectionsWriterConfig {
                 data_dir: generate_new_path(),
                 embedding_queue_limit: 50,
-                default_embedding_model: oramacore::python::embeddings::Model::BGESmall,
+                default_embedding_model: oramacore::embeddings::Model::BGESmall,
                 insert_batch_commit_size: 10_000,
                 javascript_queue_limit: 10_000,
                 commit_interval: Duration::from_secs(3_000),
@@ -191,7 +191,7 @@ impl TestContext {
                     write_api_key,
                     language: None,
                     mcp_description: None,
-                    embeddings_model: Some(oramacore::python::embeddings::Model::BGESmall),
+                    embeddings_model: Some(oramacore::embeddings::Model::BGESmall),
                 },
             )
             .await?;

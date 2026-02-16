@@ -1,6 +1,6 @@
 use crate::{
     collection_manager::sides::write::index::{EnumStrategy, IndexedValue},
-    python::embeddings::Model,
+    embeddings::Model,
     types::{
         ApiKey, CollectionId, DocumentFields, DocumentId, FieldId, IndexId, Number, RawJSONDocument,
     },

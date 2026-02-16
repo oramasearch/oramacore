@@ -4,7 +4,7 @@ use serde_json::json;
 use tokio::time::sleep;
 
 use crate::collection_manager::sides::write::WriteError;
-use crate::python::embeddings::Model;
+use crate::embeddings::Model;
 use crate::tests::utils::init_log;
 use crate::tests::utils::TestContext;
 use crate::types::CreateCollection;

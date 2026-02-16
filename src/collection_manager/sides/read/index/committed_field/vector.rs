@@ -27,8 +27,8 @@ use crate::{
         },
         OffloadFieldConfig,
     },
+    embeddings::Model,
     lock::OramaSyncLock,
-    python::embeddings::Model,
     types::DocumentId,
 };
 

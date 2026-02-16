@@ -8,7 +8,7 @@ use crate::{
         committed_field::VectorSearchParams,
         merge::{Field, UncommittedField},
     },
-    python::embeddings::Model,
+    embeddings::Model,
     types::DocumentId,
 };
 

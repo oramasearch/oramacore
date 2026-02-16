@@ -1,6 +1,6 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Deserializer, Serialize};
-use std::{fmt::Display, str::FromStr};
+use std::str::FromStr;
 
 use crate::types::InteractionLLMConfig;
 use anyhow::{anyhow, Result};
@@ -91,40 +91,6 @@ pub struct AIServiceEmbeddingsConfig {
     pub total_threads: u8,
 
     pub automatic_embeddings_selector: Option<InteractionLLMConfig>,
-
-    #[serde(default = "default_logging_level")]
-    pub level: PythonLoggingLevel,
-}
-
-#[derive(Debug, Deserialize, Clone)]
-pub enum PythonLoggingLevel {
-    #[serde(rename_all = "UPPERCASE")]
-    Debug,
-    #[serde(rename_all = "UPPERCASE")]
-    Info,
-    #[serde(rename_all = "UPPERCASE")]
-    Warning,
-    #[serde(rename_all = "UPPERCASE")]
-    Error,
-    #[serde(rename_all = "UPPERCASE")]
-    Critical,
-}
-
-impl Display for PythonLoggingLevel {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let level_str = match self {
-            PythonLoggingLevel::Debug => "DEBUG",
-            PythonLoggingLevel::Info => "INFO",
-            PythonLoggingLevel::Warning => "WARNING",
-            PythonLoggingLevel::Error => "ERROR",
-            PythonLoggingLevel::Critical => "CRITICAL",
-        };
-        write!(f, "{level_str}")
-    }
-}
-
-fn default_logging_level() -> PythonLoggingLevel {
-    PythonLoggingLevel::Info
 }
 
 fn dynamically_load_models() -> bool {

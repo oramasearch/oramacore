@@ -5,7 +5,7 @@ use crate::ai::automatic_embeddings_selector::ChosenProperties;
 
 use crate::collection_manager::sides::write::index::{EnumStrategy, FieldType, GeoPoint};
 use crate::collection_manager::sides::{deserialize_api_key, serialize_api_key};
-use crate::python::embeddings::Model;
+use crate::embeddings::Model;
 use anyhow::{bail, Context, Result};
 use arrayvec::ArrayString;
 

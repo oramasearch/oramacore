@@ -16,8 +16,8 @@ use crate::{
         write::{embedding::MultiEmbeddingCalculationRequest, WriteSideContext},
         Term, TermStringField,
     },
+    embeddings::Model,
     lock::OramaAsyncLock,
-    python::embeddings::Model,
     types::{CollectionId, DocumentId, FieldId, IndexId, Number, OramaDate, SerializableNumber},
 };
 

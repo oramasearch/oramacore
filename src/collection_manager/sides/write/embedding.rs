@@ -7,10 +7,7 @@ use crate::{
     collection_manager::sides::{
         CollectionWriteOperation, IndexWriteOperation, OperationSender, WriteOperation,
     },
-    python::{
-        embeddings::{Intent, Model},
-        PythonService,
-    },
+    embeddings::{EmbeddingsService, Intent, Model},
     types::{CollectionId, DocumentId, FieldId, IndexId},
 };
 
@@ -30,8 +27,11 @@ pub struct MultiEmbeddingCalculationRequest {
     pub text: Vec<String>,
 }
 
-async fn process<I>(op_sender: &OperationSender, python_service: Arc<PythonService>, cache: I)
-where
+async fn process<I>(
+    op_sender: &OperationSender,
+    embeddings_service: Arc<EmbeddingsService>,
+    cache: I,
+) where
     I: Iterator<
         Item = (
             Model,
@@ -54,7 +54,7 @@ where
             let text_inputs: Vec<String> =
                 inputs.iter().map(|input| input.text.to_string()).collect(); // @todo: to_string() here is used to clone the string, check if we can remove this cloning
 
-            let embeddings_service = python_service.embeddings_service.clone();
+            let embeddings_service = embeddings_service.clone();
 
             let task_result = tokio::task::spawn_blocking(move || {
                 // If something goes wrong, we will just log it and continue
@@ -124,7 +124,7 @@ where
 }
 
 pub fn start_calculate_embedding_loop(
-    python_service: Arc<PythonService>,
+    embeddings_service: Arc<EmbeddingsService>,
     mut receiver: Receiver<MultiEmbeddingCalculationRequest>,
     op_sender: OperationSender,
     limit: u32,
@@ -184,7 +184,7 @@ pub fn start_calculate_embedding_loop(
                 }
             }
 
-            process(&op_sender, python_service.clone(), cache.drain()).await;
+            process(&op_sender, embeddings_service.clone(), cache.drain()).await;
         }
 
         loop {
@@ -220,7 +220,7 @@ pub fn start_calculate_embedding_loop(
             }
         }
 
-        process(&op_sender, python_service.clone(), cache.drain()).await;
+        process(&op_sender, embeddings_service.clone(), cache.drain()).await;
 
         warn!("Stop embedding calculation loop");
 

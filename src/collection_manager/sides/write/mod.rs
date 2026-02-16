@@ -47,10 +47,9 @@ pub use context::WriteSideContext;
 use crate::collection_manager::sides::write::collection_document_storage::CollectionDocumentStorage;
 use crate::collection_manager::sides::write::document_storage::ZeboDocument;
 use crate::collection_manager::sides::{CollectionWriteOperation, DocumentStorageWriteOperation};
+use crate::embeddings::{EmbeddingsService, Model};
 use crate::lock::OramaAsyncLock;
 use crate::metrics::CollectionLabels;
-use crate::python::embeddings::Model;
-use crate::python::PythonService;
 use crate::types::DashboardClaims;
 use crate::{
     ai::{
@@ -184,7 +183,7 @@ pub struct WriteSide {
     jwt_manager: JwtManager<DashboardClaims>,
 
     #[allow(dead_code)]
-    python_service: Arc<PythonService>,
+    embeddings_service: Arc<EmbeddingsService>,
 }
 
 impl WriteSide {
@@ -194,7 +193,7 @@ impl WriteSide {
         nlp_service: Arc<NLPService>,
         llm_service: Arc<LLMService>,
         automatic_embeddings_selector: Arc<AutomaticEmbeddingsSelector>,
-        python_service: Arc<PythonService>,
+        embeddings_service: Arc<EmbeddingsService>,
     ) -> Result<Arc<Self>> {
         let master_api_key = config.master_api_key;
         let hooks_config = Arc::new(config.hooks);
@@ -234,7 +233,7 @@ impl WriteSide {
         let document_storage = Arc::new(document_storage);
 
         let context = WriteSideContext {
-            python_service: python_service.clone(),
+            embeddings_service: embeddings_service.clone(),
             embedding_sender: sx,
             op_sender: op_sender.clone(),
             nlp_service,
@@ -296,7 +295,7 @@ impl WriteSide {
             stop_done_receiver: OramaAsyncLock::new("stop_done_receiver", stop_done_receiver),
             write_operation_counter: AtomicU32::new(0),
             jwt_manager,
-            python_service,
+            embeddings_service: embeddings_service.clone(),
         };
 
         let write_side = Arc::new(write_side);
@@ -315,7 +314,7 @@ impl WriteSide {
             stop_done_sender.clone(),
         );
         start_calculate_embedding_loop(
-            context.python_service.clone(),
+            context.embeddings_service.clone(),
             rx,
             op_sender,
             embedding_queue_limit,

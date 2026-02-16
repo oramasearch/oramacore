@@ -27,8 +27,8 @@ use crate::{
         CollectionWriteOperation, DocumentStorageWriteOperation, ReplaceIndexReason,
         WriteOperation,
     },
+    embeddings::Model,
     lock::{OramaAsyncLock, OramaAsyncLockReadGuard},
-    python::embeddings::Model,
     types::{
         ApiKey, CollectionId, DescribeCollectionResponse, DocumentId, IndexEmbeddingsCalculation,
         IndexId, WriteApiKey,

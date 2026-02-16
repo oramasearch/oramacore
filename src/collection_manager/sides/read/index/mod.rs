@@ -25,12 +25,12 @@ use crate::{
         write::index::EnumStrategy,
         Offset,
     },
+    embeddings::Model,
     lock::{OramaAsyncLock, OramaAsyncLockReadGuard},
     metrics::{
         commit::{FIELD_INDEX_COMMIT_CALCULATION_TIME, INDEX_COMMIT_CALCULATION_TIME},
         FieldIndexCollectionCommitLabels, IndexCollectionCommitLabels,
     },
-    python::embeddings::Model,
     types::{
         CollectionId, DocumentId, FulltextMode, IndexId, Limit, Properties, SearchMode,
         TypeParsingStrategies,

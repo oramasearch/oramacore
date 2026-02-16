@@ -68,7 +68,7 @@ pub fn create_minimal_config() -> OramacoreConfig {
             config: CollectionsWriterConfig {
                 data_dir: generate_new_path(),
                 embedding_queue_limit: 10,
-                default_embedding_model: oramacore::python::embeddings::Model::BGELarge,
+                default_embedding_model: oramacore::embeddings::Model::BGELarge,
                 insert_batch_commit_size: 1_000, // Smaller for faster benchmarks
                 javascript_queue_limit: 1_000,
                 commit_interval: Duration::from_secs(300), // Shorter interval
