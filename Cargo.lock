@@ -5270,9 +5270,9 @@ dependencies = [
 
 [[package]]
 name = "oramacore_lib"
-version = "0.4.2"
+version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "46518af62f462ca8f795a4a74d5f01771906428d4e29fd082536315bc109cee7"
+checksum = "5d491a66b115f8e7251b890f5d3af0c4a059bda39bf21a4ee7e02aeb0733e172"
 dependencies = [
  "anyhow",
  "async-trait",

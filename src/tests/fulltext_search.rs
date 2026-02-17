@@ -2,8 +2,10 @@ use assert_approx_eq::assert_approx_eq;
 use serde_json::json;
 
 use crate::collection_manager::sides::read::ReadError;
+use crate::tests::utils::extrapolate_ids_from_result;
 use crate::tests::utils::init_log;
 use crate::tests::utils::TestContext;
+use crate::types::LanguageDTO;
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_fulltext_search_simple() {
@@ -1097,6 +1099,56 @@ async fn test_fulltext_ignore_unknown_property_on_multi_index_collection() {
         .unwrap();
     assert_eq!(output.count, 10);
     assert_eq!(output.hits.len(), 10);
+
+    drop(test_context);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_stopwords() {
+    init_log();
+
+    let test_context = TestContext::new().await;
+
+    let collection_client = test_context
+        .create_collection_with_language(Some(LanguageDTO::Italian))
+        .await
+        .unwrap();
+
+    let index_client = collection_client.create_index().await.unwrap();
+
+    index_client
+        .insert_documents(
+            json!([
+                {
+                    "id": "1",
+                    "text": "AI & ChatGPT",
+                },
+                {
+                    "id": "2",
+                    "text": "FD & ChatGPT",
+                }
+            ])
+            .try_into()
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    let output = collection_client
+        .search(
+            json!({
+                "term": "AI",
+            })
+            .try_into()
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    // Only doc 1 is returned
+    assert_eq!(output.count, 1);
+    let doc_ids = extrapolate_ids_from_result(&output);
+    assert_eq!(doc_ids, vec!["1".to_string()]);
 
     drop(test_context);
 }

@@ -327,6 +327,13 @@ impl TestContext {
     }
 
     pub async fn create_collection(&self) -> Result<TestCollectionClient> {
+        self.create_collection_with_language(None).await
+    }
+
+    pub async fn create_collection_with_language(
+        &self,
+        language: Option<LanguageDTO>,
+    ) -> Result<TestCollectionClient> {
         let id = Self::generate_collection_id();
         let write_api_key = Self::generate_api_key();
         let read_api_key_raw = Self::generate_api_key();
@@ -341,7 +348,7 @@ impl TestContext {
                     mcp_description: None,
                     read_api_key: read_api_key_raw,
                     write_api_key,
-                    language: None,
+                    language,
                     embeddings_model: Some(Model::BGESmall),
                 },
             )
