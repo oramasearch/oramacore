@@ -409,7 +409,9 @@ impl ReadSide {
             .get_collection(collection_id)
             .await
             .ok_or_else(|| ReadError::NotFound(collection_id))?;
-        collection.check_read_api_key(read_api_key, self.master_api_key)?;
+        collection
+            .check_read_api_key(read_api_key, self.master_api_key)
+            .await?;
 
         collection.stats(req).await
     }
@@ -428,7 +430,9 @@ impl ReadSide {
             .get_collection(collection_id)
             .await
             .ok_or_else(|| ReadError::NotFound(collection_id))?;
-        collection.check_read_api_key(read_api_key, self.master_api_key)?;
+        collection
+            .check_read_api_key(read_api_key, self.master_api_key)
+            .await?;
 
         collection.batch_get_documents(doc_id_strs).await
     }
@@ -444,7 +448,9 @@ impl ReadSide {
             .get_collection(collection_id)
             .await
             .ok_or_else(|| ReadError::NotFound(collection_id))?;
-        collection.check_read_api_key(read_api_key, self.master_api_key)?;
+        collection
+            .check_read_api_key(read_api_key, self.master_api_key)
+            .await?;
 
         let fields = collection.get_filterable_fields(with_keys).await?;
 
@@ -571,7 +577,9 @@ impl ReadSide {
             .get_collection(collection_id)
             .await
             .ok_or_else(|| ReadError::NotFound(collection_id))?;
-        collection.check_read_api_key(read_api_key, self.master_api_key)?;
+        collection
+            .check_read_api_key(read_api_key, self.master_api_key)
+            .await?;
 
         // Extract extra claims from JWT token if present, otherwise use None for plain API key
         let claims: Option<HashMap<String, Value>> = match read_api_key {
@@ -628,7 +636,9 @@ impl ReadSide {
             .get_collection(collection_id)
             .await
             .ok_or_else(|| ReadError::NotFound(collection_id))?;
-        collection.check_read_api_key(&read_api_key, self.master_api_key)?;
+        collection
+            .check_read_api_key(&read_api_key, self.master_api_key)
+            .await?;
 
         let collection_stats = self
             .collection_stats(
@@ -665,7 +675,9 @@ impl ReadSide {
             .get_collection(collection_id)
             .await
             .ok_or_else(|| ReadError::NotFound(collection_id))?;
-        collection.check_read_api_key(read_api_key, self.master_api_key)?;
+        collection
+            .check_read_api_key(read_api_key, self.master_api_key)
+            .await?;
 
         let collection_stats = self
             .collection_stats(
@@ -697,7 +709,9 @@ impl ReadSide {
             None => return Err(ReadError::NotFound(collection_id)),
             Some(collection) => collection,
         };
-        collection.check_read_api_key(read_api_key, self.master_api_key)?;
+        collection
+            .check_read_api_key(read_api_key, self.master_api_key)
+            .await?;
 
         Ok(collection)
     }
@@ -784,7 +798,9 @@ impl ReadSide {
             .await
             .ok_or_else(|| ReadError::NotFound(collection_id))?;
 
-        collection.check_read_api_key(read_api_key, self.master_api_key)
+        collection
+            .check_read_api_key(read_api_key, self.master_api_key)
+            .await
     }
 
     pub fn is_gpu_overloaded(&self) -> bool {
@@ -851,7 +867,9 @@ impl ReadSide {
             .get_collection(collection_id)
             .await
             .ok_or_else(|| ReadError::NotFound(collection_id))?;
-        collection.check_read_api_key(read_api_key, self.master_api_key)?;
+        collection
+            .check_read_api_key(read_api_key, self.master_api_key)
+            .await?;
 
         let known_prompt: KnownPrompts = system_prompt_id
             .as_str()
@@ -874,7 +892,9 @@ impl ReadSide {
             .get_collection(collection_id)
             .await
             .ok_or_else(|| ReadError::NotFound(collection_id))?;
-        collection.check_read_api_key(read_api_key, self.master_api_key)?;
+        collection
+            .check_read_api_key(read_api_key, self.master_api_key)
+            .await?;
 
         match self
             .training_sets
@@ -899,7 +919,10 @@ impl ReadSide {
             None => return Some(Err(ReadError::NotFound(collection_id))),
         };
 
-        if let Err(e) = collection.check_read_api_key(read_api_key, self.master_api_key) {
+        if let Err(e) = collection
+            .check_read_api_key(read_api_key, self.master_api_key)
+            .await
+        {
             return Some(Err(e));
         }
 
