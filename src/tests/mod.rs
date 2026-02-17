@@ -34,6 +34,7 @@ mod omc_test;
 mod openai_chat;
 mod pin_rules;
 mod quick_fulltext_benchmark;
+mod regenerate_read_api_key;
 mod replace_doc_on_insert;
 mod replace_index;
 mod shelves;

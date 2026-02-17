@@ -54,6 +54,10 @@ pub fn apis(write_side: Arc<WriteSide>) -> Router {
             "/v1/collections/{collection_id}/replace-index",
             post(replace_index),
         )
+        .route(
+            "/v1/collections/{collection_id}/regenerate-read-api-key",
+            post(regenerate_read_api_key),
+        )
         .with_state(write_side)
 }
 
@@ -201,6 +205,17 @@ async fn create_temp_index(
         .create_temp_index(write_api_key, collection_id, index_id, json)
         .await
         .map(|_| Json(json!({ "message": "temp collection created" })))
+}
+
+async fn regenerate_read_api_key(
+    Path(collection_id): Path<CollectionId>,
+    write_side: State<Arc<WriteSide>>,
+    write_api_key: WriteApiKey,
+) -> impl IntoResponse {
+    write_side
+        .regenerate_read_api_key(write_api_key, collection_id)
+        .await
+        .map(|new_key| Json(json!({ "read_api_key": new_key.expose() })))
 }
 
 async fn replace_index(
