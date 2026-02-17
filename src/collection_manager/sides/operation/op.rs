@@ -253,6 +253,13 @@ pub enum CollectionWriteOperation {
     UpdateMcpDescription {
         mcp_description: Option<String>,
     },
+    UpdateReadApiKey {
+        #[serde(
+            deserialize_with = "deserialize_api_key",
+            serialize_with = "serialize_api_key"
+        )]
+        read_api_key: ApiKey,
+    },
     PinRule(PinRuleOperation<DocumentId>),
     Shelf(ShelfOperation<DocumentId>),
     DocumentStorage(DocumentStorageWriteOperation),
@@ -395,6 +402,9 @@ impl WriteOperation {
                 _,
                 CollectionWriteOperation::UpdateMcpDescription { .. },
             ) => "update_mcp_description",
+            WriteOperation::Collection(_, CollectionWriteOperation::UpdateReadApiKey { .. }) => {
+                "update_read_api_key"
+            }
             WriteOperation::Collection(
                 _,
                 CollectionWriteOperation::IndexWriteOperation(_, IndexWriteOperation::Index { .. }),

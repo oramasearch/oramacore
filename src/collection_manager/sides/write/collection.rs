@@ -733,6 +733,14 @@ impl CollectionWriter {
         Ok(())
     }
 
+    /// Generates a new random read API key, updates it in-memory, and returns it.
+    pub fn regenerate_read_api_key(&mut self) -> ApiKey {
+        let new_key = ApiKey::try_new(cuid2::create_id())
+            .expect("cuid2 IDs are always valid API keys (under 64 chars)");
+        self.read_api_key = new_key;
+        new_key
+    }
+
     pub async fn as_dto(&self) -> DescribeCollectionResponse {
         let mut indexes_desc = vec![];
         let mut document_count = 0_usize;

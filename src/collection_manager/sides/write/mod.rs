@@ -433,6 +433,26 @@ impl WriteSide {
         res
     }
 
+    /// Regenerates the read API key for a collection. Requires write access.
+    pub async fn regenerate_read_api_key(
+        &self,
+        write_api_key: WriteApiKey,
+        collection_id: CollectionId,
+    ) -> Result<ApiKey, WriteError> {
+        // Verify the collection exists and we have write access
+        let _collection = self.get_collection(collection_id, write_api_key).await?;
+        drop(_collection);
+
+        self.write_operation_counter.fetch_add(1, Ordering::Relaxed);
+        let res = self
+            .collections
+            .regenerate_read_api_key(collection_id, self.op_sender.clone())
+            .await;
+        self.write_operation_counter.fetch_sub(1, Ordering::Relaxed);
+
+        res
+    }
+
     pub async fn create_index(
         &self,
         write_api_key: WriteApiKey,

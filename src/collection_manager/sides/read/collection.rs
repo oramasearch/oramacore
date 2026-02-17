@@ -125,7 +125,7 @@ pub struct CollectionReader {
     default_locale: Locale,
     deleted: bool,
 
-    read_api_key: ApiKey,
+    read_api_key: OramaAsyncLock<ApiKey>,
     write_api_key: Option<ApiKey>,
     context: ReadSideContext,
     offload_config: OffloadFieldConfig,
@@ -196,7 +196,7 @@ impl CollectionReader {
             default_locale,
             deleted: false,
 
-            read_api_key,
+            read_api_key: OramaAsyncLock::new("collection_read_api_key", read_api_key),
             write_api_key,
 
             context,
@@ -361,7 +361,7 @@ impl CollectionReader {
             default_locale: dump.default_locale,
             deleted: false,
 
-            read_api_key: dump.read_api_key,
+            read_api_key: OramaAsyncLock::new("collection_read_api_key", dump.read_api_key),
             write_api_key: dump.write_api_key,
 
             context,
@@ -546,7 +546,7 @@ impl CollectionReader {
             description: self.description.clone(),
             mcp_description: self.mcp_description.read("commit").await.clone(),
             default_locale: self.default_locale,
-            read_api_key: self.read_api_key,
+            read_api_key: **self.read_api_key.read("commit").await,
             write_api_key: self.write_api_key,
             index_ids,
             temp_index_ids,
@@ -672,16 +672,16 @@ impl CollectionReader {
             .load(std::sync::atomic::Ordering::Relaxed)
     }
 
-    #[inline]
     #[allow(clippy::result_large_err)]
-    pub fn check_read_api_key(
+    pub async fn check_read_api_key(
         &self,
         api_key: &ReadApiKey,
         master_api_key: Option<ApiKey>,
     ) -> Result<(), ReadError> {
+        let read_api_key = self.read_api_key.read("check_read_api_key").await;
         match api_key {
             ReadApiKey::ApiKey(api_key) => {
-                if *api_key == self.read_api_key {
+                if *api_key == **read_api_key {
                     return Ok(());
                 }
                 if let Some(write_api_key) = self.write_api_key {
@@ -697,7 +697,7 @@ impl CollectionReader {
             }
             ReadApiKey::Claims(claims) => {
                 // For JWT claims, verify the orak matches this collection's read API key
-                if claims.orak == self.read_api_key {
+                if claims.orak == **read_api_key {
                     return Ok(());
                 }
             }
@@ -756,6 +756,15 @@ impl CollectionReader {
         let mut mcp_description_lock = self.mcp_description.write("update").await;
         **mcp_description_lock = mcp_description;
         drop(mcp_description_lock);
+
+        Ok(())
+    }
+
+    /// Updates the read API key for this collection.
+    pub async fn update_read_api_key(&self, new_key: ApiKey) -> Result<()> {
+        let mut read_api_key_lock = self.read_api_key.write("update_read_api_key").await;
+        **read_api_key_lock = new_key;
+        drop(read_api_key_lock);
 
         Ok(())
     }
@@ -1106,6 +1115,9 @@ impl CollectionReader {
             }
             CollectionWriteOperation::UpdateMcpDescription { mcp_description } => {
                 self.update_mcp_description(mcp_description).await?;
+            }
+            CollectionWriteOperation::UpdateReadApiKey { read_api_key } => {
+                self.update_read_api_key(read_api_key).await?;
             }
             CollectionWriteOperation::PinRule(op) => {
                 println!("Applying pin rule operation: {op:?}");

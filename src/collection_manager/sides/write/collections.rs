@@ -17,7 +17,7 @@ use crate::lock::{OramaAsyncLock, OramaAsyncLockReadGuard};
 use crate::metrics::commit::COMMIT_CALCULATION_TIME;
 use crate::metrics::CollectionCommitLabels;
 use crate::python::embeddings::Model;
-use crate::types::CollectionId;
+use crate::types::{ApiKey, CollectionId};
 use crate::types::{CreateCollection, DescribeCollectionResponse, LanguageDTO};
 use oramacore_lib::fs::{create_if_not_exists, BufferedFile};
 use oramacore_lib::nlp::locales::Locale;
@@ -181,6 +181,32 @@ impl CollectionsWriter {
             .context("Cannot send update collection")?;
 
         Ok(())
+    }
+
+    /// Regenerates the read API key for a collection and sends the update to the read side.
+    pub async fn regenerate_read_api_key(
+        &self,
+        collection_id: CollectionId,
+        sender: OperationSender,
+    ) -> Result<ApiKey, WriteError> {
+        let mut collections = self.collections.write("regenerate_read_api_key").await;
+        let collection = collections
+            .get_mut(&collection_id)
+            .ok_or(WriteError::CollectionNotFound(collection_id))?;
+
+        let new_key = collection.regenerate_read_api_key();
+
+        sender
+            .send(WriteOperation::Collection(
+                collection_id,
+                CollectionWriteOperation::UpdateReadApiKey {
+                    read_api_key: new_key,
+                },
+            ))
+            .await
+            .context("Cannot send update read API key operation")?;
+
+        Ok(new_key)
     }
 
     pub async fn list(&self) -> Vec<DescribeCollectionResponse> {
