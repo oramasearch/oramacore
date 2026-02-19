@@ -108,7 +108,7 @@ impl<'collection, 'analytics_storage> Search<'collection, 'analytics_storage> {
             secrets,
         } = hook_config;
         let SearchRequest {
-            search_params,
+            mut search_params,
             search_analytics_event_origin,
             analytics_metadata,
             interaction_id,
@@ -139,6 +139,8 @@ impl<'collection, 'analytics_storage> Search<'collection, 'analytics_storage> {
         let indexes = collection
             .get_index_read_locks(search_params.indexes.as_ref())
             .await?;
+
+        search_params.mode = determine_search_mode(&indexes, &search_params.mode).await?;
 
         let pin_rule_consequences = extract_pin_rules(
             &*collection.get_pin_rules_reader("search").await,
@@ -286,6 +288,18 @@ impl<'collection, 'analytics_storage> Search<'collection, 'analytics_storage> {
     }
 }
 
+async fn determine_search_mode(
+    indexes: &ReadIndexesLockGuard<'_>,
+    mode: &SearchMode,
+) -> Result<SearchMode, ReadError> {
+    let Some(index) = indexes.iter().next() else {
+        return Ok(mode.clone());
+    };
+
+    let search_store = index.get_search_store().await;
+    Ok(TokenScoreContext::determine_search_mode(search_store.read_side_context, mode).await?)
+}
+
 pub fn extract_term_from_search_mode(search_mode: &SearchMode) -> &str {
     match search_mode {
         SearchMode::FullText(f) | SearchMode::Default(f) => &f.term,
@@ -364,18 +378,16 @@ async fn search_on_indexes(
             search_store.read_side_context,
             search_store.path_to_field_id_map,
         );
-        token_score_context
-            .execute(
-                &TokenScoreParams {
-                    mode: &search_params.mode,
-                    boost: &search_params.boost,
-                    properties: &search_params.properties,
-                    limit_hint: search_params.limit,
-                    filtered_doc_ids: filtered_document_ids.as_ref(),
-                },
-                &mut token_score_results,
-            )
-            .await?;
+        token_score_context.execute(
+            &TokenScoreParams {
+                mode: &search_params.mode,
+                boost: &search_params.boost,
+                properties: &search_params.properties,
+                limit_hint: search_params.limit,
+                filtered_doc_ids: filtered_document_ids.as_ref(),
+            },
+            &mut token_score_results,
+        )?;
 
         // Apply OMC (Orama Custom Multiplier) to the token scores for this index.
         // OMC values are stored per-index, so we need to apply them for each index.
@@ -423,18 +435,16 @@ async fn search_on_indexes(
                         search_store.read_side_context,
                         search_store.path_to_field_id_map,
                     );
-                    token_score_context
-                        .execute(
-                            &TokenScoreParams {
-                                mode: &search_params.mode,
-                                boost: &search_params.boost,
-                                properties: &search_params.properties,
-                                limit_hint: search_params.limit,
-                                filtered_doc_ids: filtered_doc_ids.as_ref(),
-                            },
-                            &mut token_score_results_for_facets,
-                        )
-                        .await?;
+                    token_score_context.execute(
+                        &TokenScoreParams {
+                            mode: &search_params.mode,
+                            boost: &search_params.boost,
+                            properties: &search_params.properties,
+                            limit_hint: search_params.limit,
+                            filtered_doc_ids: filtered_doc_ids.as_ref(),
+                        },
+                        &mut token_score_results_for_facets,
+                    )?;
 
                     Cow::Owned(token_score_results_for_facets)
                 };

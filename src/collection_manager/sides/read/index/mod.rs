@@ -428,7 +428,6 @@ impl Index {
         let mut output = HashMap::new();
         context
             .execute(&params, &mut output)
-            .await
             .expect("Failed to get all documents");
 
         let document_ids: Vec<_> = output.keys().copied().collect();
