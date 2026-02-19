@@ -108,7 +108,7 @@ impl<'collection, 'analytics_storage> Search<'collection, 'analytics_storage> {
             secrets,
         } = hook_config;
         let SearchRequest {
-            mut search_params,
+            search_params,
             search_analytics_event_origin,
             analytics_metadata,
             interaction_id,
@@ -139,12 +139,6 @@ impl<'collection, 'analytics_storage> Search<'collection, 'analytics_storage> {
         let indexes = collection
             .get_index_read_locks(search_params.indexes.as_ref())
             .await?;
-
-        search_params.mode = TokenScoreContext::determine_search_mode(
-            collection.get_read_side_context(),
-            &search_params.mode,
-        )
-        .await?;
 
         let pin_rule_consequences = extract_pin_rules(
             &*collection.get_pin_rules_reader("search").await,
@@ -348,6 +342,20 @@ async fn search_on_indexes(
 
     let mut stores = Vec::with_capacity(indexes.len());
 
+    // Resolve Auto mode once before the loop using the first index's context.
+    // All indexes share the same ReadSideContext, so any index works.
+    let first_store = indexes
+        .iter()
+        .next()
+        .expect("search_on_indexes called with no indexes")
+        .get_search_store()
+        .await;
+    let resolved_mode = TokenScoreContext::determine_search_mode(
+        first_store.read_side_context,
+        &search_params.mode,
+    )
+    .await?;
+
     for index in indexes.iter() {
         let search_store = index.get_search_store().await;
 
@@ -372,7 +380,7 @@ async fn search_on_indexes(
         );
         token_score_context.execute(
             &TokenScoreParams {
-                mode: &search_params.mode,
+                mode: &resolved_mode,
                 boost: &search_params.boost,
                 properties: &search_params.properties,
                 limit_hint: search_params.limit,
@@ -429,7 +437,7 @@ async fn search_on_indexes(
                     );
                     token_score_context.execute(
                         &TokenScoreParams {
-                            mode: &search_params.mode,
+                            mode: &resolved_mode,
                             boost: &search_params.boost,
                             properties: &search_params.properties,
                             limit_hint: search_params.limit,
