@@ -1104,3 +1104,32 @@ fn join_vec_strings(v: &[&String]) -> String {
     }
     final_str
 }
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::*;
+
+    #[tokio::test]
+    async fn test_kebab_case_join() {
+        let string_field = StringScoreField::new(
+            FieldId(1),
+            vec!["field".to_string()].into_boxed_slice(),
+            false,
+            Arc::new(TextParser::from_locale(Locale::EN)),
+        );
+
+        let value = json!("first-second-third");
+        let parsed = string_field.index_value(&value).await.unwrap();
+
+        assert_eq!(parsed.len(), 1);
+        let IndexedValue::ScoreString(_, _, indexed) = &parsed[0] else {
+            panic!("Expected ScoreString variant");
+        };
+        assert_eq!(indexed.len(), 3);
+        assert!(indexed.contains_key(&Term("first".to_string())));
+        assert!(indexed.contains_key(&Term("second".to_string())));
+        assert!(indexed.contains_key(&Term("third".to_string())));
+    }
+}
