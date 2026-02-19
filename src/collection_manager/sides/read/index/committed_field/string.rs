@@ -285,7 +285,7 @@ impl StringLayout {
             let field_id = params.field_id;
 
             let mut field_params = BM25FFieldParams {
-                weight: params.boost + phrase_boost, // User-defined field boost as BM25F weight
+                weight: params.boost * phrase_boost, // User-defined field boost as BM25F weight
                 b: 0.75, // Default normalization parameter @todo: make this configurable?
             };
 
