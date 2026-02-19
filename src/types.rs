@@ -929,6 +929,15 @@ pub enum SearchMode {
     Default(FulltextMode),
 }
 
+/// Normalized version of SearchMode with Auto already resolved.
+#[derive(Debug, Clone)]
+pub enum ScoreMode {
+    FullText(FulltextMode),
+    Vector(VectorMode),
+    Hybrid(HybridMode),
+    Default(FulltextMode),
+}
+
 impl<'de> Deserialize<'de> for SearchMode {
     fn deserialize<D>(deserializer: D) -> Result<SearchMode, D::Error>
     where

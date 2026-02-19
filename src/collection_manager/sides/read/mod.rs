@@ -50,6 +50,7 @@ use crate::collection_manager::sides::logs::HookLogs;
 use crate::collection_manager::sides::read::collection::FilterableFieldsStats;
 pub use crate::collection_manager::sides::read::context::ReadSideContext;
 use crate::collection_manager::sides::read::notify::Notifier;
+use crate::collection_manager::sides::read::index::token_score::TokenScoreContext;
 use crate::collection_manager::sides::read::search::{HookConfig, Search};
 use crate::lock::{OramaAsyncLock, OramaAsyncMutex};
 use crate::metrics::operations::OPERATION_COUNT;
@@ -607,11 +608,20 @@ impl ReadSide {
             .get_secrets_for_collection(collection_id.as_str())
             .await;
 
+        // Resolve Auto mode into a concrete ScoreMode before entering search.
+        // This is done here because ReadSide has direct access to the LLM service.
+        let score_mode = TokenScoreContext::resolve_score_mode(
+            &self.llm_service,
+            &request.search_params.mode,
+        )
+        .await?;
+
         let log_sender = self.get_hook_logs().get_sender(&collection_id);
         let search = Search::new(
             &collection,
             self.analytics_storage.as_ref(),
             request,
+            score_mode,
             HookConfig {
                 log_sender,
                 secrets,

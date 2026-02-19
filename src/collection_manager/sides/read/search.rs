@@ -29,8 +29,8 @@ use crate::{
     },
     metrics::{search::SEARCH_CALCULATION_TIME, SearchCollectionLabels},
     types::{
-        DocumentId, FacetResult, GroupedResult, RawJSONDocument, SearchMode, SearchParams,
-        SearchResult, SearchResultHit, TokenScore,
+        DocumentId, FacetResult, GroupedResult, RawJSONDocument, ScoreMode, SearchMode,
+        SearchParams, SearchResult, SearchResultHit, TokenScore,
     },
 };
 
@@ -76,6 +76,7 @@ pub struct Search<'collection, 'analytics_storage> {
     collection: &'collection CollectionReader,
     analytics_storage: Option<&'analytics_storage OramaCoreAnalytics>,
     request: SearchRequest,
+    score_mode: ScoreMode,
     hook_config: HookConfig,
 }
 
@@ -84,12 +85,14 @@ impl<'collection, 'analytics_storage> Search<'collection, 'analytics_storage> {
         collection: &'collection CollectionReader,
         analytics_storage: Option<&'analytics_storage OramaCoreAnalytics>,
         request: SearchRequest,
+        score_mode: ScoreMode,
         hook_config: HookConfig,
     ) -> Self {
         Self {
             collection,
             analytics_storage,
             request,
+            score_mode,
             hook_config,
         }
     }
@@ -101,6 +104,7 @@ impl<'collection, 'analytics_storage> Search<'collection, 'analytics_storage> {
             collection,
             analytics_storage,
             request,
+            score_mode,
             hook_config,
         } = self;
         let HookConfig {
@@ -151,6 +155,7 @@ impl<'collection, 'analytics_storage> Search<'collection, 'analytics_storage> {
         let (top_results, count, facets, groups) = search_on_indexes(
             &indexes,
             &search_params,
+            &score_mode,
             matching_document_count_estimation,
             pin_rule_consequences,
         )
@@ -324,6 +329,7 @@ fn extract_pin_rules<'collection>(
 async fn search_on_indexes(
     indexes: &ReadIndexesLockGuard<'_>,
     search_params: &SearchParams,
+    score_mode: &ScoreMode,
     matching_document_count_estimation: u64,
     pin_rule_consequences: Vec<Consequence<DocumentId>>,
 ) -> Result<
@@ -341,20 +347,6 @@ async fn search_on_indexes(
     let mut group_results = HashMap::new();
 
     let mut stores = Vec::with_capacity(indexes.len());
-
-    // Resolve Auto mode once before the loop using the first index's context.
-    // All indexes share the same ReadSideContext, so any index works.
-    let first_store = indexes
-        .iter()
-        .next()
-        .expect("search_on_indexes called with no indexes")
-        .get_search_store()
-        .await;
-    let resolved_mode = TokenScoreContext::determine_search_mode(
-        first_store.read_side_context,
-        &search_params.mode,
-    )
-    .await?;
 
     for index in indexes.iter() {
         let search_store = index.get_search_store().await;
@@ -380,7 +372,7 @@ async fn search_on_indexes(
         );
         token_score_context.execute(
             &TokenScoreParams {
-                mode: &resolved_mode,
+                mode: score_mode,
                 boost: &search_params.boost,
                 properties: &search_params.properties,
                 limit_hint: search_params.limit,
@@ -437,7 +429,7 @@ async fn search_on_indexes(
                     );
                     token_score_context.execute(
                         &TokenScoreParams {
-                            mode: &resolved_mode,
+                            mode: score_mode,
                             boost: &search_params.boost,
                             properties: &search_params.properties,
                             limit_hint: search_params.limit,

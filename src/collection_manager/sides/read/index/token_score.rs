@@ -5,15 +5,15 @@ use oramacore_lib::filters::FilterResult;
 use tracing::debug;
 
 use crate::{
-    ai::llms,
+    ai::llms::{self, LLMService},
     collection_manager::{
         bm25::BM25Scorer,
         sides::read::index::committed_field::{StringSearchParams, VectorSearchParams},
     },
     python::embeddings::Intent,
     types::{
-        DocumentId, FieldId, FulltextMode, HybridMode, IndexId, Limit, Properties, SearchMode,
-        SearchModeResult, Similarity, Threshold, VectorMode,
+        DocumentId, FieldId, FulltextMode, HybridMode, IndexId, Limit, Properties, ScoreMode,
+        SearchMode, SearchModeResult, Similarity, Threshold, VectorMode,
     },
 };
 
@@ -27,8 +27,8 @@ use super::{
 /// This structure extracts only the necessary fields from SearchParams,
 /// using lifetimes to avoid cloning data.
 pub struct TokenScoreParams<'search> {
-    /// The search mode (fulltext, vector, hybrid, or auto)
-    pub mode: &'search SearchMode,
+    /// The resolved search mode (fulltext, vector, or hybrid, Auto is already resolved)
+    pub mode: &'search ScoreMode,
     /// Field-specific boost values
     pub boost: &'search HashMap<String, f32>,
     /// Properties (fields) to search on
@@ -81,18 +81,18 @@ impl<'index> TokenScoreContext<'index> {
         }
     }
 
-    /// Determines the actual search mode to use, handling auto-mode via LLM.
+    /// Resolves a SearchMode into a ScoreMode, handling auto-mode via LLM.
     ///
     /// When the mode is Auto, this method calls the LLM service to determine
     /// whether to use fulltext, vector, or hybrid search based on the query.
-    pub async fn determine_search_mode(
-        context: &ReadSideContext,
+    /// All other modes are converted directly into their ScoreMode equivalents.
+    pub async fn resolve_score_mode(
+        llm_service: &LLMService,
         mode: &SearchMode,
-    ) -> Result<SearchMode> {
+    ) -> Result<ScoreMode> {
         match mode {
             SearchMode::Auto(mode_result) => {
-                let final_mode: String = context
-                    .llm_service
+                let final_mode: String = llm_service
                     .run_known_prompt(
                         llms::KnownPrompts::Autoquery,
                         vec![],
@@ -105,27 +105,30 @@ impl<'index> TokenScoreContext<'index> {
                 let serialized_final_mode: SearchModeResult = serde_json::from_str(&final_mode)?;
 
                 match serialized_final_mode.mode.as_str() {
-                    "fulltext" => Ok(SearchMode::FullText(FulltextMode {
+                    "fulltext" => Ok(ScoreMode::FullText(FulltextMode {
                         term: mode_result.term.clone(),
                         threshold: None,
                         exact: false,
                         tolerance: None,
                     })),
-                    "hybrid" => Ok(SearchMode::Hybrid(HybridMode {
+                    "hybrid" => Ok(ScoreMode::Hybrid(HybridMode {
                         term: mode_result.term.clone(),
                         similarity: Similarity::default(),
                         threshold: None,
                         exact: false,
                         tolerance: None,
                     })),
-                    "vector" => Ok(SearchMode::Vector(VectorMode {
+                    "vector" => Ok(ScoreMode::Vector(VectorMode {
                         term: mode_result.term.clone(),
                         similarity: Similarity::default(),
                     })),
                     _ => bail!("Invalid search mode"),
                 }
             }
-            _ => Ok(mode.clone()),
+            SearchMode::FullText(m) => Ok(ScoreMode::FullText(m.clone())),
+            SearchMode::Vector(m) => Ok(ScoreMode::Vector(m.clone())),
+            SearchMode::Hybrid(m) => Ok(ScoreMode::Hybrid(m.clone())),
+            SearchMode::Default(m) => Ok(ScoreMode::Default(m.clone())),
         }
     }
 
@@ -518,9 +521,9 @@ impl<'index> TokenScoreContext<'index> {
         // Calculate boost values
         let boost = self.calculate_boost(params.boost);
 
-        // Dispatch to appropriate search strategy based on mode
+        // Dispatch to appropriate search strategy based on the resolved score mode
         match params.mode {
-            SearchMode::Default(mode) | SearchMode::FullText(mode) => {
+            ScoreMode::Default(mode) | ScoreMode::FullText(mode) => {
                 let properties = self.calculate_string_properties(params.properties)?;
                 results.extend(self.search_full_text(
                     &mode.term,
@@ -532,7 +535,7 @@ impl<'index> TokenScoreContext<'index> {
                     params.filtered_doc_ids,
                 )?)
             }
-            SearchMode::Vector(mode) => {
+            ScoreMode::Vector(mode) => {
                 let vector_properties = self.calculate_vector_properties()?;
                 results.extend(self.search_vector(
                     &mode.term,
@@ -542,7 +545,7 @@ impl<'index> TokenScoreContext<'index> {
                     params.filtered_doc_ids,
                 )?)
             }
-            SearchMode::Hybrid(mode) => {
+            ScoreMode::Hybrid(mode) => {
                 results.extend(self.search_hybrid(
                     mode,
                     params.properties,
@@ -550,9 +553,6 @@ impl<'index> TokenScoreContext<'index> {
                     params.limit_hint,
                     params.filtered_doc_ids,
                 )?);
-            }
-            SearchMode::Auto(_) => {
-                unreachable!("Auto mode must be resolved before sync token score execution")
             }
         };
 
