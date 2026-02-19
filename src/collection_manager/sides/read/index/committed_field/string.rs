@@ -280,12 +280,12 @@ impl StringLayout {
             // TODO: think about this
             let boost_any_order = positions.len() as f32;
             let boost_sequence = sequences_count as f32 * 2.0;
-            let _phrase_boost = boost_any_order + boost_sequence;
+            let phrase_boost = boost_any_order + boost_sequence;
 
             let field_id = params.field_id;
 
             let mut field_params = BM25FFieldParams {
-                weight: params.boost, // User-defined field boost as BM25F weight
+                weight: params.boost * phrase_boost, // User-defined field boost as BM25F weight
                 b: 0.75, // Default normalization parameter @todo: make this configurable?
             };
 
