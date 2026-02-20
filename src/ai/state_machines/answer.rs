@@ -1383,6 +1383,19 @@ impl AnswerStateMachine {
                 .await
                 .map_err(|e| AnswerError::RagAtError(format!("{e:?}")))?
         } else {
+            let model_info = self
+                .llm_service
+                .models_info
+                .get(&_llm_config.model)
+                .ok_or_else(|| {
+                    AnswerError::LLMServiceError(format!(
+                        "Model info not found for model: {}",
+                        _llm_config.model
+                    ))
+                })?;
+
+            dbg!(model_info);
+
             let max_documents = Limit(interaction.max_documents.unwrap_or(5));
             let min_similarity = Similarity(interaction.min_similarity.unwrap_or(0.5));
 
