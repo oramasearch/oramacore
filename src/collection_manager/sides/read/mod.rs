@@ -28,7 +28,7 @@ use tokio::time::{Instant, MissedTickBehavior};
 
 pub use analytics::{
     AnalyticsHolder, AnalyticsMetadataFromRequest, InteractionAnalyticEventV1,
-    OramaCoreAnalyticConfig, OramaCoreAnalytics, SearchAnalyticEventOrigin,
+    OramaCoreAnalyticConfig, OramaCoreAnalytics, SearchAnalyticEventOrigin, SearchAnalyticEventV1,
 };
 
 use anyhow::{Context, Result};
@@ -49,11 +49,13 @@ use crate::auth::{JwtConfig, JwtManager};
 use crate::collection_manager::sides::logs::HookLogs;
 use crate::collection_manager::sides::read::collection::FilterableFieldsStats;
 pub use crate::collection_manager::sides::read::context::ReadSideContext;
+use crate::collection_manager::sides::read::index::token_score::TokenScoreContext;
 use crate::collection_manager::sides::read::notify::Notifier;
-use crate::collection_manager::sides::read::search::{HookConfig, Search};
+use crate::collection_manager::sides::read::search::{HookConfig, ScoreParams, Search};
 use crate::lock::{OramaAsyncLock, OramaAsyncMutex};
 use crate::metrics::operations::OPERATION_COUNT;
-use crate::metrics::Empty;
+use crate::metrics::search::SEARCH_CALCULATION_TIME;
+use crate::metrics::{Empty, SearchCollectionLabels};
 use crate::python::PythonService;
 use crate::types::{
     ApiKey, CollectionStatsRequest, CustomerClaims, Document, InteractionLLMConfig, ReadApiKey,
@@ -607,20 +609,82 @@ impl ReadSide {
             .get_secrets_for_collection(collection_id.as_str())
             .await;
 
+        let search_params = &request.search_params;
+
+        let has_filters = !search_params.where_filter.is_empty();
+        let has_facets = !search_params.facets.is_empty();
+        let has_groups = search_params.group_by.is_none();
+        let has_sorting = search_params.sort_by.is_none();
+
+        let m = SEARCH_CALCULATION_TIME.create(SearchCollectionLabels {
+            collection: collection_id.to_string().into(),
+            mode: search_params.mode.as_str(),
+            has_filter: if has_filters { "true" } else { "false" },
+            has_facet: if has_facets { "true" } else { "false" },
+            has_group: if has_groups { "true" } else { "false" },
+            has_sorting: if has_sorting { "true" } else { "false" },
+        });
+
+        // Resolve Auto mode into a concrete ScoreMode before entering search.
+        let score_mode =
+            TokenScoreContext::resolve_score_mode(&self.llm_service, &search_params.mode).await?;
+
+        let score_params = ScoreParams {
+            mode: &score_mode,
+            boost: &search_params.boost,
+            properties: &search_params.properties,
+            limit: search_params.limit,
+            offset: search_params.offset,
+            where_filter: &search_params.where_filter,
+            facets: &search_params.facets,
+            sort_by: search_params.sort_by.as_ref(),
+            group_by: search_params.group_by.as_ref(),
+            indexes: search_params.indexes.as_ref(),
+        };
+
         let log_sender = self.get_hook_logs().get_sender(&collection_id);
         let search = Search::new(
             &collection,
-            self.analytics_storage.as_ref(),
-            request,
+            score_params,
             HookConfig {
                 log_sender,
                 secrets,
             },
         );
 
-        let search_result = search.execute().await?;
+        let search_output = search.execute().await?;
 
-        Ok(search_result)
+        drop(m);
+
+        info!(duration=?search_output.stats.duration, "Search completed");
+
+        // Analytics: record event using original SearchParams (preserves Auto mode).
+        if let Some(analytics_storage) = self.analytics_storage.as_ref() {
+            if let Some(search_analytics_event_origin) = request.search_analytics_event_origin {
+                match SearchAnalyticEventV1::try_new(
+                    collection_id,
+                    &request.search_params,
+                    &search_output.result,
+                    search_analytics_event_origin,
+                    search_output.stats.duration,
+                    search_output.stats.has_pin_rules,
+                    false,
+                    request.analytics_metadata,
+                    request.interaction_id,
+                ) {
+                    Ok(ev) => {
+                        if let Err(e) = analytics_storage.add_event(ev) {
+                            error!(?e, "Failed to add search event to analytics storage");
+                        }
+                    }
+                    Err(e) => {
+                        error!(?e, "Failed to create search event for analytics. Ignored");
+                    }
+                };
+            }
+        }
+
+        Ok(search_output.result)
     }
 
     pub async fn nlp_search(
