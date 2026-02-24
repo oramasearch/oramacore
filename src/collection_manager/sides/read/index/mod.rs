@@ -32,7 +32,7 @@ use crate::{
     },
     python::embeddings::Model,
     types::{
-        CollectionId, DocumentId, FulltextMode, IndexId, Limit, Properties, SearchMode,
+        CollectionId, DocumentId, FulltextMode, IndexId, Limit, Properties, ScoreMode,
         TypeParsingStrategies,
     },
 };
@@ -408,7 +408,7 @@ impl Index {
             &self.path_to_index_id_map,
         );
 
-        let mode = SearchMode::Default(FulltextMode {
+        let mode = ScoreMode::Default(FulltextMode {
             term: String::new(),
             threshold: None,
             exact: false,
@@ -428,7 +428,6 @@ impl Index {
         let mut output = HashMap::new();
         context
             .execute(&params, &mut output)
-            .await
             .expect("Failed to get all documents");
 
         let document_ids: Vec<_> = output.keys().copied().collect();

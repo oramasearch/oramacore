@@ -2,19 +2,18 @@ use std::collections::{HashMap, HashSet};
 
 use anyhow::{bail, Context as _, Result};
 use oramacore_lib::filters::FilterResult;
-use tokio::join;
 use tracing::debug;
 
 use crate::{
-    ai::llms,
+    ai::llms::{self, LLMService},
     collection_manager::{
         bm25::BM25Scorer,
         sides::read::index::committed_field::{StringSearchParams, VectorSearchParams},
     },
     python::embeddings::Intent,
     types::{
-        DocumentId, FieldId, FulltextMode, HybridMode, IndexId, Limit, Properties, SearchMode,
-        SearchModeResult, Similarity, Threshold, VectorMode,
+        DocumentId, FieldId, FulltextMode, HybridMode, IndexId, Limit, Properties, ScoreMode,
+        SearchMode, SearchModeResult, Similarity, Threshold, VectorMode,
     },
 };
 
@@ -28,8 +27,8 @@ use super::{
 /// This structure extracts only the necessary fields from SearchParams,
 /// using lifetimes to avoid cloning data.
 pub struct TokenScoreParams<'search> {
-    /// The search mode (fulltext, vector, hybrid, or auto)
-    pub mode: &'search SearchMode,
+    /// The resolved search mode (fulltext, vector, or hybrid, Auto is already resolved)
+    pub mode: &'search ScoreMode,
     /// Field-specific boost values
     pub boost: &'search HashMap<String, f32>,
     /// Properties (fields) to search on
@@ -82,16 +81,18 @@ impl<'index> TokenScoreContext<'index> {
         }
     }
 
-    /// Determines the actual search mode to use, handling auto-mode via LLM.
+    /// Resolves a SearchMode into a ScoreMode, handling auto-mode via LLM.
     ///
     /// When the mode is Auto, this method calls the LLM service to determine
     /// whether to use fulltext, vector, or hybrid search based on the query.
-    async fn determine_search_mode(&self, mode: &SearchMode) -> Result<SearchMode> {
+    /// All other modes are converted directly into their ScoreMode equivalents.
+    pub async fn resolve_score_mode(
+        llm_service: &LLMService,
+        mode: &SearchMode,
+    ) -> Result<ScoreMode> {
         match mode {
             SearchMode::Auto(mode_result) => {
-                let final_mode: String = self
-                    .context
-                    .llm_service
+                let final_mode: String = llm_service
                     .run_known_prompt(
                         llms::KnownPrompts::Autoquery,
                         vec![],
@@ -101,30 +102,33 @@ impl<'index> TokenScoreContext<'index> {
                     )
                     .await?;
 
-                let serilized_final_mode: SearchModeResult = serde_json::from_str(&final_mode)?;
+                let serialized_final_mode: SearchModeResult = serde_json::from_str(&final_mode)?;
 
-                match serilized_final_mode.mode.as_str() {
-                    "fulltext" => Ok(SearchMode::FullText(FulltextMode {
+                match serialized_final_mode.mode.as_str() {
+                    "fulltext" => Ok(ScoreMode::FullText(FulltextMode {
                         term: mode_result.term.clone(),
                         threshold: None,
                         exact: false,
                         tolerance: None,
                     })),
-                    "hybrid" => Ok(SearchMode::Hybrid(HybridMode {
+                    "hybrid" => Ok(ScoreMode::Hybrid(HybridMode {
                         term: mode_result.term.clone(),
                         similarity: Similarity::default(),
                         threshold: None,
                         exact: false,
                         tolerance: None,
                     })),
-                    "vector" => Ok(SearchMode::Vector(VectorMode {
+                    "vector" => Ok(ScoreMode::Vector(VectorMode {
                         term: mode_result.term.clone(),
                         similarity: Similarity::default(),
                     })),
                     _ => bail!("Invalid search mode"),
                 }
             }
-            _ => Ok(mode.clone()),
+            SearchMode::FullText(m) => Ok(ScoreMode::FullText(m.clone())),
+            SearchMode::Vector(m) => Ok(ScoreMode::Vector(m.clone())),
+            SearchMode::Hybrid(m) => Ok(ScoreMode::Hybrid(m.clone())),
+            SearchMode::Default(m) => Ok(ScoreMode::Default(m.clone())),
         }
     }
 
@@ -142,7 +146,7 @@ impl<'index> TokenScoreContext<'index> {
 
     /// Calculates vector field properties by collecting all vector fields from
     /// uncommitted and committed field collections.
-    async fn calculate_vector_properties(&self) -> Result<Vec<FieldId>> {
+    fn calculate_vector_properties(&self) -> Result<Vec<FieldId>> {
         let properties: HashSet<_> = self
             .uncommitted_fields
             .vector_fields
@@ -159,7 +163,7 @@ impl<'index> TokenScoreContext<'index> {
     /// Handles three cases:
     /// - Specified: Uses the provided field names (validates they exist and are strings)
     /// - None/Star: Uses all string fields from uncommitted and committed collections
-    async fn calculate_string_properties(&self, properties: &Properties) -> Result<Vec<FieldId>> {
+    fn calculate_string_properties(&self, properties: &Properties) -> Result<Vec<FieldId>> {
         let properties: HashSet<_> = match properties {
             Properties::Specified(properties) => {
                 let mut field_ids = HashSet::new();
@@ -191,7 +195,7 @@ impl<'index> TokenScoreContext<'index> {
     /// This method tokenizes the search term, searches across all specified properties,
     /// and computes BM25 scores for matching documents. It handles both uncommitted
     /// and committed field data.
-    async fn search_full_text(
+    fn search_full_text(
         &self,
         term: &str,
         threshold: Option<Threshold>,
@@ -207,7 +211,7 @@ impl<'index> TokenScoreContext<'index> {
         } else {
             tokens
                 .into_iter()
-                .flat_map(|e| std::iter::once(e.0).chain(e.1.into_iter()))
+                .flat_map(|e| std::iter::once(e.0).chain(e.1))
                 .collect()
         };
 
@@ -353,7 +357,7 @@ impl<'index> TokenScoreContext<'index> {
     /// This method calculates embeddings for the search term and performs similarity
     /// search across all specified vector fields. It handles both uncommitted and
     /// committed field data.
-    async fn search_vector(
+    fn search_vector(
         &self,
         term: &str,
         properties: Vec<FieldId>,
@@ -403,9 +407,9 @@ impl<'index> TokenScoreContext<'index> {
 
     /// Performs hybrid search combining full-text and vector search.
     ///
-    /// This method executes both vector and full-text searches in parallel,
+    /// This method executes both vector and full-text searches,
     /// normalizes their scores using min-max normalization, and combines them.
-    async fn search_hybrid(
+    fn search_hybrid(
         &self,
         mode: &HybridMode,
         properties: &Properties,
@@ -413,31 +417,25 @@ impl<'index> TokenScoreContext<'index> {
         limit: Limit,
         filtered_doc_ids: Option<&FilterResult<DocumentId>>,
     ) -> Result<HashMap<DocumentId, f32>> {
-        let vector_properties = self.calculate_vector_properties().await?;
-        let string_properties = self.calculate_string_properties(properties).await?;
+        let vector_properties = self.calculate_vector_properties()?;
+        let string_properties = self.calculate_string_properties(properties)?;
 
-        // Execute both searches in parallel
-        let (vector_res, fulltext_res) = join!(
-            self.search_vector(
-                &mode.term,
-                vector_properties,
-                mode.similarity,
-                limit,
-                filtered_doc_ids,
-            ),
-            self.search_full_text(
-                &mode.term,
-                mode.threshold,
-                mode.exact,
-                mode.tolerance,
-                string_properties,
-                boost,
-                filtered_doc_ids,
-            )
-        );
-
-        let vector_results = vector_res?;
-        let fulltext_results = fulltext_res?;
+        let vector_results = self.search_vector(
+            &mode.term,
+            vector_properties,
+            mode.similarity,
+            limit,
+            filtered_doc_ids,
+        )?;
+        let fulltext_results = self.search_full_text(
+            &mode.term,
+            mode.threshold,
+            mode.exact,
+            mode.tolerance,
+            string_properties,
+            boost,
+            filtered_doc_ids,
+        )?;
 
         // Normalize and combine the results
         Self::normalize_and_combine(vector_results, fulltext_results)
@@ -515,60 +513,47 @@ impl<'index> TokenScoreContext<'index> {
     /// # Returns
     ///
     /// Returns `Ok(())` on success, or an error if any search operation fails.
-    pub async fn execute(
+    pub fn execute(
         self,
         params: &TokenScoreParams<'_>,
         results: &mut HashMap<DocumentId, f32>,
     ) -> Result<()> {
-        // Determine the actual search mode (handle auto-mode with LLM)
-        let search_mode = self.determine_search_mode(params.mode).await?;
-
         // Calculate boost values
         let boost = self.calculate_boost(params.boost);
 
-        // Dispatch to appropriate search strategy based on mode
-        match search_mode {
-            SearchMode::Default(mode) | SearchMode::FullText(mode) => {
-                let properties = self.calculate_string_properties(params.properties).await?;
-                results.extend(
-                    self.search_full_text(
-                        &mode.term,
-                        mode.threshold,
-                        mode.exact,
-                        mode.tolerance,
-                        properties,
-                        boost,
-                        params.filtered_doc_ids,
-                    )
-                    .await?,
-                )
+        // Dispatch to appropriate search strategy based on the resolved score mode
+        match params.mode {
+            ScoreMode::Default(mode) | ScoreMode::FullText(mode) => {
+                let properties = self.calculate_string_properties(params.properties)?;
+                results.extend(self.search_full_text(
+                    &mode.term,
+                    mode.threshold,
+                    mode.exact,
+                    mode.tolerance,
+                    properties,
+                    boost,
+                    params.filtered_doc_ids,
+                )?)
             }
-            SearchMode::Vector(mode) => {
-                let vector_properties = self.calculate_vector_properties().await?;
-                results.extend(
-                    self.search_vector(
-                        &mode.term,
-                        vector_properties,
-                        mode.similarity,
-                        params.limit_hint,
-                        params.filtered_doc_ids,
-                    )
-                    .await?,
-                )
+            ScoreMode::Vector(mode) => {
+                let vector_properties = self.calculate_vector_properties()?;
+                results.extend(self.search_vector(
+                    &mode.term,
+                    vector_properties,
+                    mode.similarity,
+                    params.limit_hint,
+                    params.filtered_doc_ids,
+                )?)
             }
-            SearchMode::Hybrid(mode) => {
-                results.extend(
-                    self.search_hybrid(
-                        &mode,
-                        params.properties,
-                        boost,
-                        params.limit_hint,
-                        params.filtered_doc_ids,
-                    )
-                    .await?,
-                );
+            ScoreMode::Hybrid(mode) => {
+                results.extend(self.search_hybrid(
+                    mode,
+                    params.properties,
+                    boost,
+                    params.limit_hint,
+                    params.filtered_doc_ids,
+                )?);
             }
-            SearchMode::Auto(_) => unreachable!(),
         };
 
         // Track metrics
