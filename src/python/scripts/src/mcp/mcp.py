@@ -8,6 +8,7 @@ class SearchInput(BaseModel):
 
     term: str = Field(description="The search term to look for")
     limit: int = Field(default=10, ge=1, le=100, description="Maximum number of results to return")
+    offset: int = Field(default=0, ge=0, description="Number of results to skip before starting to return results")
     mode: str = Field(default="fulltext", description="Search mode: 'fulltext', 'vector', or 'hybrid'")
 
 
@@ -39,14 +40,14 @@ class MCPServer:
             },
         }
 
-    def _search(self, term: str, limit: int = 10, mode: str = "fulltext") -> Dict[str, Any]:
-        inputs = SearchInput(term=term, limit=limit, mode=mode)
+    def _search(self, term: str, limit: int = 10, offset: int = 0, mode: str = "fulltext") -> Dict[str, Any]:
+        inputs = SearchInput(term=term, limit=limit, offset=offset, mode=mode)
 
         search_params = {
             "mode": inputs.mode,
             "term": inputs.term,
             "limit": inputs.limit,
-            "offset": 0,
+            "offset": inputs.offset,
             "properties": "*",
         }
 
