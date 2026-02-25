@@ -578,6 +578,7 @@ mod tests {
     use serde_json::value::RawValue;
 
     use crate::types::{CollectionId, DocumentId, RawJSONDocument, SerializableNumber};
+    use oramacore_fields::bool::IndexedValue as BoolIndexedValue;
     use oramacore_lib::nlp::locales::Locale;
 
     #[test]
@@ -689,6 +690,35 @@ mod tests {
                         doc_id: DocumentId(2),
                         indexed_values: Vec::from([IndexedValue::FilterBool(field_id, false)]),
                         omc: Some(2.0),
+                    },
+                ),
+            ),
+            // Test FilterBool2 with plain value
+            WriteOperation::Collection(
+                collection_id,
+                CollectionWriteOperation::IndexWriteOperation(
+                    index_id,
+                    IndexWriteOperation::Index {
+                        doc_id: DocumentId(3),
+                        indexed_values: Vec::from([IndexedValue::FilterBool2(
+                            field_id,
+                            BoolIndexedValue::Plain(true),
+                        )]),
+                    },
+                ),
+            ),
+            // Test FilterBool2 with array value
+            WriteOperation::Collection(
+                collection_id,
+                CollectionWriteOperation::IndexWriteOperation(
+                    index_id,
+                    IndexWriteOperation::Index2 {
+                        doc_id: DocumentId(4),
+                        indexed_values: Vec::from([IndexedValue::FilterBool2(
+                            field_id,
+                            BoolIndexedValue::Array(vec![true, false]),
+                        )]),
+                        omc: None,
                     },
                 ),
             ),

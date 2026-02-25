@@ -1,36 +1,167 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::iter::Peekable;
 
 use crate::{
     collection_manager::sides::read::ReadError,
-    types::{DocumentId, Number, SortOrder},
+    types::{DocumentId, FieldId, Number, SortOrder},
 };
 
 use super::{
-    committed_field::{CommittedBoolField, CommittedDateField, CommittedNumberField},
+    bool_field::BoolFieldStorage,
+    committed_field::{CommittedDateField, CommittedNumberField},
     path_to_index_id_map::PathToIndexId,
-    uncommitted_field::{UncommittedBoolField, UncommittedDateFilterField, UncommittedNumberField},
+    uncommitted_field::{UncommittedDateFilterField, UncommittedNumberField},
     CommittedFields, FieldType, UncommittedFields,
 };
+
+// =============================================================================
+// DocBatch - abstraction over document ID collections in sort batches
+// =============================================================================
+
+/// A batch of document IDs used in sort operations.
+///
+/// Supports both `HashSet` references (for number/date fields where data is
+/// already stored in HashSets) and slice references (for bool fields, avoiding
+/// expensive HashSet materialization from mmap'd sorted arrays).
+///
+/// Using `Slice` for bool fields saves ~6x memory per element compared to
+/// `HashSet` (8 bytes vs ~50+ bytes per DocumentId) and avoids hashing overhead.
+#[derive(Debug)]
+pub enum DocBatch<'a> {
+    /// Reference to an existing HashSet (zero-copy for number/date fields).
+    HashSet(&'a HashSet<DocumentId>),
+    /// Reference to a contiguous slice.
+    Slice(&'a [DocumentId]),
+    /// Owned Vec of document IDs (used by bool fields which compute on demand).
+    Owned(Vec<DocumentId>),
+}
+
+impl<'a> DocBatch<'a> {
+    /// Returns an iterator over the document IDs in this batch.
+    #[inline]
+    pub fn iter(&self) -> DocBatchIter<'_> {
+        match self {
+            DocBatch::HashSet(set) => DocBatchIter::HashSet(set.iter()),
+            DocBatch::Slice(slice) => DocBatchIter::Slice(slice.iter()),
+            DocBatch::Owned(vec) => DocBatchIter::Slice(vec.iter()),
+        }
+    }
+
+    /// Returns the number of document IDs in this batch.
+    #[inline]
+    pub fn len(&self) -> usize {
+        match self {
+            DocBatch::HashSet(set) => set.len(),
+            DocBatch::Slice(slice) => slice.len(),
+            DocBatch::Owned(vec) => vec.len(),
+        }
+    }
+
+    #[inline]
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+}
+
+/// Iterator over document IDs in a `DocBatch` (borrowing).
+///
+/// Wraps either a `HashSet::iter()` or a slice `iter()`, dispatching
+/// via a single branch per `.next()` call (no dynamic dispatch overhead).
+pub enum DocBatchIter<'a> {
+    HashSet(std::collections::hash_set::Iter<'a, DocumentId>),
+    Slice(std::slice::Iter<'a, DocumentId>),
+}
+
+impl<'a> Iterator for DocBatchIter<'a> {
+    type Item = &'a DocumentId;
+
+    #[inline]
+    fn next(&mut self) -> Option<Self::Item> {
+        match self {
+            DocBatchIter::HashSet(iter) => iter.next(),
+            DocBatchIter::Slice(iter) => iter.next(),
+        }
+    }
+
+    #[inline]
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        match self {
+            DocBatchIter::HashSet(iter) => iter.size_hint(),
+            DocBatchIter::Slice(iter) => iter.size_hint(),
+        }
+    }
+}
+
+/// Owning iterator over document IDs in a `DocBatch`.
+///
+/// For `HashSet`/`Slice` variants, copies each `DocumentId` from the reference.
+/// For `Owned`, moves `DocumentId` values out of the underlying `Vec`.
+pub enum DocBatchIntoIter<'a> {
+    HashSet(std::collections::hash_set::Iter<'a, DocumentId>),
+    Slice(std::slice::Iter<'a, DocumentId>),
+    Owned(std::vec::IntoIter<DocumentId>),
+}
+
+impl<'a> Iterator for DocBatchIntoIter<'a> {
+    type Item = DocumentId;
+
+    #[inline]
+    fn next(&mut self) -> Option<Self::Item> {
+        match self {
+            DocBatchIntoIter::HashSet(iter) => iter.next().copied(),
+            DocBatchIntoIter::Slice(iter) => iter.next().copied(),
+            DocBatchIntoIter::Owned(iter) => iter.next(),
+        }
+    }
+
+    #[inline]
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        match self {
+            DocBatchIntoIter::HashSet(iter) => iter.size_hint(),
+            DocBatchIntoIter::Slice(iter) => iter.size_hint(),
+            DocBatchIntoIter::Owned(iter) => iter.size_hint(),
+        }
+    }
+}
+
+impl<'a> IntoIterator for DocBatch<'a> {
+    type Item = DocumentId;
+    type IntoIter = DocBatchIntoIter<'a>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        match self {
+            DocBatch::HashSet(set) => DocBatchIntoIter::HashSet(set.iter()),
+            DocBatch::Slice(slice) => DocBatchIntoIter::Slice(slice.iter()),
+            DocBatch::Owned(vec) => DocBatchIntoIter::Owned(vec.into_iter()),
+        }
+    }
+}
 
 // =============================================================================
 // Type aliases for complex iterator types
 // =============================================================================
 
-/// A boxed iterator yielding (sort_key, document_ids) pairs.
-/// Used for sorting operations that require forward iteration only.
-type SortedDocIdsIter<'s> = Box<dyn Iterator<Item = (Number, &'s HashSet<DocumentId>)> + 's>;
+/// Public output iterator from `IndexSortContext::execute()`.
+/// Yields `(sort_key, DocBatch)` pairs, where DocBatch abstracts
+/// over different document collection types (HashSet for number/date,
+/// Slice for bool fields).
+pub type SortedDocIdsIter<'s> = Box<dyn Iterator<Item = (Number, DocBatch<'s>)> + 's>;
 
-/// A boxed double-ended iterator yielding (sort_key, document_ids) pairs.
-/// Used for sorting operations that need both ascending and descending traversal.
-type SortedDocIdsBidirectionalIter<'s> =
+/// Internal iterator type using `&HashSet` directly.
+/// Used by `Sortable` trait implementations and `calculate_sort_on_field`
+/// for number/date fields where data is already in HashSets.
+type InternalSortIter<'s> = Box<dyn Iterator<Item = (Number, &'s HashSet<DocumentId>)> + 's>;
+
+/// Internal bidirectional iterator for number/date fields.
+/// Used by `Sortable::iter_sorted()` to support both ascending and descending order.
+type InternalBidirectionalSortIter<'s> =
     Box<dyn DoubleEndedIterator<Item = (Number, &'s HashSet<DocumentId>)> + 's>;
 
 /// Result type for sort execution, returning either a sorted iterator or a read error.
-type SortExecuteResult<'s> = Result<SortedDocIdsIter<'s>, ReadError>;
+pub type SortExecuteResult<'s> = Result<SortedDocIdsIter<'s>, ReadError>;
 
-/// A peekable boxed iterator for merge operations.
-/// Used internally by SortIterator to peek at the next element without consuming it.
+/// A peekable boxed iterator for internal merge operations.
+/// Used by SortIterator to peek at the next element without consuming it.
 type PeekableSortIter<'s, T> =
     Peekable<Box<dyn Iterator<Item = (T, &'s HashSet<DocumentId>)> + 's>>;
 
@@ -41,7 +172,7 @@ type PeekableSortIter<'s, T> =
 /// Trait for fields that support sorting operations.
 ///
 /// This trait provides a uniform interface for sorting documents across
-/// different field types (Bool, Number, Date). Each implementation
+/// different field types (Number, Date). Each implementation
 /// converts its native type to `Number` for unified sorting.
 ///
 /// # Design
@@ -49,12 +180,15 @@ type PeekableSortIter<'s, T> =
 /// The trait returns a boxed `DoubleEndedIterator` to support both ascending
 /// and descending sort orders. The iterator yields tuples of (Number, &HashSet<DocumentId>)
 /// where Number is the sort key. References to stored HashSets avoid cloning.
+///
+/// Note: Bool fields bypass this trait entirely, using `DocBatch::Slice`
+/// to avoid materializing HashSets from mmap'd sorted arrays.
 trait Sortable {
     /// Returns a sorted iterator over (sort_key, document_ids) pairs.
     ///
     /// The iterator yields values in ascending order by default.
     /// Use `.rev()` on the returned iterator for descending order.
-    fn iter_sorted<'s>(&'s self) -> SortedDocIdsBidirectionalIter<'s>;
+    fn iter_sorted<'s>(&'s self) -> InternalBidirectionalSortIter<'s>;
 }
 
 // =============================================================================
@@ -62,30 +196,16 @@ trait Sortable {
 // =============================================================================
 
 impl Sortable for UncommittedNumberField {
-    fn iter_sorted<'s>(&'s self) -> SortedDocIdsBidirectionalIter<'s> {
+    fn iter_sorted<'s>(&'s self) -> InternalBidirectionalSortIter<'s> {
         Box::new(self.iter_ref())
     }
 }
 
 impl Sortable for UncommittedDateFilterField {
-    fn iter_sorted<'s>(&'s self) -> SortedDocIdsBidirectionalIter<'s> {
+    fn iter_sorted<'s>(&'s self) -> InternalBidirectionalSortIter<'s> {
         Box::new(
             self.iter_ref()
                 .map(|(timestamp, doc_ids)| (i64_to_number(timestamp), doc_ids)),
-        )
-    }
-}
-
-impl Sortable for UncommittedBoolField {
-    fn iter_sorted<'s>(&'s self) -> SortedDocIdsBidirectionalIter<'s> {
-        let (true_docs, false_docs) = self.inner_ref();
-        // Ascending order: false (0) first, then true (1)
-        Box::new(
-            vec![
-                (bool_to_number(false), false_docs),
-                (bool_to_number(true), true_docs),
-            ]
-            .into_iter(),
         )
     }
 }
@@ -95,7 +215,7 @@ impl Sortable for UncommittedBoolField {
 // =============================================================================
 
 impl Sortable for CommittedNumberField {
-    fn iter_sorted<'s>(&'s self) -> SortedDocIdsBidirectionalIter<'s> {
+    fn iter_sorted<'s>(&'s self) -> InternalBidirectionalSortIter<'s> {
         Box::new(
             self.iter_ref()
                 .map(|(serializable_number, doc_ids)| (serializable_number.0, doc_ids)),
@@ -104,24 +224,10 @@ impl Sortable for CommittedNumberField {
 }
 
 impl Sortable for CommittedDateField {
-    fn iter_sorted<'s>(&'s self) -> SortedDocIdsBidirectionalIter<'s> {
+    fn iter_sorted<'s>(&'s self) -> InternalBidirectionalSortIter<'s> {
         Box::new(
             self.iter_ref()
                 .map(|(timestamp, doc_ids)| (i64_to_number(timestamp), doc_ids)),
-        )
-    }
-}
-
-impl Sortable for CommittedBoolField {
-    fn iter_sorted<'s>(&'s self) -> SortedDocIdsBidirectionalIter<'s> {
-        let (true_docs, false_docs) = self.inner_ref();
-        // Ascending order: false (0) first, then true (1)
-        Box::new(
-            vec![
-                (bool_to_number(false), false_docs),
-                (bool_to_number(true), true_docs),
-            ]
-            .into_iter(),
         )
     }
 }
@@ -133,6 +239,7 @@ impl Sortable for CommittedBoolField {
 /// Context required for executing sort operations on an index.
 pub struct IndexSortContext<'index> {
     path_to_index_id_map: &'index PathToIndexId,
+    bool_fields: &'index HashMap<FieldId, BoolFieldStorage>,
     uncommitted_fields: &'index UncommittedFields,
     committed_fields: &'index CommittedFields,
     field_name: String,
@@ -143,6 +250,7 @@ impl<'index> IndexSortContext<'index> {
     /// Creates a new IndexSortContext with the provided sort dependencies.
     pub(crate) fn new(
         path_to_index_id_map: &'index PathToIndexId,
+        bool_fields: &'index HashMap<FieldId, BoolFieldStorage>,
         uncommitted_fields: &'index UncommittedFields,
         committed_fields: &'index CommittedFields,
         field_name: &str,
@@ -150,6 +258,7 @@ impl<'index> IndexSortContext<'index> {
     ) -> Self {
         Self {
             path_to_index_id_map,
+            bool_fields,
             uncommitted_fields,
             committed_fields,
             field_name: field_name.to_string(),
@@ -182,11 +291,12 @@ impl<'index> IndexSortContext<'index> {
                         ))
                     })?;
                 let committed = self.committed_fields.number_fields.get(&field_id);
-                Ok(calculate_sort_on_field(uncommitted, committed, self.order))
+                let iter = calculate_sort_on_field(uncommitted, committed, self.order);
+                // Wrap &HashSet references in DocBatch::HashSet for the public API
+                Ok(Box::new(iter.map(|(k, v)| (k, DocBatch::HashSet(v)))))
             }
             FieldType::Bool => {
-                let uncommitted = self
-                    .uncommitted_fields
+                let bool_field = self
                     .bool_fields
                     .get(&field_id)
                     .ok_or_else(|| {
@@ -195,8 +305,25 @@ impl<'index> IndexSortContext<'index> {
                             self.field_name
                         ))
                     })?;
-                let committed = self.committed_fields.bool_fields.get(&field_id);
-                Ok(calculate_sort_on_field(uncommitted, committed, self.order))
+
+                // Compute on demand: collect doc IDs into owned Vecs
+                let false_docs: Vec<DocumentId> =
+                    bool_field.filter_docs(false).into_iter().map(DocumentId).collect();
+                let true_docs: Vec<DocumentId> =
+                    bool_field.filter_docs(true).into_iter().map(DocumentId).collect();
+
+                // Ascending: false (0) first, then true (1)
+                let data = vec![
+                    (bool_to_number(false), DocBatch::Owned(false_docs)),
+                    (bool_to_number(true), DocBatch::Owned(true_docs)),
+                ];
+
+                let iter: SortedDocIdsIter<'s> = match self.order {
+                    SortOrder::Ascending => Box::new(data.into_iter()),
+                    SortOrder::Descending => Box::new(data.into_iter().rev()),
+                };
+
+                Ok(iter)
             }
             FieldType::Date => {
                 let uncommitted = self
@@ -210,7 +337,9 @@ impl<'index> IndexSortContext<'index> {
                         ))
                     })?;
                 let committed = self.committed_fields.date_fields.get(&field_id);
-                Ok(calculate_sort_on_field(uncommitted, committed, self.order))
+                let iter = calculate_sort_on_field(uncommitted, committed, self.order);
+                // Wrap &HashSet references in DocBatch::HashSet for the public API
+                Ok(Box::new(iter.map(|(k, v)| (k, DocBatch::HashSet(v)))))
             }
             _ => Err(ReadError::InvalidSortField(
                 self.field_name.clone(),
@@ -252,19 +381,20 @@ fn i64_to_number(value: i64) -> Number {
 /// Merges sorted iterators from uncommitted and committed fields.
 ///
 /// This generic function handles the combination of uncommitted (in-memory) and
-/// committed (persisted) field data.
+/// committed (persisted) field data. Returns an internal iterator that yields
+/// `&HashSet<DocumentId>` references - the caller wraps these in `DocBatch::HashSet`.
 fn calculate_sort_on_field<'a, UF, CF>(
     uncommitted_field: &'a UF,
     committed_field: Option<&'a CF>,
     order: SortOrder,
-) -> SortedDocIdsIter<'a>
+) -> InternalSortIter<'a>
 where
     UF: Sortable,
     CF: Sortable,
 {
     let uncommitted_iter = uncommitted_field.iter_sorted();
 
-    let uncommitted_iter: SortedDocIdsIter<'a> = match order {
+    let uncommitted_iter: InternalSortIter<'a> = match order {
         SortOrder::Ascending => Box::new(uncommitted_iter),
         SortOrder::Descending => Box::new(uncommitted_iter.rev()),
     };
@@ -272,7 +402,7 @@ where
     if let Some(committed_field) = committed_field {
         let committed_iter = committed_field.iter_sorted();
 
-        let committed_iter: SortedDocIdsIter<'a> = match order {
+        let committed_iter: InternalSortIter<'a> = match order {
             SortOrder::Ascending => Box::new(committed_iter),
             SortOrder::Descending => Box::new(committed_iter.rev()),
         };
@@ -369,8 +499,8 @@ mod tests {
 
     #[test]
     fn test_sort_iterator_ascending_empty() {
-        let iter1: SortedDocIdsIter<'_> = Box::new(std::iter::empty());
-        let iter2: SortedDocIdsIter<'_> = Box::new(std::iter::empty());
+        let iter1: InternalSortIter<'_> = Box::new(std::iter::empty());
+        let iter2: InternalSortIter<'_> = Box::new(std::iter::empty());
 
         let mut merged = SortIterator::new(iter1, iter2, SortOrder::Ascending);
         assert!(merged.next().is_none());
@@ -382,8 +512,8 @@ mod tests {
             (Number::I32(1), HashSet::from([DocumentId(10)])),
             (Number::I32(3), HashSet::from([DocumentId(30)])),
         ];
-        let iter1: SortedDocIdsIter<'_> = Box::new(data.iter().map(|(k, v)| (*k, v)));
-        let iter2: SortedDocIdsIter<'_> = Box::new(std::iter::empty());
+        let iter1: InternalSortIter<'_> = Box::new(data.iter().map(|(k, v)| (*k, v)));
+        let iter2: InternalSortIter<'_> = Box::new(std::iter::empty());
 
         let merged = SortIterator::new(iter1, iter2, SortOrder::Ascending);
         let collected: Vec<_> = merged.collect();
@@ -404,8 +534,8 @@ mod tests {
             (Number::I32(4), HashSet::from([DocumentId(40)])),
         ];
 
-        let iter1: SortedDocIdsIter<'_> = Box::new(data1.iter().map(|(k, v)| (*k, v)));
-        let iter2: SortedDocIdsIter<'_> = Box::new(data2.iter().map(|(k, v)| (*k, v)));
+        let iter1: InternalSortIter<'_> = Box::new(data1.iter().map(|(k, v)| (*k, v)));
+        let iter2: InternalSortIter<'_> = Box::new(data2.iter().map(|(k, v)| (*k, v)));
 
         let merged = SortIterator::new(iter1, iter2, SortOrder::Ascending);
         let collected: Vec<_> = merged.collect();
@@ -435,8 +565,8 @@ mod tests {
             (Number::I32(2), HashSet::from([DocumentId(20)])),
         ];
 
-        let iter1: SortedDocIdsIter<'_> = Box::new(data1.iter().map(|(k, v)| (*k, v)));
-        let iter2: SortedDocIdsIter<'_> = Box::new(data2.iter().map(|(k, v)| (*k, v)));
+        let iter1: InternalSortIter<'_> = Box::new(data1.iter().map(|(k, v)| (*k, v)));
+        let iter2: InternalSortIter<'_> = Box::new(data2.iter().map(|(k, v)| (*k, v)));
 
         let merged = SortIterator::new(iter1, iter2, SortOrder::Descending);
         let collected: Vec<_> = merged.collect();
@@ -465,8 +595,8 @@ mod tests {
             (Number::I32(3), HashSet::from([DocumentId(31)])),
         ];
 
-        let iter1: SortedDocIdsIter<'_> = Box::new(data1.iter().map(|(k, v)| (*k, v)));
-        let iter2: SortedDocIdsIter<'_> = Box::new(data2.iter().map(|(k, v)| (*k, v)));
+        let iter1: InternalSortIter<'_> = Box::new(data1.iter().map(|(k, v)| (*k, v)));
+        let iter2: InternalSortIter<'_> = Box::new(data2.iter().map(|(k, v)| (*k, v)));
 
         let merged = SortIterator::new(iter1, iter2, SortOrder::Ascending);
         let collected: Vec<_> = merged.collect();

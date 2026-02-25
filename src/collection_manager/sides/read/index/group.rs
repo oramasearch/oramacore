@@ -5,15 +5,18 @@ use std::hash::Hash;
 
 use crate::{
     collection_manager::sides::read::index::committed_field::{
-        CommittedBoolField, CommittedNumberField, CommittedStringFilterField,
+        CommittedNumberField, CommittedStringFilterField,
     },
     collection_manager::sides::read::index::uncommitted_field::{
-        UncommittedBoolField, UncommittedNumberField, UncommittedStringFilterField,
+        UncommittedNumberField, UncommittedStringFilterField,
     },
     types::{DocumentId, FieldId, Number, NumberFilter},
 };
 
-use super::{path_to_index_id_map::PathToIndexId, CommittedFields, FieldType, UncommittedFields};
+use super::{
+    bool_field::BoolFieldStorage, path_to_index_id_map::PathToIndexId, CommittedFields, FieldType,
+    UncommittedFields,
+};
 
 // =============================================================================
 // GroupValue enum
@@ -127,30 +130,6 @@ trait Groupable {
 // Groupable implementations
 // =============================================================================
 
-impl Groupable for UncommittedBoolField {
-    type GroupParam = bool;
-
-    fn get_values(&self) -> Box<dyn Iterator<Item = bool> + '_> {
-        Box::new(vec![true, false].into_iter())
-    }
-
-    fn get_doc_ids(&self, variant: &bool) -> Result<Box<dyn Iterator<Item = DocumentId> + '_>> {
-        Ok(Box::new(self.filter(*variant)))
-    }
-}
-
-impl Groupable for CommittedBoolField {
-    type GroupParam = bool;
-
-    fn get_values(&self) -> Box<dyn Iterator<Item = bool> + '_> {
-        Box::new(vec![true, false].into_iter())
-    }
-
-    fn get_doc_ids(&self, variant: &bool) -> Result<Box<dyn Iterator<Item = DocumentId> + '_>> {
-        Ok(Box::new(self.filter(*variant)?))
-    }
-}
-
 impl Groupable for UncommittedNumberField {
     type GroupParam = Number;
 
@@ -220,6 +199,7 @@ pub struct GroupParams<'search> {
 /// GroupContext constructor, maintaining proper encapsulation.
 pub struct GroupContext<'index> {
     path_to_index_id_map: &'index PathToIndexId,
+    bool_fields: &'index HashMap<FieldId, BoolFieldStorage>,
     uncommitted_fields: &'index UncommittedFields,
     committed_fields: &'index CommittedFields,
 }
@@ -232,11 +212,13 @@ impl<'index> GroupContext<'index> {
     /// is responsible for gathering the data and passing it in.
     pub fn new(
         path_to_index_id_map: &'index PathToIndexId,
+        bool_fields: &'index HashMap<FieldId, BoolFieldStorage>,
         uncommitted_fields: &'index UncommittedFields,
         committed_fields: &'index CommittedFields,
     ) -> Self {
         Self {
             path_to_index_id_map,
+            bool_fields,
             uncommitted_fields,
             committed_fields,
         }
@@ -275,6 +257,7 @@ impl<'index> GroupContext<'index> {
             let field_variants = calculate_group_for_field(
                 *field_id,
                 *field_type,
+                self.bool_fields,
                 self.uncommitted_fields,
                 self.committed_fields,
             )?;
@@ -406,17 +389,23 @@ where
 fn calculate_group_for_field(
     field_id: FieldId,
     field_type: FieldType,
+    bool_fields: &HashMap<FieldId, BoolFieldStorage>,
     uncommitted_fields: &UncommittedFields,
     committed_fields: &CommittedFields,
 ) -> Result<HashMap<GroupValue, HashSet<DocumentId>>> {
     match field_type {
         FieldType::Bool => {
-            let uncommitted = uncommitted_fields
-                .bool_fields
+            let bool_field = bool_fields
                 .get(&field_id)
                 .ok_or_else(|| anyhow::anyhow!("Cannot find bool field {field_id:?}"))?;
-            let committed = committed_fields.bool_fields.get(&field_id);
-            calculate_group_on_field(uncommitted, committed)
+
+            // Use BoolFieldStorage::get_grouped_docs() which returns HashMap<bool, HashSet<DocumentId>>
+            let grouped = bool_field.get_grouped_docs();
+            let mut result = HashMap::new();
+            for (bool_val, doc_ids) in grouped {
+                result.insert(GroupValue::Bool(bool_val), doc_ids);
+            }
+            Ok(result)
         }
         FieldType::Number => {
             let uncommitted = uncommitted_fields

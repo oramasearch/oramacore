@@ -40,7 +40,7 @@ async fn test_commit_after_operation_limit_reached() {
         index.fields_stats.iter().any(|f| {
             matches!(
                 f.stats,
-                IndexFieldStatsType::CommittedBoolean(_)
+                IndexFieldStatsType::BoolFieldStorage(_)
                     | IndexFieldStatsType::CommittedNumber(_)
                     | IndexFieldStatsType::CommittedStringFilter(_)
                     | IndexFieldStatsType::CommittedString(_)
@@ -237,7 +237,7 @@ async fn test_commit_after_collection_operation_limit_reached() {
         index.fields_stats.iter().any(|f| {
             matches!(
                 f.stats,
-                IndexFieldStatsType::CommittedBoolean(_)
+                IndexFieldStatsType::BoolFieldStorage(_)
                     | IndexFieldStatsType::CommittedNumber(_)
                     | IndexFieldStatsType::CommittedStringFilter(_)
                     | IndexFieldStatsType::CommittedString(_)

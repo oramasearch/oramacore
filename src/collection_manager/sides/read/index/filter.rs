@@ -1,12 +1,12 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use anyhow::{bail, Context, Result};
 use oramacore_lib::filters::{FilterResult, PlainFilterResult};
 use tracing::trace;
 
-use crate::types::{DateFilter, DocumentId, Filter, GeoSearchFilter, NumberFilter, WhereFilter};
+use crate::types::{DateFilter, DocumentId, FieldId, Filter, GeoSearchFilter, NumberFilter, WhereFilter};
 
-use super::{path_to_index_id_map::PathToIndexId, CommittedFields, FieldType, UncommittedFields};
+use super::{bool_field::BoolFieldStorage, path_to_index_id_map::PathToIndexId, CommittedFields, FieldType, UncommittedFields};
 
 /// Trait for fields that support filtering operations.
 ///
@@ -241,6 +241,7 @@ where
 fn calculate_filter_for_fields(
     document_count_estimate: u64,
     path_to_index_id_map: &PathToIndexId,
+    bool_fields: &HashMap<FieldId, BoolFieldStorage>,
     uncommitted_fields: &UncommittedFields,
     committed_fields: &CommittedFields,
     key: &str,
@@ -252,17 +253,24 @@ fn calculate_filter_for_fields(
 
     match field_type {
         FieldType::Bool => {
-            let uncommitted_field = uncommitted_fields
-                .bool_fields
+            let bool_field = bool_fields
                 .get(&field_id)
-                .ok_or_else(|| anyhow::anyhow!("Field not found in index"))?;
+                .ok_or_else(|| anyhow::anyhow!("Bool field not found in index"))?;
 
-            calculate_filter_on_field(
+            let Filter::Bool(bool_value) = filter else {
+                // Wrong filter type for bool field - return empty set
+                return Ok(FilterResult::Filter(PlainFilterResult::new(
+                    document_count_estimate,
+                )));
+            };
+
+            let docs = bool_field.filter_docs(*bool_value)
+                .into_iter()
+                .map(DocumentId);
+            Ok(FilterResult::Filter(PlainFilterResult::from_iter(
                 document_count_estimate,
-                uncommitted_field,
-                committed_fields.bool_fields.get(&field_id),
-                filter,
-            )
+                docs,
+            )))
         }
         FieldType::Number => {
             let uncommitted_field = uncommitted_fields
@@ -349,6 +357,7 @@ fn calculate_filter_for_fields(
 fn calculate_filter(
     document_count_estimate: u64,
     path_to_index_id_map: &PathToIndexId,
+    bool_fields: &HashMap<FieldId, BoolFieldStorage>,
     where_filter: &WhereFilter,
     uncommitted_fields: &UncommittedFields,
     committed_fields: &CommittedFields,
@@ -369,6 +378,7 @@ fn calculate_filter(
         let filtered = calculate_filter_for_fields(
             document_count_estimate,
             path_to_index_id_map,
+            bool_fields,
             uncommitted_fields,
             committed_fields,
             k,
@@ -383,6 +393,7 @@ fn calculate_filter(
             let result = calculate_filter(
                 document_count_estimate,
                 path_to_index_id_map,
+                bool_fields,
                 f,
                 uncommitted_fields,
                 committed_fields,
@@ -397,6 +408,7 @@ fn calculate_filter(
             let result = calculate_filter(
                 document_count_estimate,
                 path_to_index_id_map,
+                bool_fields,
                 f,
                 uncommitted_fields,
                 committed_fields,
@@ -422,6 +434,7 @@ fn calculate_filter(
         let result = calculate_filter(
             document_count_estimate,
             path_to_index_id_map,
+            bool_fields,
             filter,
             uncommitted_fields,
             committed_fields,
@@ -453,6 +466,7 @@ fn calculate_filter(
 pub struct FilterContext<'index> {
     document_count: u64,
     path_to_index_id_map: &'index PathToIndexId,
+    bool_fields: &'index HashMap<FieldId, BoolFieldStorage>,
     uncommitted_fields: &'index UncommittedFields,
     committed_fields: &'index CommittedFields,
     uncommitted_deleted_documents: &'index HashSet<DocumentId>,
@@ -467,6 +481,7 @@ impl<'index> FilterContext<'index> {
     pub fn new(
         document_count: u64,
         path_to_index_id_map: &'index PathToIndexId,
+        bool_fields: &'index HashMap<FieldId, BoolFieldStorage>,
         uncommitted_fields: &'index UncommittedFields,
         committed_fields: &'index CommittedFields,
         uncommitted_deleted_documents: &'index HashSet<DocumentId>,
@@ -474,6 +489,7 @@ impl<'index> FilterContext<'index> {
         Self {
             document_count,
             path_to_index_id_map,
+            bool_fields,
             uncommitted_fields,
             committed_fields,
             uncommitted_deleted_documents,
@@ -515,6 +531,7 @@ impl<'index> FilterContext<'index> {
         let mut output = calculate_filter(
             expected_items,
             self.path_to_index_id_map,
+            self.bool_fields,
             where_filter,
             self.uncommitted_fields,
             self.committed_fields,

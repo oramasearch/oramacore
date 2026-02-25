@@ -2062,13 +2062,8 @@ struct FieldStats {
 #[serde(tag = "type")]
 #[allow(dead_code)]
 enum FieldStatType {
-    #[serde(rename = "uncommitted_bool")]
-    UncommittedBoolean {
-        false_count: usize,
-        true_count: usize,
-    },
-    #[serde(rename = "committed_bool")]
-    CommittedBoolean {
+    #[serde(rename = "bool")]
+    Bool {
         false_count: usize,
         true_count: usize,
     },
@@ -2128,11 +2123,7 @@ impl FieldStatType {
     fn document_count(&self) -> usize {
         use FieldStatType::*;
         match self {
-            UncommittedBoolean {
-                false_count,
-                true_count,
-            }
-            | CommittedBoolean {
+            Bool {
                 false_count,
                 true_count,
             } => false_count + true_count,
@@ -2151,7 +2142,7 @@ impl FieldStatType {
     fn field_type_name(&self) -> &'static str {
         use FieldStatType::*;
         match self {
-            UncommittedBoolean { .. } | CommittedBoolean { .. } => "boolean",
+            Bool { .. } => "boolean",
             UncommittedNumber { .. } | CommittedNumber { .. } => "number",
             UncommittedStringFilter { .. } | CommittedStringFilter { .. } => "string_filter",
             UncommittedString { .. } | CommittedString { .. } => "string",

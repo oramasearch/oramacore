@@ -21,6 +21,7 @@ use crate::{
     types::{CollectionId, DocumentId, FieldId, IndexId, Number, OramaDate, SerializableNumber},
 };
 
+use oramacore_fields::bool::{BoolIndexer, IndexedValue as BoolIndexedValue};
 use oramacore_lib::nlp::{
     chunker::{Chunker, ChunkerConfig},
     locales::Locale,
@@ -341,6 +342,7 @@ pub struct BoolFilterField {
     field_id: FieldId,
     field_path: Box<[String]>,
     is_array: bool,
+    indexer: BoolIndexer,
 }
 
 impl BoolFilterField {
@@ -349,31 +351,18 @@ impl BoolFilterField {
             field_id,
             field_path,
             is_array,
+            indexer: BoolIndexer::new(is_array),
         }
     }
 
     pub fn index_value(&self, value: &Value) -> Result<Vec<IndexedValue>> {
-        let data: Vec<bool> = match value {
-            Value::Bool(b) => vec![*b],
-            Value::Array(arr) => arr
-                .iter()
-                .filter_map(|v| {
-                    if let Value::Bool(b) = v {
-                        Some(*b)
-                    } else {
-                        None
-                    }
-                })
-                .collect(),
-            _ => vec![],
-        };
-
-        let data = data
-            .into_iter()
-            .map(|b| IndexedValue::FilterBool(self.field_id, b))
-            .collect();
-
-        Ok(data)
+        // Delegate to BoolIndexer which handles both plain and array extraction.
+        // For arrays like [true, false], a single FilterBool2 operation is emitted
+        // instead of multiple FilterBool operations.
+        match self.indexer.index_json(value) {
+            Some(indexed) => Ok(vec![IndexedValue::FilterBool2(self.field_id, indexed)]),
+            None => Ok(vec![]),
+        }
     }
 }
 
@@ -1087,6 +1076,9 @@ pub enum IndexedValue {
     FilterDate(FieldId, i64),
     FilterGeoPoint(FieldId, GeoPoint),
     ScoreString(FieldId, u16, HashMap<Term, TermStringField>),
+    /// New variant that carries an `oramacore_fields::bool::IndexedValue` directly,
+    /// supporting both plain and array bool values in a single operation.
+    FilterBool2(FieldId, BoolIndexedValue),
 }
 
 fn join_vec_strings(v: &[&String]) -> String {

@@ -37,6 +37,7 @@ mod quick_fulltext_benchmark;
 mod regenerate_read_api_key;
 mod replace_doc_on_insert;
 mod replace_index;
+mod replace_index_bool_promotion;
 mod shelves;
 mod shutdown;
 mod sort;

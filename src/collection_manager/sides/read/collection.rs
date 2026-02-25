@@ -45,10 +45,10 @@ use crate::{
 
 use super::{
     index::{Index, IndexStats},
-    CollectionCommitConfig, CommittedBoolFieldStats, CommittedNumberFieldStats,
-    CommittedStringFilterFieldStats, CommittedVectorFieldStats, DeletionReason, OffloadFieldConfig,
-    ReadSide, UncommittedBoolFieldStats, UncommittedNumberFieldStats, UncommittedStringFieldStats,
-    UncommittedStringFilterFieldStats, UncommittedVectorFieldStats,
+    CollectionCommitConfig, CommittedNumberFieldStats, CommittedStringFilterFieldStats,
+    CommittedVectorFieldStats, DeletionReason, OffloadFieldConfig, ReadSide,
+    UncommittedNumberFieldStats, UncommittedStringFieldStats, UncommittedStringFilterFieldStats,
+    UncommittedVectorFieldStats,
 };
 use oramacore_lib::values::ValuesReader;
 
@@ -910,6 +910,7 @@ impl CollectionReader {
                     self.context.clone(),
                     self.offload_config,
                     EnumStrategy::default(),
+                    self.data_dir.join("indexes").join(index_id.as_str()),
                 );
                 let contains = get_index_in_vector(&indexes_lock, index_id).is_some();
                 if contains {
@@ -932,6 +933,7 @@ impl CollectionReader {
                     self.context.clone(),
                     self.offload_config,
                     enum_strategy,
+                    self.data_dir.join("indexes").join(index_id.as_str()),
                 );
                 let contains = get_index_in_vector(&indexes_lock, index_id).is_some();
                 if contains {
@@ -950,6 +952,7 @@ impl CollectionReader {
                     self.context.clone(),
                     self.offload_config,
                     EnumStrategy::default(),
+                    self.data_dir.join("temp_indexes").join(index_id.as_str()),
                 );
                 let contains = get_index_in_vector(&temp_indexes_lock, index_id).is_some();
                 if contains {
@@ -972,6 +975,7 @@ impl CollectionReader {
                     self.context.clone(),
                     self.offload_config,
                     enum_strategy,
+                    self.data_dir.join("temp_indexes").join(index_id.as_str()),
                 );
                 let contains = get_index_in_vector(&temp_indexes_lock, index_id).is_some();
                 if contains {
@@ -1054,8 +1058,11 @@ impl CollectionReader {
                     // This should not happen, since we already checked that the index exists
                     .remove(temp_i);
 
-                // Replace the temp index id with the new one
-                new_index.promote_to_runtime_index(runtime_index_id);
+                // Replace the temp index id with the new one.
+                // Pass the permanent data_dir so bool fields can be relocated
+                // from temp_indexes/ to indexes/.
+                let new_data_dir = self.data_dir.join("indexes").join(runtime_index_id.as_str());
+                new_index.promote_to_runtime_index(runtime_index_id, new_data_dir)?;
                 runtime_index_lock.push(new_index);
 
                 drop(temp_index_lock);
@@ -1298,41 +1305,17 @@ impl CollectionReader {
 
             for field in stat.fields_stats.iter() {
                 match &field.stats {
-                    IndexFieldStatsType::CommittedBoolean(CommittedBoolFieldStats {
-                        false_count,
-                        true_count,
-                    }) => {
+                    IndexFieldStatsType::BoolFieldStorage(stats) => {
                         final_stats.insert(
                             field.field_id,
                             FilterableField::Bool(FilterableFieldBool {
                                 field_path: field.field_path.clone(),
                                 field_type: "boolean".to_string(),
-                                count_true: *true_count,
-                                count_false: *false_count,
-                                count: *true_count + *false_count,
+                                count_true: stats.true_count,
+                                count_false: stats.false_count,
+                                count: stats.true_count + stats.false_count,
                             }),
                         );
-                    }
-                    IndexFieldStatsType::UncommittedBoolean(UncommittedBoolFieldStats {
-                        false_count,
-                        true_count,
-                    }) => {
-                        if *false_count > 0 || *true_count > 0 {
-                            if let Some(FilterableField::Bool(bool_stats)) =
-                                final_stats.get(&field.field_id)
-                            {
-                                final_stats.insert(
-                                    field.field_id,
-                                    FilterableField::Bool(FilterableFieldBool {
-                                        field_path: field.field_path.clone(),
-                                        field_type: "boolean".to_string(),
-                                        count_true: bool_stats.count_true + *true_count,
-                                        count_false: bool_stats.count_false + *false_count,
-                                        count: bool_stats.count + *true_count + *false_count,
-                                    }),
-                                );
-                            }
-                        }
                     }
                     IndexFieldStatsType::CommittedGeoPoint(CommittedGeoPointFieldStats {
                         count,
@@ -1616,10 +1599,8 @@ use derive_more::From;
 #[derive(Serialize, Debug, From)]
 #[serde(tag = "type")]
 pub enum IndexFieldStatsType {
-    #[serde(rename = "uncommitted_bool")]
-    UncommittedBoolean(UncommittedBoolFieldStats),
-    #[serde(rename = "committed_bool")]
-    CommittedBoolean(CommittedBoolFieldStats),
+    #[serde(rename = "bool")]
+    BoolFieldStorage(super::index::bool_field::BoolFieldStorageStats),
 
     #[serde(rename = "uncommitted_number")]
     UncommittedNumber(UncommittedNumberFieldStats),

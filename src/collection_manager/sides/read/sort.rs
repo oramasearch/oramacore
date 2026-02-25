@@ -5,7 +5,7 @@ use oramacore_lib::data_structures::capped_heap::CappedHeap;
 use ordered_float::NotNan;
 use tracing::warn;
 
-use super::{GroupValue, IndexSortContext};
+use super::{DocBatch, GroupValue, IndexSortContext};
 use crate::collection_manager::sides::read::sort::sort_iter::{
     CombinedSortFilter, MergeSortedIterator,
 };
@@ -57,6 +57,7 @@ fn sort_token_scores_by_field<'index>(
 
         let index_sort_context = IndexSortContext::new(
             store.path_to_field_id_map,
+            store.bool_fields,
             &store.uncommitted_fields,
             &store.committed_fields,
             &sort_by.property,
@@ -71,6 +72,7 @@ fn sort_token_scores_by_field<'index>(
         for store in stores.iter() {
             let index_sort_context = IndexSortContext::new(
                 store.path_to_field_id_map,
+                store.bool_fields,
                 &store.uncommitted_fields,
                 &store.committed_fields,
                 &sort_by.property,
@@ -95,18 +97,18 @@ fn sort_token_scores_by_field<'index>(
     Ok(result)
 }
 
-/// Process sort iterator to collect results up to the desired count
+/// Process sort iterator to collect results up to the desired count.
 ///
-/// Returns a vector of (Number, &HashSet<DocumentId>) tuples where
-/// the sum of the sizes of the HashSets is at least `desiderata`.
+/// Returns a vector of `(Number, DocBatch)` tuples where
+/// the sum of the batch sizes is at least `desiderata`.
 fn process_sort_iterator<'a>(
-    iter: Box<dyn Iterator<Item = (Number, &'a HashSet<DocumentId>)> + 'a>,
+    iter: Box<dyn Iterator<Item = (Number, DocBatch<'a>)> + 'a>,
     desiderata: usize,
-) -> Vec<(Number, &'a HashSet<DocumentId>)> {
+) -> Vec<(Number, DocBatch<'a>)> {
     // The worst scenario is that documents doesn't share the "number" value,
     // so each iterator item contains only one document.
     // For a good scenario, the documents share the "number" value,
-    // so the hashset contains multiple documents.
+    // so the batch contains multiple documents.
     // We use `desiderata / 2` to avoid excessive memory usage
     let mut index_results = Vec::with_capacity((desiderata / 2).min(1000));
 
@@ -148,6 +150,7 @@ pub fn sort_groups<'index>(
 
                 let index_sort_context = IndexSortContext::new(
                     store.path_to_field_id_map,
+                    store.bool_fields,
                     &store.uncommitted_fields,
                     &store.committed_fields,
                     &sort_by.property,
@@ -157,7 +160,7 @@ pub fn sort_groups<'index>(
                 let sorted_iter = index_sort_context.execute()?;
 
                 sorted_iter
-                    .flat_map(|(_, h)| h.iter().copied())
+                    .flat_map(|(_, h)| h)
                     .filter(|doc_id| docs.contains(doc_id) && token_scores.contains_key(doc_id))
                     .take(top_count)
                     .collect()
@@ -166,6 +169,7 @@ pub fn sort_groups<'index>(
                 for store in stores.iter() {
                     let index_sort_context = IndexSortContext::new(
                         store.path_to_field_id_map,
+                        store.bool_fields,
                         &store.uncommitted_fields,
                         &store.committed_fields,
                         &sort_by.property,
@@ -186,7 +190,7 @@ pub fn sort_groups<'index>(
 
                 // With the filter, we still need per-doc filtering since batch may contain mixed docs
                 let data: Vec<DocumentId> = merge_sorted_iterator
-                    .flat_map(|(_, h)| h.iter().copied())
+                    .flat_map(|(_, h)| h)
                     .filter(|doc_id| docs.contains(doc_id) && token_scores.contains_key(doc_id))
                     .take(top_count)
                     .collect();
@@ -229,7 +233,7 @@ pub fn sort_groups<'index>(
 }
 
 /// Truncate results based on top_count, applying token scores.
-fn truncate<'a, I: Iterator<Item = (Number, &'a HashSet<DocumentId>)>>(
+fn truncate<'a, I: Iterator<Item = (Number, DocBatch<'a>)>>(
     token_scores: &HashMap<DocumentId, f32>,
     output: I,
     top_count: usize,
@@ -387,6 +391,7 @@ fn apply_pin_rules_to_group(
 }
 
 mod sort_iter {
+    use super::DocBatch;
     use crate::types::{DocumentId, Number, SortOrder};
     use std::collections::{HashMap, HashSet};
     use std::fmt::Debug;
@@ -458,8 +463,8 @@ mod sort_iter {
     // MergeSortedIterator - N-way merge with filtering
     // =============================================================================
 
-    /// A boxed iterator yielding (sort_key, document_ids) pairs.
-    type SortedIter<'s, T> = Box<dyn Iterator<Item = (T, &'s HashSet<DocumentId>)> + 's>;
+    /// A boxed iterator yielding `(sort_key, DocBatch)` pairs.
+    type SortedIter<'s, T> = Box<dyn Iterator<Item = (T, DocBatch<'s>)> + 's>;
 
     /// A peekable boxed iterator for merge operations.
     type PeekableSortedIter<'s, T> = Peekable<SortedIter<'s, T>>;
@@ -516,7 +521,7 @@ mod sort_iter {
     impl<'iter, Key: OrderedKey, Filter: SortFilter<DocumentId>> Iterator
         for MergeSortedIterator<'iter, Key, Filter>
     {
-        type Item = (Key, &'iter HashSet<DocumentId>);
+        type Item = (Key, DocBatch<'iter>);
 
         fn next(&mut self) -> Option<Self::Item> {
             loop {
@@ -563,9 +568,11 @@ mod sort_iter {
         impl OrderedKey for u8 {}
         impl OrderedKey for i16 {}
 
-        /// Helper to compare HashSet references with expected HashSet
-        fn set_eq(set: &HashSet<DocumentId>, expected: HashSet<DocumentId>) -> bool {
-            set == &expected
+        /// Helper to compare a DocBatch with an expected HashSet.
+        /// Works for both DocBatch::HashSet and DocBatch::Slice variants.
+        fn batch_eq(batch: &DocBatch<'_>, expected: HashSet<DocumentId>) -> bool {
+            let collected: HashSet<DocumentId> = batch.iter().copied().collect();
+            collected == expected
         }
 
         #[test]
@@ -587,17 +594,17 @@ mod sort_iter {
                 ),
             ];
             let mut merged = MergeSortedIterator::<u8, ()>::new(SortOrder::Ascending, ());
-            merged.add(Box::new(data.iter().map(|(k, v)| (*k, v))));
+            merged.add(Box::new(data.iter().map(|(k, v)| (*k, DocBatch::HashSet(v)))));
             let collected: Vec<_> = merged.collect();
             assert_eq!(collected.len(), 2);
             assert_eq!(collected[0].0, 0);
-            assert!(set_eq(
-                collected[0].1,
+            assert!(batch_eq(
+                &collected[0].1,
                 HashSet::from([DocumentId(1), DocumentId(2), DocumentId(3)])
             ));
             assert_eq!(collected[1].0, 2);
-            assert!(set_eq(
-                collected[1].1,
+            assert!(batch_eq(
+                &collected[1].1,
                 HashSet::from([DocumentId(6), DocumentId(8), DocumentId(9)])
             ));
         }
@@ -627,9 +634,9 @@ mod sort_iter {
             ];
 
             let mut merged = MergeSortedIterator::<u8, ()>::new(SortOrder::Ascending, ());
-            merged.add(Box::new(data1.iter().map(|(k, v)| (*k, v))));
-            merged.add(Box::new(data2.iter().map(|(k, v)| (*k, v))));
-            merged.add(Box::new(data3.iter().map(|(k, v)| (*k, v))));
+            merged.add(Box::new(data1.iter().map(|(k, v)| (*k, DocBatch::HashSet(v)))));
+            merged.add(Box::new(data2.iter().map(|(k, v)| (*k, DocBatch::HashSet(v)))));
+            merged.add(Box::new(data3.iter().map(|(k, v)| (*k, DocBatch::HashSet(v)))));
 
             let collected: Vec<_> = merged.collect();
             let keys: Vec<u8> = collected.iter().map(|(k, _)| *k).collect();
@@ -637,9 +644,9 @@ mod sort_iter {
             assert_eq!(keys, vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
 
             // Verify document IDs are preserved correctly
-            assert!(set_eq(collected[0].1, HashSet::from([DocumentId(10)])));
-            assert!(set_eq(collected[1].1, HashSet::from([DocumentId(20)])));
-            assert!(set_eq(collected[9].1, HashSet::from([DocumentId(100)])));
+            assert!(batch_eq(&collected[0].1, HashSet::from([DocumentId(10)])));
+            assert!(batch_eq(&collected[1].1, HashSet::from([DocumentId(20)])));
+            assert!(batch_eq(&collected[9].1, HashSet::from([DocumentId(100)])));
         }
 
         #[test]
@@ -667,9 +674,9 @@ mod sort_iter {
             ];
 
             let mut merged = MergeSortedIterator::<u8, ()>::new(SortOrder::Descending, ());
-            merged.add(Box::new(data1.iter().map(|(k, v)| (*k, v))));
-            merged.add(Box::new(data2.iter().map(|(k, v)| (*k, v))));
-            merged.add(Box::new(data3.iter().map(|(k, v)| (*k, v))));
+            merged.add(Box::new(data1.iter().map(|(k, v)| (*k, DocBatch::HashSet(v)))));
+            merged.add(Box::new(data2.iter().map(|(k, v)| (*k, DocBatch::HashSet(v)))));
+            merged.add(Box::new(data3.iter().map(|(k, v)| (*k, DocBatch::HashSet(v)))));
 
             let collected: Vec<_> = merged.collect();
             let keys: Vec<u8> = collected.iter().map(|(k, _)| *k).collect();
@@ -677,9 +684,9 @@ mod sort_iter {
             assert_eq!(keys, vec![10, 9, 8, 7, 6, 5, 4, 3, 2, 1]);
 
             // Verify document IDs are preserved correctly
-            assert!(set_eq(collected[0].1, HashSet::from([DocumentId(100)])));
-            assert!(set_eq(collected[1].1, HashSet::from([DocumentId(90)])));
-            assert!(set_eq(collected[9].1, HashSet::from([DocumentId(10)])));
+            assert!(batch_eq(&collected[0].1, HashSet::from([DocumentId(100)])));
+            assert!(batch_eq(&collected[1].1, HashSet::from([DocumentId(90)])));
+            assert!(batch_eq(&collected[9].1, HashSet::from([DocumentId(10)])));
         }
 
         #[test]
@@ -699,8 +706,8 @@ mod sort_iter {
             ];
 
             let mut merged = MergeSortedIterator::<u8, ()>::new(SortOrder::Ascending, ());
-            merged.add(Box::new(data1.iter().map(|(k, v)| (*k, v))));
-            merged.add(Box::new(data2.iter().map(|(k, v)| (*k, v))));
+            merged.add(Box::new(data1.iter().map(|(k, v)| (*k, DocBatch::HashSet(v)))));
+            merged.add(Box::new(data2.iter().map(|(k, v)| (*k, DocBatch::HashSet(v)))));
 
             let collected: Vec<_> = merged.collect();
             let keys: Vec<u8> = collected.iter().map(|(k, _)| *k).collect();
@@ -709,12 +716,12 @@ mod sort_iter {
             assert_eq!(keys, vec![1, 1, 3, 3, 4, 5]);
 
             // Verify both document sets for key 1 are preserved
-            assert!(set_eq(collected[0].1, HashSet::from([DocumentId(10)])));
-            assert!(set_eq(collected[1].1, HashSet::from([DocumentId(11)])));
+            assert!(batch_eq(&collected[0].1, HashSet::from([DocumentId(10)])));
+            assert!(batch_eq(&collected[1].1, HashSet::from([DocumentId(11)])));
 
             // Verify both document sets for key 3 are preserved
-            assert!(set_eq(collected[2].1, HashSet::from([DocumentId(30)])));
-            assert!(set_eq(collected[3].1, HashSet::from([DocumentId(31)])));
+            assert!(batch_eq(&collected[2].1, HashSet::from([DocumentId(30)])));
+            assert!(batch_eq(&collected[3].1, HashSet::from([DocumentId(31)])));
         }
 
         #[test]
@@ -728,23 +735,23 @@ mod sort_iter {
             ];
 
             let mut merged = MergeSortedIterator::<u8, ()>::new(SortOrder::Ascending, ());
-            merged.add(Box::new(data.iter().map(|(k, v)| (*k, v))));
+            merged.add(Box::new(data.iter().map(|(k, v)| (*k, DocBatch::HashSet(v)))));
 
             let collected: Vec<_> = merged.collect();
             let keys: Vec<u8> = collected.iter().map(|(k, _)| *k).collect();
 
             assert_eq!(keys, vec![1, 1, 2, 2]);
-            assert!(set_eq(collected[0].1, HashSet::from([DocumentId(10)])));
-            assert!(set_eq(collected[1].1, HashSet::from([DocumentId(11)])));
-            assert!(set_eq(collected[2].1, HashSet::from([DocumentId(20)])));
-            assert!(set_eq(collected[3].1, HashSet::from([DocumentId(21)])));
+            assert!(batch_eq(&collected[0].1, HashSet::from([DocumentId(10)])));
+            assert!(batch_eq(&collected[1].1, HashSet::from([DocumentId(11)])));
+            assert!(batch_eq(&collected[2].1, HashSet::from([DocumentId(20)])));
+            assert!(batch_eq(&collected[3].1, HashSet::from([DocumentId(21)])));
         }
 
         #[test]
         fn test_single_empty_iterator() {
             let data: Vec<(u8, HashSet<DocumentId>)> = vec![];
             let mut merged = MergeSortedIterator::<u8, ()>::new(SortOrder::Ascending, ());
-            merged.add(Box::new(data.iter().map(|(k, v)| (*k, v))));
+            merged.add(Box::new(data.iter().map(|(k, v)| (*k, DocBatch::HashSet(v)))));
 
             let collected: Vec<_> = merged.collect();
             assert!(collected.is_empty());
@@ -764,20 +771,20 @@ mod sort_iter {
             ];
 
             let mut merged = MergeSortedIterator::<u8, ()>::new(SortOrder::Ascending, ());
-            merged.add(Box::new(empty1.iter().map(|(k, v)| (*k, v))));
-            merged.add(Box::new(data1.iter().map(|(k, v)| (*k, v))));
-            merged.add(Box::new(empty2.iter().map(|(k, v)| (*k, v))));
-            merged.add(Box::new(data2.iter().map(|(k, v)| (*k, v))));
+            merged.add(Box::new(empty1.iter().map(|(k, v)| (*k, DocBatch::HashSet(v)))));
+            merged.add(Box::new(data1.iter().map(|(k, v)| (*k, DocBatch::HashSet(v)))));
+            merged.add(Box::new(empty2.iter().map(|(k, v)| (*k, DocBatch::HashSet(v)))));
+            merged.add(Box::new(data2.iter().map(|(k, v)| (*k, DocBatch::HashSet(v)))));
 
             let collected: Vec<_> = merged.collect();
             let keys: Vec<u8> = collected.iter().map(|(k, _)| *k).collect();
 
             // Should only get results from non-empty iterators
             assert_eq!(keys, vec![1, 2, 3, 4]);
-            assert!(set_eq(collected[0].1, HashSet::from([DocumentId(10)])));
-            assert!(set_eq(collected[1].1, HashSet::from([DocumentId(20)])));
-            assert!(set_eq(collected[2].1, HashSet::from([DocumentId(30)])));
-            assert!(set_eq(collected[3].1, HashSet::from([DocumentId(40)])));
+            assert!(batch_eq(&collected[0].1, HashSet::from([DocumentId(10)])));
+            assert!(batch_eq(&collected[1].1, HashSet::from([DocumentId(20)])));
+            assert!(batch_eq(&collected[2].1, HashSet::from([DocumentId(30)])));
+            assert!(batch_eq(&collected[3].1, HashSet::from([DocumentId(40)])));
         }
 
         #[test]
@@ -787,9 +794,9 @@ mod sort_iter {
             let data3 = [(3_u8, HashSet::from([DocumentId(30)]))];
 
             let mut merged = MergeSortedIterator::<u8, ()>::new(SortOrder::Ascending, ());
-            merged.add(Box::new(data1.iter().map(|(k, v)| (*k, v))));
-            merged.add(Box::new(data2.iter().map(|(k, v)| (*k, v))));
-            merged.add(Box::new(data3.iter().map(|(k, v)| (*k, v))));
+            merged.add(Box::new(data1.iter().map(|(k, v)| (*k, DocBatch::HashSet(v)))));
+            merged.add(Box::new(data2.iter().map(|(k, v)| (*k, DocBatch::HashSet(v)))));
+            merged.add(Box::new(data3.iter().map(|(k, v)| (*k, DocBatch::HashSet(v)))));
 
             let collected: Vec<_> = merged.collect();
             let keys: Vec<u8> = collected.iter().map(|(k, _)| *k).collect();
@@ -824,9 +831,9 @@ mod sort_iter {
             ];
 
             let mut merged = MergeSortedIterator::<u8, ()>::new(SortOrder::Ascending, ());
-            merged.add(Box::new(data1.iter().map(|(k, v)| (*k, v))));
-            merged.add(Box::new(data2.iter().map(|(k, v)| (*k, v))));
-            merged.add(Box::new(data3.iter().map(|(k, v)| (*k, v))));
+            merged.add(Box::new(data1.iter().map(|(k, v)| (*k, DocBatch::HashSet(v)))));
+            merged.add(Box::new(data2.iter().map(|(k, v)| (*k, DocBatch::HashSet(v)))));
+            merged.add(Box::new(data3.iter().map(|(k, v)| (*k, DocBatch::HashSet(v)))));
 
             let collected: Vec<_> = merged.collect();
             let keys: Vec<u8> = collected.iter().map(|(k, _)| *k).collect();
@@ -855,8 +862,8 @@ mod sort_iter {
             ];
 
             let mut merged = MergeSortedIterator::<u8, ()>::new(SortOrder::Descending, ());
-            merged.add(Box::new(data1.iter().map(|(k, v)| (*k, v))));
-            merged.add(Box::new(data2.iter().map(|(k, v)| (*k, v))));
+            merged.add(Box::new(data1.iter().map(|(k, v)| (*k, DocBatch::HashSet(v)))));
+            merged.add(Box::new(data2.iter().map(|(k, v)| (*k, DocBatch::HashSet(v)))));
 
             let collected: Vec<_> = merged.collect();
             let keys: Vec<u8> = collected.iter().map(|(k, _)| *k).collect();
@@ -864,11 +871,11 @@ mod sort_iter {
             assert_eq!(keys, vec![100, 99, 98, 97, 96, 95, 94, 93, 92, 91, 90]);
 
             // Verify first item comes from the shorter iterator
-            assert!(set_eq(collected[0].1, HashSet::from([DocumentId(1000)])));
+            assert!(batch_eq(&collected[0].1, HashSet::from([DocumentId(1000)])));
 
             // Verify remaining items come from the longer iterator
-            assert!(set_eq(collected[1].1, HashSet::from([DocumentId(990)])));
-            assert!(set_eq(collected[10].1, HashSet::from([DocumentId(900)])));
+            assert!(batch_eq(&collected[1].1, HashSet::from([DocumentId(990)])));
+            assert!(batch_eq(&collected[10].1, HashSet::from([DocumentId(900)])));
         }
 
         #[test]
@@ -889,8 +896,8 @@ mod sort_iter {
             ];
 
             let mut merged = MergeSortedIterator::<u8, ()>::new(SortOrder::Ascending, ());
-            merged.add(Box::new(data1.iter().map(|(k, v)| (*k, v))));
-            merged.add(Box::new(data2.iter().map(|(k, v)| (*k, v))));
+            merged.add(Box::new(data1.iter().map(|(k, v)| (*k, DocBatch::HashSet(v)))));
+            merged.add(Box::new(data2.iter().map(|(k, v)| (*k, DocBatch::HashSet(v)))));
 
             let collected: Vec<_> = merged.collect();
             let keys: Vec<u8> = collected.iter().map(|(k, _)| *k).collect();
@@ -898,16 +905,16 @@ mod sort_iter {
             assert_eq!(keys, vec![1, 2, 3, 4]);
 
             // Verify multi-document sets are preserved
-            assert!(set_eq(
-                collected[0].1,
+            assert!(batch_eq(
+                &collected[0].1,
                 HashSet::from([DocumentId(10), DocumentId(11), DocumentId(12)])
             ));
-            assert!(set_eq(collected[1].1, HashSet::from([DocumentId(20)])));
-            assert!(set_eq(
-                collected[2].1,
+            assert!(batch_eq(&collected[1].1, HashSet::from([DocumentId(20)])));
+            assert!(batch_eq(
+                &collected[2].1,
                 HashSet::from([DocumentId(30), DocumentId(31)])
             ));
-            assert!(set_eq(collected[3].1, HashSet::from([DocumentId(40)])));
+            assert!(batch_eq(&collected[3].1, HashSet::from([DocumentId(40)])));
         }
 
         #[test]
@@ -925,8 +932,8 @@ mod sort_iter {
             ];
 
             let mut merged = MergeSortedIterator::<u8, ()>::new(SortOrder::Ascending, ());
-            merged.add(Box::new(data1.iter().map(|(k, v)| (*k, v))));
-            merged.add(Box::new(data2.iter().map(|(k, v)| (*k, v))));
+            merged.add(Box::new(data1.iter().map(|(k, v)| (*k, DocBatch::HashSet(v)))));
+            merged.add(Box::new(data2.iter().map(|(k, v)| (*k, DocBatch::HashSet(v)))));
 
             let collected: Vec<_> = merged.collect();
             let keys: Vec<u8> = collected.iter().map(|(k, _)| *k).collect();
@@ -935,19 +942,19 @@ mod sort_iter {
 
             // Each set should maintain its own DocumentId combinations
             // DocumentId(100) appears in multiple sets, which is expected behavior
-            assert!(set_eq(
-                collected[0].1,
+            assert!(batch_eq(
+                &collected[0].1,
                 HashSet::from([DocumentId(100), DocumentId(101)])
             ));
-            assert!(set_eq(
-                collected[1].1,
+            assert!(batch_eq(
+                &collected[1].1,
                 HashSet::from([DocumentId(100), DocumentId(102)])
             ));
-            assert!(set_eq(
-                collected[2].1,
+            assert!(batch_eq(
+                &collected[2].1,
                 HashSet::from([DocumentId(100), DocumentId(103)])
             ));
-            assert!(set_eq(collected[3].1, HashSet::from([DocumentId(104)])));
+            assert!(batch_eq(&collected[3].1, HashSet::from([DocumentId(104)])));
         }
 
         #[test]
@@ -967,15 +974,15 @@ mod sort_iter {
             ];
 
             let mut merged = MergeSortedIterator::<u8, ()>::new(SortOrder::Ascending, ());
-            merged.add(Box::new(data1.iter().map(|(k, v)| (*k, v))));
-            merged.add(Box::new(data2.iter().map(|(k, v)| (*k, v))));
+            merged.add(Box::new(data1.iter().map(|(k, v)| (*k, DocBatch::HashSet(v)))));
+            merged.add(Box::new(data2.iter().map(|(k, v)| (*k, DocBatch::HashSet(v)))));
 
             let collected: Vec<_> = merged.collect();
             let keys: Vec<u8> = collected.iter().map(|(k, _)| *k).collect();
 
             assert_eq!(keys, vec![0, 1, 2, 127, 254, 255]);
-            assert!(set_eq(collected[0].1, HashSet::from([DocumentId(0)])));
-            assert!(set_eq(collected[5].1, HashSet::from([DocumentId(255)])));
+            assert!(batch_eq(&collected[0].1, HashSet::from([DocumentId(0)])));
+            assert!(batch_eq(&collected[5].1, HashSet::from([DocumentId(255)])));
         }
 
         #[test]
@@ -996,16 +1003,16 @@ mod sort_iter {
             ];
 
             let mut merged = MergeSortedIterator::<i16, ()>::new(SortOrder::Descending, ());
-            merged.add(Box::new(data1.iter().map(|(k, v)| (*k, v))));
-            merged.add(Box::new(data2.iter().map(|(k, v)| (*k, v))));
+            merged.add(Box::new(data1.iter().map(|(k, v)| (*k, DocBatch::HashSet(v)))));
+            merged.add(Box::new(data2.iter().map(|(k, v)| (*k, DocBatch::HashSet(v)))));
 
             let collected: Vec<_> = merged.collect();
             let keys: Vec<i16> = collected.iter().map(|(k, _)| *k).collect();
 
             // Should be in descending order
             assert_eq!(keys, vec![32767, 1000, 0, -1000, -32768]);
-            assert!(set_eq(collected[0].1, HashSet::from([DocumentId(32767)])));
-            assert!(set_eq(collected[4].1, HashSet::from([DocumentId(32768)])));
+            assert!(batch_eq(&collected[0].1, HashSet::from([DocumentId(32767)])));
+            assert!(batch_eq(&collected[4].1, HashSet::from([DocumentId(32768)])));
         }
 
         // =============================================================================
@@ -1024,7 +1031,7 @@ mod sort_iter {
             // Filter that only includes DocumentId(20) and DocumentId(31)
             let filter_set: HashSet<DocumentId> = HashSet::from([DocumentId(20), DocumentId(31)]);
             let mut merged = MergeSortedIterator::<u8, _>::new(SortOrder::Ascending, &filter_set);
-            merged.add(Box::new(data.iter().map(|(k, v)| (*k, v))));
+            merged.add(Box::new(data.iter().map(|(k, v)| (*k, DocBatch::HashSet(v)))));
 
             let collected: Vec<_> = merged.collect();
 
@@ -1032,12 +1039,12 @@ mod sort_iter {
             assert_eq!(collected.len(), 2);
             assert_eq!(collected[0].0, 2); // Batch with DocumentId(20)
                                            // Verify batch 2 document set
-            assert!(set_eq(collected[0].1, HashSet::from([DocumentId(20)])));
+            assert!(batch_eq(&collected[0].1, HashSet::from([DocumentId(20)])));
 
             assert_eq!(collected[1].0, 3); // Batch with DocumentId(31) (and 30)
                                            // Verify batch 3 returns FULL set (batch-level filtering returns entire batch)
-            assert!(set_eq(
-                collected[1].1,
+            assert!(batch_eq(
+                &collected[1].1,
                 HashSet::from([DocumentId(30), DocumentId(31)])
             ));
         }
@@ -1056,7 +1063,7 @@ mod sort_iter {
             scores.insert(DocumentId(30), 2.0);
 
             let mut merged = MergeSortedIterator::<u8, _>::new(SortOrder::Ascending, &scores);
-            merged.add(Box::new(data.iter().map(|(k, v)| (*k, v))));
+            merged.add(Box::new(data.iter().map(|(k, v)| (*k, DocBatch::HashSet(v)))));
 
             let collected: Vec<_> = merged.collect();
 
@@ -1065,13 +1072,13 @@ mod sort_iter {
             assert_eq!(collected.len(), 2);
             assert_eq!(collected[0].0, 1);
             // Verify batch 1 returns FULL set (both docs, even though only DocumentId(11) is in filter)
-            assert!(set_eq(
-                collected[0].1,
+            assert!(batch_eq(
+                &collected[0].1,
                 HashSet::from([DocumentId(10), DocumentId(11)])
             ));
 
             assert_eq!(collected[1].0, 3);
-            assert!(set_eq(collected[1].1, HashSet::from([DocumentId(30)])));
+            assert!(batch_eq(&collected[1].1, HashSet::from([DocumentId(30)])));
         }
 
         #[test]
@@ -1099,7 +1106,7 @@ mod sort_iter {
             };
 
             let mut merged = MergeSortedIterator::<u8, _>::new(SortOrder::Ascending, filter);
-            merged.add(Box::new(data.iter().map(|(k, v)| (*k, v))));
+            merged.add(Box::new(data.iter().map(|(k, v)| (*k, DocBatch::HashSet(v)))));
 
             let collected: Vec<_> = merged.collect();
 
@@ -1109,8 +1116,8 @@ mod sort_iter {
             assert_eq!(collected.len(), 1);
             assert_eq!(collected[0].0, 1);
             // Verify batch 1 returns FULL set (batch-level filtering returns entire batch)
-            assert!(set_eq(
-                collected[0].1,
+            assert!(batch_eq(
+                &collected[0].1,
                 HashSet::from([DocumentId(10), DocumentId(11)])
             ));
         }
@@ -1125,18 +1132,18 @@ mod sort_iter {
 
             // () filter should include everything
             let mut merged = MergeSortedIterator::<u8, ()>::new(SortOrder::Ascending, ());
-            merged.add(Box::new(data.iter().map(|(k, v)| (*k, v))));
+            merged.add(Box::new(data.iter().map(|(k, v)| (*k, DocBatch::HashSet(v)))));
 
             let collected: Vec<_> = merged.collect();
 
             // All batches should be included with correct keys and document sets
             assert_eq!(collected.len(), 3);
             assert_eq!(collected[0].0, 1);
-            assert!(set_eq(collected[0].1, HashSet::from([DocumentId(10)])));
+            assert!(batch_eq(&collected[0].1, HashSet::from([DocumentId(10)])));
             assert_eq!(collected[1].0, 2);
-            assert!(set_eq(collected[1].1, HashSet::from([DocumentId(20)])));
+            assert!(batch_eq(&collected[1].1, HashSet::from([DocumentId(20)])));
             assert_eq!(collected[2].0, 3);
-            assert!(set_eq(collected[2].1, HashSet::from([DocumentId(30)])));
+            assert!(batch_eq(&collected[2].1, HashSet::from([DocumentId(30)])));
         }
 
         #[test]
@@ -1150,7 +1157,7 @@ mod sort_iter {
             // Filter that matches nothing
             let filter_set: HashSet<DocumentId> = HashSet::from([DocumentId(999)]);
             let mut merged = MergeSortedIterator::<u8, _>::new(SortOrder::Ascending, &filter_set);
-            merged.add(Box::new(data.iter().map(|(k, v)| (*k, v))));
+            merged.add(Box::new(data.iter().map(|(k, v)| (*k, DocBatch::HashSet(v)))));
 
             let collected: Vec<_> = merged.collect();
 

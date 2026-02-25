@@ -1,6 +1,6 @@
 use chrono::{DateTime, Utc};
 use committed_field::{
-    BoolFieldInfo, CommittedBoolField, CommittedNumberField, CommittedStringFilterField,
+    BoolFieldInfo, CommittedNumberField, CommittedStringFilterField,
     NumberFieldInfo, StringFilterFieldInfo, VectorFieldInfo,
 };
 use path_to_index_id_map::PathToIndexId;
@@ -39,8 +39,10 @@ use crate::{
 use oramacore_lib::fs::{create_if_not_exists, BufferedFile};
 use oramacore_lib::nlp::{locales::Locale, TextParser};
 
+use self::bool_field::BoolFieldStorage;
 use super::collection::{IndexFieldStats, IndexFieldStatsType};
 use super::OffloadFieldConfig;
+pub mod bool_field;
 mod committed_field;
 pub mod facet;
 pub mod filter;
@@ -59,12 +61,11 @@ use crate::{
 };
 use anyhow::{Context, Result};
 pub use committed_field::{
-    CommittedBoolFieldStats, CommittedDateFieldStats, CommittedGeoPointFieldStats,
-    CommittedNumberFieldStats, CommittedStringFieldStats, CommittedStringFilterFieldStats,
-    CommittedVectorFieldStats,
+    CommittedDateFieldStats, CommittedGeoPointFieldStats, CommittedNumberFieldStats,
+    CommittedStringFieldStats, CommittedStringFilterFieldStats, CommittedVectorFieldStats,
 };
 pub use group::GroupValue;
-pub use sort::IndexSortContext;
+pub use sort::{DocBatch, DocBatchIntoIter, DocBatchIter, IndexSortContext, SortedDocIdsIter};
 use std::{
     collections::{HashMap, HashSet},
     path::{Path, PathBuf},
@@ -74,9 +75,8 @@ use std::{
     },
 };
 pub use uncommitted_field::{
-    UncommittedBoolFieldStats, UncommittedDateFieldStats, UncommittedGeoPointFieldStats,
-    UncommittedNumberFieldStats, UncommittedStringFieldStats, UncommittedStringFilterFieldStats,
-    UncommittedVectorFieldStats,
+    UncommittedDateFieldStats, UncommittedGeoPointFieldStats, UncommittedNumberFieldStats,
+    UncommittedStringFieldStats, UncommittedStringFilterFieldStats, UncommittedVectorFieldStats,
 };
 
 #[derive(Debug, Clone, Copy)]
@@ -89,7 +89,6 @@ pub enum DeletionReason {
 
 #[derive(Default)]
 pub struct UncommittedFields {
-    pub bool_fields: HashMap<FieldId, UncommittedBoolField>,
     pub number_fields: HashMap<FieldId, UncommittedNumberField>,
     pub string_filter_fields: HashMap<FieldId, UncommittedStringFilterField>,
     pub date_fields: HashMap<FieldId, UncommittedDateFilterField>,
@@ -100,7 +99,6 @@ pub struct UncommittedFields {
 
 #[derive(Default)]
 pub struct CommittedFields {
-    pub bool_fields: HashMap<FieldId, CommittedBoolField>,
     pub number_fields: HashMap<FieldId, CommittedNumberField>,
     pub string_filter_fields: HashMap<FieldId, CommittedStringFilterField>,
     pub date_fields: HashMap<FieldId, CommittedDateField>,
@@ -113,6 +111,7 @@ pub struct IndexSearchStore<'index> {
     pub document_count: u64,
     pub committed_fields: OramaAsyncLockReadGuard<'index, CommittedFields>,
     pub uncommitted_fields: OramaAsyncLockReadGuard<'index, UncommittedFields>,
+    pub bool_fields: &'index HashMap<FieldId, BoolFieldStorage>,
     pub path_to_field_id_map: &'index PathToIndexId,
     pub uncommitted_deleted_documents: &'index HashSet<DocumentId>,
     pub text_parser: &'index TextParser,
@@ -137,8 +136,17 @@ pub struct Index {
     context: ReadSideContext,
     offload_config: OffloadFieldConfig,
 
+    // Base data directory for this index. Used to create stable paths
+    // for BoolFieldStorage instances created during update().
+    // Always known from construction time.
+    data_dir: PathBuf,
+
     document_count: u64,
     uncommitted_deleted_documents: HashSet<DocumentId>,
+
+    // Bool fields are managed directly by BoolFieldStorage (backed by oramacore_fields)
+    // instead of being split across uncommitted/committed field maps.
+    bool_fields: HashMap<FieldId, BoolFieldStorage>,
 
     uncommitted_fields: OramaAsyncLock<UncommittedFields>,
     committed_fields: OramaAsyncLock<CommittedFields>,
@@ -165,6 +173,7 @@ impl Index {
         context: ReadSideContext,
         offload_config: OffloadFieldConfig,
         enum_strategy: EnumStrategy,
+        data_dir: PathBuf,
     ) -> Self {
         Self {
             id,
@@ -177,8 +186,12 @@ impl Index {
             context,
             offload_config,
 
+            data_dir,
+
             document_count: 0,
             uncommitted_deleted_documents: HashSet::new(),
+
+            bool_fields: HashMap::new(),
 
             committed_fields: OramaAsyncLock::new("committed_fields", Default::default()),
             uncommitted_fields: OramaAsyncLock::new("uncommitted_fields", Default::default()),
@@ -221,19 +234,16 @@ impl Index {
 
         let mut uncommitted_fields = UncommittedFields::default();
         let mut committed_fields = CommittedFields::default();
+        let mut bool_fields = HashMap::new();
         debug!("Loading bool fields");
         for (field_id, info) in dump.bool_field_ids {
             filter_fields.insert(info.field_path.clone(), (field_id, FieldType::Bool));
 
-            uncommitted_fields.bool_fields.insert(
-                field_id,
-                UncommittedBoolField::empty(info.field_path.clone()),
-            );
-            debug!("CommittedBoolField::try_load for field_id {:?}", field_id);
-            let field = CommittedBoolField::try_load(info, offload_config)
+            debug!("BoolFieldStorage::try_load for field_id {:?}", field_id);
+            let field = BoolFieldStorage::try_load(info)
                 .context("Cannot load bool field")?;
             debug!("DONE");
-            committed_fields.bool_fields.insert(field_id, field);
+            bool_fields.insert(field_id, field);
         }
         debug!("Bool fields loaded");
 
@@ -352,8 +362,12 @@ impl Index {
             context,
             offload_config,
 
+            data_dir,
+
             document_count: dump.document_count,
             uncommitted_deleted_documents: HashSet::new(),
+
+            bool_fields,
 
             committed_fields: OramaAsyncLock::new("committed_fields", committed_fields),
             uncommitted_fields: OramaAsyncLock::new("uncommitted_fields", uncommitted_fields),
@@ -385,6 +399,7 @@ impl Index {
             document_count: self.document_count,
             committed_fields,
             uncommitted_fields,
+            bool_fields: &self.bool_fields,
             path_to_field_id_map: &self.path_to_index_id_map,
             uncommitted_deleted_documents: &self.uncommitted_deleted_documents,
             text_parser: &self.text_parser,
@@ -458,10 +473,10 @@ impl Index {
         let is_promoted = self.promoted_to_runtime_index.load(Ordering::Relaxed);
 
         // check if there's something to commit
-        let something_to_commit = uncommitted_fields
+        let something_to_commit = self
             .bool_fields
-            .iter()
-            .any(|(_, field)| !field.is_empty())
+            .values()
+            .any(|field| field.has_pending_ops())
             || uncommitted_fields
                 .number_fields
                 .iter()
@@ -509,21 +524,13 @@ impl Index {
 
         let committed_fields = self.committed_fields.read("commit").await;
 
-        let merged_bools = merge_type(
-            &data_dir_with_offset,
-            &uncommitted_fields.bool_fields,
-            &committed_fields.bool_fields,
-            &self.uncommitted_deleted_documents,
-            is_promoted,
-            &self.offload_config,
-            FieldIndexCollectionCommitLabels {
-                collection: collection_id.as_str().to_string(),
-                index: self.id.as_str().to_string(),
-                side: "read",
-                field_type: "bool",
-            },
-        )
-        .context("Cannot merge bool fields")?;
+        // Compact bool fields directly (they manage their own persistence)
+        for (_, bool_field) in &self.bool_fields {
+            if bool_field.has_pending_ops() {
+                bool_field.compact(offset.0 as u64)
+                    .context("Cannot compact bool field")?;
+            }
+        }
 
         let merged_numbers = merge_type(
             &data_dir_with_offset,
@@ -640,13 +647,6 @@ impl Index {
         overwrite_committed(
             self.id,
             offset,
-            merged_bools,
-            &mut committed_fields.bool_fields,
-            &mut uncommitted_fields.bool_fields,
-        );
-        overwrite_committed(
-            self.id,
-            offset,
             merged_numbers,
             &mut committed_fields.number_fields,
             &mut uncommitted_fields.number_fields,
@@ -721,7 +721,7 @@ impl Index {
             document_count: self.document_count,
             locale: self.locale,
             aliases: self.aliases.clone(),
-            bool_field_ids: committed_fields
+            bool_field_ids: self
                 .bool_fields
                 .iter()
                 .map(|(k, v)| (*k, v.metadata()))
@@ -803,7 +803,12 @@ impl Index {
         }
 
         let mut field_data_dirs: HashSet<PathBuf> = HashSet::new();
-        add(&mut field_data_dirs, &committed_fields.bool_fields);
+        // Bool fields are managed separately by BoolFieldStorage
+        field_data_dirs.extend(
+            self.bool_fields
+                .values()
+                .map(|f| f.base_path().to_path_buf()),
+        );
         add(&mut field_data_dirs, &committed_fields.number_fields);
         add(&mut field_data_dirs, &committed_fields.string_filter_fields);
         add(&mut field_data_dirs, &committed_fields.date_fields);
@@ -858,6 +863,11 @@ impl Index {
             std::fs::remove_dir_all(subfolder).context("Cannot remove path")?;
         }
 
+        // Clean up old bool field versions (they manage their own persistence)
+        for bool_field in self.bool_fields.values() {
+            bool_field.cleanup();
+        }
+
         Ok(())
     }
 
@@ -887,7 +897,11 @@ impl Index {
         self.created_at
     }
 
-    pub fn promote_to_runtime_index(&mut self, runtime_index_id: IndexId) {
+    pub fn promote_to_runtime_index(
+        &mut self,
+        runtime_index_id: IndexId,
+        new_data_dir: PathBuf,
+    ) -> Result<()> {
         let previous_id = self.id;
         self.id = runtime_index_id;
         self.aliases.push(previous_id);
@@ -895,6 +909,57 @@ impl Index {
             .store(true, Ordering::Relaxed);
         // We need to update the created_at and updated_at fields
         self.updated_at = Utc::now();
+
+        // Relocate bool fields from temp_indexes/ path to the permanent indexes/ path.
+        // Other fields handle this in commit() via merge_type + copy_items,
+        // but bool fields manage their own persistence (mmap'd sorted arrays)
+        // and need explicit relocation here (where we have &mut self).
+        let old_data_dir = std::mem::replace(&mut self.data_dir, new_data_dir.clone());
+        for (field_id, old_storage) in self.bool_fields.iter_mut() {
+            // Flush any pending in-memory ops to disk before copying the directory,
+            // otherwise uncommitted inserts/deletes would be lost during promotion.
+            if old_storage.has_pending_ops() {
+                let version = old_storage.current_version_number() + 1;
+                old_storage
+                    .compact(version)
+                    .context("Cannot compact bool field before promotion")?;
+                old_storage.cleanup();
+            }
+
+            let old_path = old_storage.base_path().to_path_buf();
+            let new_path = new_data_dir.join("bool").join(field_id.0.to_string());
+
+            if old_path == new_path {
+                continue;
+            }
+
+            // Copy old directory to new location (same strategy as merge.rs)
+            if old_path.exists() {
+                let options = fs_extra::dir::CopyOptions::new().overwrite(true);
+                if let Some(parent) = new_path.parent() {
+                    oramacore_lib::fs::create_if_not_exists(parent.to_path_buf())
+                        .context("Cannot create bool field parent directory")?;
+                }
+                fs_extra::copy_items(&[&old_path], new_path.parent().expect("bool path must have parent"), &options)
+                    .context("Cannot copy bool field directory during promotion")?;
+            }
+
+            // Recreate BoolFieldStorage at the new path
+            let field_path = old_storage.field_path().into();
+            let new_storage = BoolFieldStorage::new(field_path, new_path)
+                .context("Cannot create BoolFieldStorage at new path after promotion")?;
+            *old_storage = new_storage;
+        }
+
+        // Clean up old bool directory if it exists and is different
+        let old_bool_dir = old_data_dir.join("bool");
+        if old_bool_dir.exists() {
+            if let Err(e) = std::fs::remove_dir_all(&old_bool_dir) {
+                warn!("Failed to remove old bool directory {:?}: {}", old_bool_dir, e);
+            }
+        }
+
+        Ok(())
     }
 
     pub fn mark_as_deleted(&mut self, reason: DeletionReason) {
@@ -928,9 +993,12 @@ impl Index {
                             field_id,
                             FieldType::Bool,
                         );
-                        uncommitted_fields
-                            .bool_fields
-                            .insert(field_id, UncommittedBoolField::empty(field_path));
+                        // Create BoolFieldStorage with a stable path under the index data dir.
+                        // data_dir is always known from construction time.
+                        let bool_base_path = self.data_dir.join("bool").join(field_id.0.to_string());
+                        let storage = BoolFieldStorage::new(field_path, bool_base_path)
+                            .context("Failed to create BoolFieldStorage")?;
+                        self.bool_fields.insert(field_id, storage);
                     }
                     IndexWriteOperationFieldType::Number => {
                         self.path_to_index_id_map.insert_filter_field(
@@ -1002,10 +1070,10 @@ impl Index {
                 for indexed_value in indexed_values {
                     match indexed_value {
                         IndexedValue::FilterBool(field_id, bool_value) => {
-                            if let Some(field) = uncommitted_fields.bool_fields.get_mut(&field_id) {
+                            if let Some(field) = self.bool_fields.get(&field_id) {
                                 field.insert(doc_id, bool_value);
                             } else {
-                                error!("Cannot find field {:?} in uncommitted fields", field_id);
+                                error!("Cannot find bool field {:?}", field_id);
                             }
                         }
                         IndexedValue::FilterNumber(field_id, number) => {
@@ -1047,6 +1115,13 @@ impl Index {
                                 field.insert(doc_id, geopoint);
                             } else {
                                 error!("Cannot find field {:?} in uncommitted fields", field_id);
+                            }
+                        }
+                        IndexedValue::FilterBool2(field_id, ref bool_indexed_value) => {
+                            if let Some(field) = self.bool_fields.get(&field_id) {
+                                field.insert_indexed(doc_id, bool_indexed_value);
+                            } else {
+                                error!("Cannot find bool field {:?}", field_id);
                             }
                         }
                     }
@@ -1069,10 +1144,10 @@ impl Index {
                 for indexed_value in indexed_values {
                     match indexed_value {
                         IndexedValue::FilterBool(field_id, bool_value) => {
-                            if let Some(field) = uncommitted_fields.bool_fields.get_mut(&field_id) {
+                            if let Some(field) = self.bool_fields.get(&field_id) {
                                 field.insert(doc_id, bool_value);
                             } else {
-                                error!("Cannot find field {:?} in uncommitted fields", field_id);
+                                error!("Cannot find bool field {:?}", field_id);
                             }
                         }
                         IndexedValue::FilterNumber(field_id, number) => {
@@ -1114,6 +1189,13 @@ impl Index {
                                 field.insert(doc_id, geopoint);
                             } else {
                                 error!("Cannot find field {:?} in uncommitted fields", field_id);
+                            }
+                        }
+                        IndexedValue::FilterBool2(field_id, ref bool_indexed_value) => {
+                            if let Some(field) = self.bool_fields.get(&field_id) {
+                                field.insert_indexed(doc_id, bool_indexed_value);
+                            } else {
+                                error!("Cannot find bool field {:?}", field_id);
                             }
                         }
                     }
@@ -1140,6 +1222,13 @@ impl Index {
                 for doc_id in &doc_ids {
                     uncommitted_omc.remove(doc_id);
                     committed_omc.remove(doc_id);
+                }
+
+                // Delete from bool fields directly (they manage their own deletion)
+                for doc_id in &doc_ids {
+                    for (_, bool_field) in &self.bool_fields {
+                        bool_field.delete(*doc_id);
+                    }
                 }
 
                 self.uncommitted_deleted_documents.extend(doc_ids);
@@ -1197,8 +1286,17 @@ impl Index {
             fields.iter().map(|(k, v)| (k, v).into())
         }
 
+        // Bool fields (managed by BoolFieldStorage, not split across uncommitted/committed)
+        for (field_id, bool_field) in &self.bool_fields {
+            let stats = bool_field.stats();
+            fields_stats.push(IndexFieldStats {
+                field_id: *field_id,
+                field_path: bool_field.field_path().join("."),
+                stats: IndexFieldStatsType::BoolFieldStorage(stats),
+            });
+        }
+
         // Uncommitted
-        fields_stats.extend(extrapolate_stats(&uncommitted_fields.bool_fields));
         fields_stats.extend(extrapolate_stats(&uncommitted_fields.number_fields));
         fields_stats.extend(extrapolate_stats(&uncommitted_fields.date_fields));
         fields_stats.extend(extrapolate_stats(&uncommitted_fields.geopoint_fields));
@@ -1207,7 +1305,6 @@ impl Index {
         fields_stats.extend(extrapolate_stats(&uncommitted_fields.vector_fields));
 
         // Committed
-        fields_stats.extend(extrapolate_stats(&committed_fields.bool_fields));
         fields_stats.extend(extrapolate_stats(&committed_fields.number_fields));
         fields_stats.extend(extrapolate_stats(&committed_fields.date_fields));
         fields_stats.extend(extrapolate_stats(&committed_fields.geopoint_fields));
