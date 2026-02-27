@@ -4,18 +4,14 @@ use anyhow::{bail, Result};
 use std::hash::Hash;
 
 use crate::{
-    collection_manager::sides::read::index::committed_field::{
-        CommittedNumberField, CommittedStringFilterField,
-    },
-    collection_manager::sides::read::index::uncommitted_field::{
-        UncommittedNumberField, UncommittedStringFilterField,
-    },
+    collection_manager::sides::read::index::committed_field::CommittedNumberField,
+    collection_manager::sides::read::index::uncommitted_field::UncommittedNumberField,
     types::{DocumentId, FieldId, Number, NumberFilter},
 };
 
 use super::{
-    bool_field::BoolFieldStorage, path_to_index_id_map::PathToIndexId, CommittedFields, FieldType,
-    UncommittedFields,
+    bool_field::BoolFieldStorage, path_to_index_id_map::PathToIndexId,
+    string_filter_field::StringFilterFieldStorage, CommittedFields, FieldType, UncommittedFields,
 };
 
 // =============================================================================
@@ -154,29 +150,6 @@ impl Groupable for CommittedNumberField {
     }
 }
 
-impl Groupable for UncommittedStringFilterField {
-    type GroupParam = String;
-
-    fn get_values(&self) -> Box<dyn Iterator<Item = String> + '_> {
-        Box::new(self.iter().map(|(n, _)| n))
-    }
-
-    fn get_doc_ids(&self, variant: &String) -> Result<Box<dyn Iterator<Item = DocumentId> + '_>> {
-        Ok(Box::new(self.filter(variant)))
-    }
-}
-
-impl Groupable for CommittedStringFilterField {
-    type GroupParam = String;
-
-    fn get_values(&self) -> Box<dyn Iterator<Item = String> + '_> {
-        Box::new(self.iter().map(|(n, _)| n))
-    }
-
-    fn get_doc_ids(&self, variant: &String) -> Result<Box<dyn Iterator<Item = DocumentId> + '_>> {
-        Ok(Box::new(self.filter(variant)))
-    }
-}
 
 // =============================================================================
 // GroupParams and GroupContext
@@ -200,6 +173,7 @@ pub struct GroupParams<'search> {
 pub struct GroupContext<'index> {
     path_to_index_id_map: &'index PathToIndexId,
     bool_fields: &'index HashMap<FieldId, BoolFieldStorage>,
+    string_filter_fields: &'index HashMap<FieldId, StringFilterFieldStorage>,
     uncommitted_fields: &'index UncommittedFields,
     committed_fields: &'index CommittedFields,
 }
@@ -213,12 +187,14 @@ impl<'index> GroupContext<'index> {
     pub fn new(
         path_to_index_id_map: &'index PathToIndexId,
         bool_fields: &'index HashMap<FieldId, BoolFieldStorage>,
+        string_filter_fields: &'index HashMap<FieldId, StringFilterFieldStorage>,
         uncommitted_fields: &'index UncommittedFields,
         committed_fields: &'index CommittedFields,
     ) -> Self {
         Self {
             path_to_index_id_map,
             bool_fields,
+            string_filter_fields,
             uncommitted_fields,
             committed_fields,
         }
@@ -258,6 +234,7 @@ impl<'index> GroupContext<'index> {
                 *field_id,
                 *field_type,
                 self.bool_fields,
+                self.string_filter_fields,
                 self.uncommitted_fields,
                 self.committed_fields,
             )?;
@@ -390,6 +367,7 @@ fn calculate_group_for_field(
     field_id: FieldId,
     field_type: FieldType,
     bool_fields: &HashMap<FieldId, BoolFieldStorage>,
+    string_filter_fields: &HashMap<FieldId, StringFilterFieldStorage>,
     uncommitted_fields: &UncommittedFields,
     committed_fields: &CommittedFields,
 ) -> Result<HashMap<GroupValue, HashSet<DocumentId>>> {
@@ -416,12 +394,17 @@ fn calculate_group_for_field(
             calculate_group_on_field(uncommitted, committed)
         }
         FieldType::StringFilter => {
-            let uncommitted = uncommitted_fields
-                .string_filter_fields
+            let string_filter_field = string_filter_fields
                 .get(&field_id)
                 .ok_or_else(|| anyhow::anyhow!("Cannot find string filter field {field_id:?}"))?;
-            let committed = committed_fields.string_filter_fields.get(&field_id);
-            calculate_group_on_field(uncommitted, committed)
+
+            // Use StringFilterFieldStorage::get_grouped_docs() directly
+            let grouped = string_filter_field.get_grouped_docs();
+            let mut result = HashMap::with_capacity(grouped.len());
+            for (key, doc_ids) in grouped {
+                result.insert(GroupValue::String(key), doc_ids);
+            }
+            Ok(result)
         }
         FieldType::GeoPoint => {
             bail!("Cannot calculate group on a GeoPoint field")

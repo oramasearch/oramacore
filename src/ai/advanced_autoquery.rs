@@ -174,15 +174,8 @@ enum FieldStatType {
         #[serde(default)]
         document_count: usize,
     },
-    #[serde(rename = "uncommitted_string_filter")]
-    UncommittedStringFilter {
-        #[allow(dead_code)]
-        key_count: usize,
-        document_count: usize,
-        keys: Option<Vec<String>>,
-    },
-    #[serde(rename = "committed_string_filter")]
-    CommittedStringFilter {
+    #[serde(rename = "string_filter")]
+    StringFilter {
         #[allow(dead_code)]
         key_count: usize,
         document_count: usize,
@@ -226,8 +219,7 @@ impl FieldStatType {
             } => false_count + true_count,
             UncommittedNumber { count, .. } => *count,
             CommittedNumber { document_count, .. } => *document_count,
-            UncommittedStringFilter { document_count, .. }
-            | CommittedStringFilter { document_count, .. } => *document_count,
+            StringFilter { document_count, .. } => *document_count,
             UncommittedString { global_info, .. } | CommittedString { global_info, .. } => {
                 global_info.total_documents
             }
@@ -242,7 +234,7 @@ impl FieldStatType {
         match self {
             Bool { .. } => "boolean",
             UncommittedNumber { .. } | CommittedNumber { .. } => "number",
-            UncommittedStringFilter { .. } | CommittedStringFilter { .. } => "string_filter",
+            StringFilter { .. } => "string_filter",
             UncommittedString { .. } | CommittedString { .. } => "string",
             UncommittedVector { .. } | CommittedVector { .. } => "vector",
         }
@@ -259,8 +251,7 @@ impl FieldStatType {
     /// Extracts keys if this is a string filter field
     fn extract_keys(&self) -> Option<&[String]> {
         match self {
-            FieldStatType::CommittedStringFilter { keys: Some(k), .. }
-            | FieldStatType::UncommittedStringFilter { keys: Some(k), .. } => Some(k),
+            FieldStatType::StringFilter { keys: Some(k), .. } => Some(k),
             _ => None,
         }
     }

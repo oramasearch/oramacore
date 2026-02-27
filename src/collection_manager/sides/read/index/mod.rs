@@ -1,6 +1,6 @@
 use chrono::{DateTime, Utc};
 use committed_field::{
-    BoolFieldInfo, CommittedNumberField, CommittedStringFilterField,
+    BoolFieldInfo, CommittedNumberField,
     NumberFieldInfo, StringFilterFieldInfo, VectorFieldInfo,
 };
 use path_to_index_id_map::PathToIndexId;
@@ -41,6 +41,7 @@ use oramacore_lib::nlp::{locales::Locale, TextParser};
 
 use self::bool_field::BoolFieldStorage;
 use self::geopoint_field::GeoPointFieldStorage;
+use self::string_filter_field::StringFilterFieldStorage;
 use super::collection::{IndexFieldStats, IndexFieldStatsType};
 use super::OffloadFieldConfig;
 pub mod bool_field;
@@ -52,6 +53,7 @@ pub mod group;
 mod merge;
 mod path_to_index_id_map;
 mod sort;
+pub mod string_filter_field;
 pub mod token_score;
 mod uncommitted_field;
 
@@ -64,7 +66,7 @@ use crate::{
 use anyhow::{Context, Result};
 pub use committed_field::{
     CommittedDateFieldStats, CommittedNumberFieldStats,
-    CommittedStringFieldStats, CommittedStringFilterFieldStats, CommittedVectorFieldStats,
+    CommittedStringFieldStats, CommittedVectorFieldStats,
 };
 pub use group::GroupValue;
 pub use sort::{DocBatch, DocBatchIntoIter, DocBatchIter, IndexSortContext, SortedDocIdsIter};
@@ -78,7 +80,7 @@ use std::{
 };
 pub use uncommitted_field::{
     UncommittedDateFieldStats, UncommittedNumberFieldStats,
-    UncommittedStringFieldStats, UncommittedStringFilterFieldStats, UncommittedVectorFieldStats,
+    UncommittedStringFieldStats, UncommittedVectorFieldStats,
 };
 
 #[derive(Debug, Clone, Copy)]
@@ -92,7 +94,6 @@ pub enum DeletionReason {
 #[derive(Default)]
 pub struct UncommittedFields {
     pub number_fields: HashMap<FieldId, UncommittedNumberField>,
-    pub string_filter_fields: HashMap<FieldId, UncommittedStringFilterField>,
     pub date_fields: HashMap<FieldId, UncommittedDateFilterField>,
     pub string_fields: HashMap<FieldId, UncommittedStringField>,
     pub vector_fields: HashMap<FieldId, UncommittedVectorField>,
@@ -101,7 +102,6 @@ pub struct UncommittedFields {
 #[derive(Default)]
 pub struct CommittedFields {
     pub number_fields: HashMap<FieldId, CommittedNumberField>,
-    pub string_filter_fields: HashMap<FieldId, CommittedStringFilterField>,
     pub date_fields: HashMap<FieldId, CommittedDateField>,
     pub string_fields: HashMap<FieldId, CommittedStringField>,
     pub vector_fields: HashMap<FieldId, CommittedVectorField>,
@@ -113,6 +113,7 @@ pub struct IndexSearchStore<'index> {
     pub uncommitted_fields: OramaAsyncLockReadGuard<'index, UncommittedFields>,
     pub bool_fields: &'index HashMap<FieldId, BoolFieldStorage>,
     pub geopoint_fields: &'index HashMap<FieldId, GeoPointFieldStorage>,
+    pub string_filter_fields: &'index HashMap<FieldId, StringFilterFieldStorage>,
     pub path_to_field_id_map: &'index PathToIndexId,
     pub uncommitted_deleted_documents: &'index HashSet<DocumentId>,
     pub text_parser: &'index TextParser,
@@ -152,6 +153,10 @@ pub struct Index {
     // GeoPoint fields are managed directly by GeoPointFieldStorage (backed by oramacore_fields)
     // instead of being split across uncommitted/committed field maps.
     geopoint_fields: HashMap<FieldId, GeoPointFieldStorage>,
+
+    // StringFilter fields are managed directly by StringFilterFieldStorage (backed by oramacore_fields)
+    // instead of being split across uncommitted/committed field maps.
+    string_filter_fields: HashMap<FieldId, StringFilterFieldStorage>,
 
     uncommitted_fields: OramaAsyncLock<UncommittedFields>,
     committed_fields: OramaAsyncLock<CommittedFields>,
@@ -198,6 +203,7 @@ impl Index {
 
             bool_fields: HashMap::new(),
             geopoint_fields: HashMap::new(),
+            string_filter_fields: HashMap::new(),
 
             committed_fields: OramaAsyncLock::new("committed_fields", Default::default()),
             uncommitted_fields: OramaAsyncLock::new("uncommitted_fields", Default::default()),
@@ -293,18 +299,13 @@ impl Index {
         }
 
         debug!("Loading string_filter_field_ids");
+        let mut string_filter_fields = HashMap::new();
         for (field_id, info) in dump.string_filter_field_ids {
             filter_fields.insert(info.field_path.clone(), (field_id, FieldType::StringFilter));
 
-            uncommitted_fields.string_filter_fields.insert(
-                field_id,
-                UncommittedStringFilterField::empty(info.field_path.clone()),
-            );
-            let field = CommittedStringFilterField::try_load(info, offload_config)
+            let field = StringFilterFieldStorage::try_load(info)
                 .context("Cannot load string filter field")?;
-            committed_fields
-                .string_filter_fields
-                .insert(field_id, field);
+            string_filter_fields.insert(field_id, field);
         }
 
         debug!("Loading string_field_ids");
@@ -374,6 +375,7 @@ impl Index {
 
             bool_fields,
             geopoint_fields,
+            string_filter_fields,
 
             committed_fields: OramaAsyncLock::new("committed_fields", committed_fields),
             uncommitted_fields: OramaAsyncLock::new("uncommitted_fields", uncommitted_fields),
@@ -407,6 +409,7 @@ impl Index {
             uncommitted_fields,
             bool_fields: &self.bool_fields,
             geopoint_fields: &self.geopoint_fields,
+            string_filter_fields: &self.string_filter_fields,
             path_to_field_id_map: &self.path_to_index_id_map,
             uncommitted_deleted_documents: &self.uncommitted_deleted_documents,
             text_parser: &self.text_parser,
@@ -488,12 +491,12 @@ impl Index {
                 .geopoint_fields
                 .values()
                 .any(|field| field.has_pending_ops())
+            || self
+                .string_filter_fields
+                .values()
+                .any(|field| field.has_pending_ops())
             || uncommitted_fields
                 .number_fields
-                .iter()
-                .any(|(_, field)| !field.is_empty())
-            || uncommitted_fields
-                .string_filter_fields
                 .iter()
                 .any(|(_, field)| !field.is_empty())
             || uncommitted_fields
@@ -547,6 +550,14 @@ impl Index {
             }
         }
 
+        // Compact string_filter fields directly (they manage their own persistence)
+        for (_, string_filter_field) in &self.string_filter_fields {
+            if string_filter_field.has_pending_ops() {
+                string_filter_field.compact(offset.0 as u64)
+                    .context("Cannot compact string_filter field")?;
+            }
+        }
+
         let merged_numbers = merge_type(
             &data_dir_with_offset,
             &uncommitted_fields.number_fields,
@@ -578,22 +589,6 @@ impl Index {
             },
         )
         .context("Cannot merge date fields")?;
-
-        let merged_string_filters = merge_type(
-            &data_dir_with_offset,
-            &uncommitted_fields.string_filter_fields,
-            &committed_fields.string_filter_fields,
-            &self.uncommitted_deleted_documents,
-            is_promoted,
-            &self.offload_config,
-            FieldIndexCollectionCommitLabels {
-                collection: collection_id.as_str().to_string(),
-                index: self.id.as_str().to_string(),
-                side: "read",
-                field_type: "string_filter",
-            },
-        )
-        .context("Cannot merge string filter fields")?;
 
         let merged_strings = merge_type(
             &data_dir_with_offset,
@@ -656,13 +651,6 @@ impl Index {
             merged_dates,
             &mut committed_fields.date_fields,
             &mut uncommitted_fields.date_fields,
-        );
-        overwrite_committed(
-            self.id,
-            offset,
-            merged_string_filters,
-            &mut committed_fields.string_filter_fields,
-            &mut uncommitted_fields.string_filter_fields,
         );
         overwrite_committed(
             self.id,
@@ -733,7 +721,7 @@ impl Index {
                 .iter()
                 .map(|(k, v)| (*k, v.metadata()))
                 .collect(),
-            string_filter_field_ids: committed_fields
+            string_filter_field_ids: self
                 .string_filter_fields
                 .iter()
                 .map(|(k, v)| (*k, v.metadata()))
@@ -802,7 +790,12 @@ impl Index {
                 .map(|f| f.base_path().to_path_buf()),
         );
         add(&mut field_data_dirs, &committed_fields.number_fields);
-        add(&mut field_data_dirs, &committed_fields.string_filter_fields);
+        // StringFilter fields are managed separately by StringFilterFieldStorage
+        field_data_dirs.extend(
+            self.string_filter_fields
+                .values()
+                .map(|f| f.base_path().to_path_buf()),
+        );
         add(&mut field_data_dirs, &committed_fields.date_fields);
         // GeoPoint fields are managed separately by GeoPointFieldStorage
         field_data_dirs.extend(
@@ -868,6 +861,11 @@ impl Index {
         // Clean up old geopoint field versions (they manage their own persistence)
         for geopoint_field in self.geopoint_fields.values() {
             geopoint_field.cleanup();
+        }
+
+        // Clean up old string_filter field versions (they manage their own persistence)
+        for string_filter_field in self.string_filter_fields.values() {
+            string_filter_field.cleanup();
         }
 
         Ok(())
@@ -986,6 +984,39 @@ impl Index {
             *old_storage = new_storage;
         }
 
+        // Relocate string_filter fields from temp_indexes/ path to the permanent indexes/ path.
+        for (field_id, old_storage) in self.string_filter_fields.iter_mut() {
+            if old_storage.has_pending_ops() {
+                let version = old_storage.current_version_number() + 1;
+                old_storage
+                    .compact(version)
+                    .context("Cannot compact string_filter field before promotion")?;
+                old_storage.cleanup();
+            }
+
+            let old_path = old_storage.base_path().to_path_buf();
+            let new_path = new_data_dir.join("string_filter").join(field_id.0.to_string());
+
+            if old_path == new_path {
+                continue;
+            }
+
+            if old_path.exists() {
+                let options = fs_extra::dir::CopyOptions::new().overwrite(true);
+                if let Some(parent) = new_path.parent() {
+                    oramacore_lib::fs::create_if_not_exists(parent.to_path_buf())
+                        .context("Cannot create string_filter field parent directory")?;
+                }
+                fs_extra::copy_items(&[&old_path], new_path.parent().expect("string_filter path must have parent"), &options)
+                    .context("Cannot copy string_filter field directory during promotion")?;
+            }
+
+            let field_path = old_storage.field_path().into();
+            let new_storage = StringFilterFieldStorage::new(field_path, new_path)
+                .context("Cannot create StringFilterFieldStorage at new path after promotion")?;
+            *old_storage = new_storage;
+        }
+
         // Clean up old bool directory if it exists and is different
         let old_bool_dir = old_data_dir.join("bool");
         if old_bool_dir.exists() {
@@ -999,6 +1030,14 @@ impl Index {
         if old_geopoint_dir.exists() {
             if let Err(e) = std::fs::remove_dir_all(&old_geopoint_dir) {
                 warn!("Failed to remove old geopoint directory {:?}: {}", old_geopoint_dir, e);
+            }
+        }
+
+        // Clean up old string_filter directory if it exists and is different
+        let old_string_filter_dir = old_data_dir.join("string_filter");
+        if old_string_filter_dir.exists() {
+            if let Err(e) = std::fs::remove_dir_all(&old_string_filter_dir) {
+                warn!("Failed to remove old string_filter directory {:?}: {}", old_string_filter_dir, e);
             }
         }
 
@@ -1059,9 +1098,11 @@ impl Index {
                             field_id,
                             FieldType::StringFilter,
                         );
-                        uncommitted_fields
-                            .string_filter_fields
-                            .insert(field_id, UncommittedStringFilterField::empty(field_path));
+                        // Create StringFilterFieldStorage with a stable path under the index data dir.
+                        let string_filter_base_path = self.data_dir.join("string_filter").join(field_id.0.to_string());
+                        let storage = StringFilterFieldStorage::new(field_path, string_filter_base_path)
+                            .context("Failed to create StringFilterFieldStorage")?;
+                        self.string_filter_fields.insert(field_id, storage);
                     }
                     IndexWriteOperationFieldType::Date => {
                         self.path_to_index_id_map.insert_filter_field(
@@ -1129,12 +1170,17 @@ impl Index {
                             }
                         }
                         IndexedValue::FilterString(field_id, string_value) => {
-                            if let Some(field) =
-                                uncommitted_fields.string_filter_fields.get_mut(&field_id)
-                            {
+                            if let Some(field) = self.string_filter_fields.get(&field_id) {
                                 field.insert(doc_id, string_value);
                             } else {
-                                error!("Cannot find field {:?} in uncommitted fields", field_id);
+                                error!("Cannot find string_filter field {:?}", field_id);
+                            }
+                        }
+                        IndexedValue::FilterString2(field_id, ref string_filter_indexed_value) => {
+                            if let Some(field) = self.string_filter_fields.get(&field_id) {
+                                field.insert_indexed(doc_id, string_filter_indexed_value);
+                            } else {
+                                error!("Cannot find string_filter field {:?}", field_id);
                             }
                         }
                         IndexedValue::ScoreString(field_id, len, values) => {
@@ -1210,12 +1256,17 @@ impl Index {
                             }
                         }
                         IndexedValue::FilterString(field_id, string_value) => {
-                            if let Some(field) =
-                                uncommitted_fields.string_filter_fields.get_mut(&field_id)
-                            {
+                            if let Some(field) = self.string_filter_fields.get(&field_id) {
                                 field.insert(doc_id, string_value);
                             } else {
-                                error!("Cannot find field {:?} in uncommitted fields", field_id);
+                                error!("Cannot find string_filter field {:?}", field_id);
+                            }
+                        }
+                        IndexedValue::FilterString2(field_id, ref string_filter_indexed_value) => {
+                            if let Some(field) = self.string_filter_fields.get(&field_id) {
+                                field.insert_indexed(doc_id, string_filter_indexed_value);
+                            } else {
+                                error!("Cannot find string_filter field {:?}", field_id);
                             }
                         }
                         IndexedValue::ScoreString(field_id, len, values) => {
@@ -1296,6 +1347,13 @@ impl Index {
                     }
                 }
 
+                // Delete from string_filter fields directly (they manage their own deletion)
+                for doc_id in &doc_ids {
+                    for (_, string_filter_field) in &self.string_filter_fields {
+                        string_filter_field.delete(*doc_id);
+                    }
+                }
+
                 self.uncommitted_deleted_documents.extend(doc_ids);
                 self.document_count = self.document_count.saturating_sub(len);
             }
@@ -1371,17 +1429,25 @@ impl Index {
             });
         }
 
+        // StringFilter fields (managed by StringFilterFieldStorage, not split across uncommitted/committed)
+        for (field_id, string_filter_field) in &self.string_filter_fields {
+            let stats = string_filter_field.stats();
+            fields_stats.push(IndexFieldStats {
+                field_id: *field_id,
+                field_path: string_filter_field.field_path().join("."),
+                stats: IndexFieldStatsType::StringFilterFieldStorage(stats),
+            });
+        }
+
         // Uncommitted
         fields_stats.extend(extrapolate_stats(&uncommitted_fields.number_fields));
         fields_stats.extend(extrapolate_stats(&uncommitted_fields.date_fields));
-        fields_stats.extend(extrapolate_stats(&uncommitted_fields.string_filter_fields));
         fields_stats.extend(extrapolate_stats(&uncommitted_fields.string_fields));
         fields_stats.extend(extrapolate_stats(&uncommitted_fields.vector_fields));
 
         // Committed
         fields_stats.extend(extrapolate_stats(&committed_fields.number_fields));
         fields_stats.extend(extrapolate_stats(&committed_fields.date_fields));
-        fields_stats.extend(extrapolate_stats(&committed_fields.string_filter_fields));
         fields_stats.extend(extrapolate_stats(&committed_fields.string_fields));
         fields_stats.extend(extrapolate_stats(&committed_fields.vector_fields));
 

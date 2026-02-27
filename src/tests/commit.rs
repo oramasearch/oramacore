@@ -42,7 +42,7 @@ async fn test_commit_after_operation_limit_reached() {
                 f.stats,
                 IndexFieldStatsType::BoolFieldStorage(_)
                     | IndexFieldStatsType::CommittedNumber(_)
-                    | IndexFieldStatsType::CommittedStringFilter(_)
+                    | IndexFieldStatsType::StringFilterFieldStorage(_)
                     | IndexFieldStatsType::CommittedString(_)
                     | IndexFieldStatsType::CommittedVector(_)
             )
@@ -239,7 +239,7 @@ async fn test_commit_after_collection_operation_limit_reached() {
                 f.stats,
                 IndexFieldStatsType::BoolFieldStorage(_)
                     | IndexFieldStatsType::CommittedNumber(_)
-                    | IndexFieldStatsType::CommittedStringFilter(_)
+                    | IndexFieldStatsType::StringFilterFieldStorage(_)
                     | IndexFieldStatsType::CommittedString(_)
                     | IndexFieldStatsType::CommittedVector(_)
             )

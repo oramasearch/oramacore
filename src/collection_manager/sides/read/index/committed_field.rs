@@ -5,9 +5,7 @@ pub use number::{CommittedNumberField, CommittedNumberFieldStats, NumberFieldInf
 pub use string::{
     CommittedStringField, CommittedStringFieldStats, StringFieldInfo, StringSearchParams,
 };
-pub use string_filter::{
-    CommittedStringFilterField, CommittedStringFilterFieldStats, StringFilterFieldInfo,
-};
+pub use string_filter::StringFilterFieldInfo;
 pub use vector::{
     CommittedVectorField, CommittedVectorFieldStats, VectorFieldInfo, VectorSearchParams,
 };

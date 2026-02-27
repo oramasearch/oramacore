@@ -45,9 +45,9 @@ use crate::{
 
 use super::{
     index::{Index, IndexStats},
-    CollectionCommitConfig, CommittedNumberFieldStats, CommittedStringFilterFieldStats,
+    CollectionCommitConfig, CommittedNumberFieldStats,
     CommittedVectorFieldStats, DeletionReason, OffloadFieldConfig, ReadSide,
-    UncommittedNumberFieldStats, UncommittedStringFieldStats, UncommittedStringFilterFieldStats,
+    UncommittedNumberFieldStats, UncommittedStringFieldStats,
     UncommittedVectorFieldStats,
 };
 use oramacore_lib::values::ValuesReader;
@@ -1429,35 +1429,15 @@ impl CollectionReader {
                             );
                         }
                     }
-                    IndexFieldStatsType::CommittedStringFilter(
-                        CommittedStringFilterFieldStats { key_count, .. },
-                    ) => {
+                    IndexFieldStatsType::StringFilterFieldStorage(ref stats) => {
                         final_stats.insert(
                             field.field_id,
                             FilterableField::String(FilterableFieldString {
                                 field_path: field.field_path.clone(),
                                 field_type: "enum".to_string(),
-                                count: *key_count,
+                                count: stats.key_count,
                             }),
                         );
-                    }
-                    IndexFieldStatsType::UncommittedStringFilter(
-                        UncommittedStringFilterFieldStats { key_count, .. },
-                    ) => {
-                        if *key_count > 0 {
-                            if let Some(FilterableField::String(string_stats)) =
-                                final_stats.get(&field.field_id)
-                            {
-                                final_stats.insert(
-                                    field.field_id,
-                                    FilterableField::String(FilterableFieldString {
-                                        field_path: field.field_path.clone(),
-                                        field_type: "enum".to_string(),
-                                        count: string_stats.count + *key_count,
-                                    }),
-                                );
-                            }
-                        }
                     }
                     _ => {}
                 }
@@ -1595,10 +1575,8 @@ pub enum IndexFieldStatsType {
     #[serde(rename = "committed_date")]
     CommittedDate(CommittedDateFieldStats),
 
-    #[serde(rename = "uncommitted_string_filter")]
-    UncommittedStringFilter(UncommittedStringFilterFieldStats),
-    #[serde(rename = "committed_string_filter")]
-    CommittedStringFilter(CommittedStringFilterFieldStats),
+    #[serde(rename = "string_filter")]
+    StringFilterFieldStorage(super::index::string_filter_field::StringFilterFieldStorageStats),
 
     #[serde(rename = "uncommitted_string")]
     UncommittedString(UncommittedStringFieldStats),

@@ -580,6 +580,7 @@ mod tests {
     use crate::types::{CollectionId, DocumentId, RawJSONDocument, SerializableNumber};
     use oramacore_fields::bool::IndexedValue as BoolIndexedValue;
     use oramacore_fields::geopoint::{GeoPoint as FieldsGeoPoint, IndexedValue as GeoPointIndexedValue};
+    use oramacore_fields::string_filter::IndexedValue as StringFilterIndexedValue;
     use oramacore_lib::nlp::locales::Locale;
 
     #[test]
@@ -751,6 +752,38 @@ mod tests {
                             GeoPointIndexedValue::Array(vec![
                                 FieldsGeoPoint::new(41.9028, 12.4964).unwrap(),
                                 FieldsGeoPoint::new(48.8566, 2.3522).unwrap(),
+                            ]),
+                        )]),
+                        omc: None,
+                    },
+                ),
+            ),
+            // Test FilterString2 with plain value
+            WriteOperation::Collection(
+                collection_id,
+                CollectionWriteOperation::IndexWriteOperation(
+                    index_id,
+                    IndexWriteOperation::Index {
+                        doc_id: DocumentId(7),
+                        indexed_values: Vec::from([IndexedValue::FilterString2(
+                            field_id,
+                            StringFilterIndexedValue::Plain("red".to_string()),
+                        )]),
+                    },
+                ),
+            ),
+            // Test FilterString2 with array value
+            WriteOperation::Collection(
+                collection_id,
+                CollectionWriteOperation::IndexWriteOperation(
+                    index_id,
+                    IndexWriteOperation::Index2 {
+                        doc_id: DocumentId(8),
+                        indexed_values: Vec::from([IndexedValue::FilterString2(
+                            field_id,
+                            StringFilterIndexedValue::Array(vec![
+                                "blue".to_string(),
+                                "green".to_string(),
                             ]),
                         )]),
                         omc: None,

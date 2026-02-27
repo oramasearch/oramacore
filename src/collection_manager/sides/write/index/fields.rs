@@ -23,6 +23,9 @@ use crate::{
 
 use oramacore_fields::bool::{BoolIndexer, IndexedValue as BoolIndexedValue};
 use oramacore_fields::geopoint::{GeoPointIndexer, IndexedValue as GeoPointIndexedValue};
+use oramacore_fields::string_filter::{
+    IndexedValue as StringFilterIndexedValue, StringIndexer,
+};
 use oramacore_lib::nlp::{
     chunker::{Chunker, ChunkerConfig},
     locales::Locale,
@@ -384,6 +387,7 @@ pub struct StringFilterField {
     field_path: Box<[String]>,
     is_array: bool,
     strategy: EnumStrategy,
+    indexer: StringIndexer<Box<dyn Fn(&str) -> bool + Send + Sync>>,
 }
 
 impl StringFilterField {
@@ -393,48 +397,70 @@ impl StringFilterField {
         is_array: bool,
         strategy: EnumStrategy,
     ) -> Self {
+        // Push the filtering logic into the StringIndexer callback.
+        // For StringLength, the indexer rejects strings that are empty or too long.
+        // For Explicit, we accept all strings here and do the enum() extraction in index_value.
+        let filter: Box<dyn Fn(&str) -> bool + Send + Sync> = match strategy {
+            EnumStrategy::StringLength(length) => {
+                Box::new(move |s: &str| !s.is_empty() && s.len() <= length)
+            }
+            EnumStrategy::Explicit => Box::new(|_: &str| true),
+        };
         Self {
             field_id,
             field_path,
             is_array,
             strategy,
+            indexer: StringIndexer::new(is_array, filter),
         }
     }
 
     pub fn index_value(&self, value: &Value) -> Result<Vec<IndexedValue>> {
-        let data: Vec<String> = match value {
-            Value::String(s) => vec![s.clone()],
-            Value::Array(arr) => arr
-                .iter()
-                .filter_map(|v| {
-                    if let Value::String(s) = v {
-                        Some(s.clone())
-                    } else {
-                        None
-                    }
-                })
-                .collect(),
-            _ => vec![],
+        let Some(indexed) = self.indexer.index_json(value) else {
+            return Ok(vec![]);
         };
 
-        let data = match &self.strategy {
-            EnumStrategy::StringLength(length) => data
-                .into_iter()
-                .filter(|s| !s.is_empty() && s.len() <= *length)
-                .map(|s| IndexedValue::FilterString(self.field_id, s))
-                .collect(),
-            EnumStrategy::Explicit => data
-                .into_iter()
-                .filter_map(|s| {
-                    oramacore_lib::casting::enumerative::parse(&s)
-                        .ok()
-                        .flatten()
-                })
-                .map(|s| IndexedValue::FilterString(self.field_id, s))
-                .collect(),
+        // For StringLength, the indexer's filter already applied the length check.
+        // For Explicit, we need to parse and extract values from "enum(...)" syntax.
+        let result = match self.strategy {
+            EnumStrategy::StringLength(_) => Some(indexed),
+            EnumStrategy::Explicit => Self::transform_explicit(indexed),
         };
 
-        Ok(data)
+        match result {
+            Some(value) => Ok(vec![IndexedValue::FilterString2(self.field_id, value)]),
+            None => Ok(vec![]),
+        }
+    }
+
+    /// Transforms indexed values for Explicit enum strategy by extracting
+    /// the inner value from "enum(...)" syntax via `enumerative::parse`.
+    fn transform_explicit(
+        indexed: StringFilterIndexedValue,
+    ) -> Option<StringFilterIndexedValue> {
+        match indexed {
+            StringFilterIndexedValue::Plain(s) => {
+                oramacore_lib::casting::enumerative::parse(&s)
+                    .ok()
+                    .flatten()
+                    .map(StringFilterIndexedValue::Plain)
+            }
+            StringFilterIndexedValue::Array(arr) => {
+                let filtered: Vec<String> = arr
+                    .into_iter()
+                    .filter_map(|s| {
+                        oramacore_lib::casting::enumerative::parse(&s)
+                            .ok()
+                            .flatten()
+                    })
+                    .collect();
+                if filtered.is_empty() {
+                    None
+                } else {
+                    Some(StringFilterIndexedValue::Array(filtered))
+                }
+            }
+        }
     }
 }
 
@@ -1067,6 +1093,9 @@ pub enum IndexedValue {
     /// New variant that carries an `oramacore_fields::geopoint::IndexedValue` directly,
     /// supporting both plain and array geopoint values in a single operation.
     FilterGeoPoint2(FieldId, GeoPointIndexedValue),
+    /// New variant that carries an `oramacore_fields::string_filter::IndexedValue` directly,
+    /// supporting both plain and array string filter values in a single operation.
+    FilterString2(FieldId, StringFilterIndexedValue),
 }
 
 fn join_vec_strings(v: &[&String]) -> String {

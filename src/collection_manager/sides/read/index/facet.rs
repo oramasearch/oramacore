@@ -4,21 +4,17 @@ use anyhow::{bail, Result};
 use tracing::{info, warn};
 
 use crate::{
-    collection_manager::sides::read::index::committed_field::{
-        CommittedNumberField, CommittedStringFilterField,
-    },
-    collection_manager::sides::read::index::uncommitted_field::{
-        UncommittedNumberField, UncommittedStringFilterField,
-    },
+    collection_manager::sides::read::index::committed_field::CommittedNumberField,
+    collection_manager::sides::read::index::uncommitted_field::UncommittedNumberField,
     types::{
         BoolFacetDefinition, DocumentId, FacetDefinition, FacetResult, FieldId,
-        NumberFacetDefinition, NumberFilter, StringFacetDefinition,
+        NumberFacetDefinition, NumberFilter,
     },
 };
 
 use super::{
-    bool_field::BoolFieldStorage, path_to_index_id_map::PathToIndexId, CommittedFields, FieldType,
-    UncommittedFields,
+    bool_field::BoolFieldStorage, path_to_index_id_map::PathToIndexId,
+    string_filter_field::StringFilterFieldStorage, CommittedFields, FieldType, UncommittedFields,
 };
 
 // =============================================================================
@@ -119,19 +115,6 @@ impl TryFromFacetDefinition for NumberFacetDefinition {
     }
 }
 
-impl TryFromFacetDefinition for StringFacetDefinition {
-    type Error = anyhow::Error;
-
-    fn try_from_facet_definition(facet: &FacetDefinition) -> Result<&Self, Self::Error> {
-        if let FacetDefinition::String(string_facet) = facet {
-            Ok(string_facet)
-        } else {
-            Err(anyhow::anyhow!(
-                "Failed to convert facet definition to string facet"
-            ))
-        }
-    }
-}
 
 // =============================================================================
 // Facetable implementations for Number fields
@@ -181,56 +164,6 @@ impl Facetable for CommittedNumberField {
 
             let label = format!("{}-{}", range.from, range.to);
             result.insert(label, count);
-        }
-
-        Ok(result)
-    }
-}
-
-// =============================================================================
-// Facetable implementations for StringFilter fields
-// =============================================================================
-
-impl Facetable for UncommittedStringFilterField {
-    type FacetParam = StringFacetDefinition;
-
-    fn calculate_facet(
-        &self,
-        _facet_param: &Self::FacetParam,
-        token_scores: &HashMap<DocumentId, f32>,
-    ) -> Result<HashMap<String, usize>> {
-        let mut result = HashMap::new();
-
-        // Discover all unique string values and count matching documents
-        for value in self.get_string_values() {
-            let count = self
-                .filter(value)
-                .filter(|doc_id| token_scores.contains_key(doc_id))
-                .count();
-            result.insert(value.to_string(), count);
-        }
-
-        Ok(result)
-    }
-}
-
-impl Facetable for CommittedStringFilterField {
-    type FacetParam = StringFacetDefinition;
-
-    fn calculate_facet(
-        &self,
-        _facet_param: &Self::FacetParam,
-        token_scores: &HashMap<DocumentId, f32>,
-    ) -> Result<HashMap<String, usize>> {
-        let mut result = HashMap::new();
-
-        // Discover all unique string values and count matching documents
-        for value in self.get_string_values() {
-            let count = self
-                .filter(value)
-                .filter(|doc_id| token_scores.contains_key(doc_id))
-                .count();
-            result.insert(value.to_string(), count);
         }
 
         Ok(result)
@@ -320,6 +253,7 @@ fn calculate_facet_for_field(
     field_id: FieldId,
     field_type: FieldType,
     bool_fields: &HashMap<FieldId, BoolFieldStorage>,
+    string_filter_fields: &HashMap<FieldId, StringFilterFieldStorage>,
     uncommitted_fields: &UncommittedFields,
     committed_fields: &CommittedFields,
     facet_definition: &FacetDefinition,
@@ -343,12 +277,17 @@ fn calculate_facet_for_field(
 
             Ok(bool_field.calculate_facet(facet_param, token_scores))
         }
-        FieldType::StringFilter => calculate_facet_on_field(
-            uncommitted_fields.string_filter_fields.get(&field_id),
-            committed_fields.string_filter_fields.get(&field_id),
-            facet_definition,
-            token_scores,
-        ),
+        FieldType::StringFilter => {
+            let string_filter_field = string_filter_fields
+                .get(&field_id)
+                .ok_or_else(|| anyhow::anyhow!("Cannot find string_filter field {field_id:?}"))?;
+
+            let FacetDefinition::String(facet_param) = facet_definition else {
+                bail!("Expected String facet definition for StringFilter field");
+            };
+
+            Ok(string_filter_field.calculate_facet(facet_param, token_scores))
+        }
         _ => {
             bail!("Cannot calculate facet on field type {field_type:?}: unsupported for faceting");
         }
@@ -379,6 +318,7 @@ pub struct FacetParams<'search> {
 pub struct FacetContext<'index> {
     path_to_index_id_map: &'index PathToIndexId,
     bool_fields: &'index HashMap<FieldId, BoolFieldStorage>,
+    string_filter_fields: &'index HashMap<FieldId, StringFilterFieldStorage>,
     uncommitted_fields: &'index UncommittedFields,
     committed_fields: &'index CommittedFields,
 }
@@ -392,12 +332,14 @@ impl<'index> FacetContext<'index> {
     pub fn new(
         path_to_index_id_map: &'index PathToIndexId,
         bool_fields: &'index HashMap<FieldId, BoolFieldStorage>,
+        string_filter_fields: &'index HashMap<FieldId, StringFilterFieldStorage>,
         uncommitted_fields: &'index UncommittedFields,
         committed_fields: &'index CommittedFields,
     ) -> Self {
         Self {
             path_to_index_id_map,
             bool_fields,
+            string_filter_fields,
             uncommitted_fields,
             committed_fields,
         }
@@ -455,6 +397,7 @@ impl<'index> FacetContext<'index> {
                 field_id,
                 field_type,
                 self.bool_fields,
+                self.string_filter_fields,
                 self.uncommitted_fields,
                 self.committed_fields,
                 facet_definition,
