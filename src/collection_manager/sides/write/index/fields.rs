@@ -22,6 +22,7 @@ use crate::{
 };
 
 use oramacore_fields::bool::{BoolIndexer, IndexedValue as BoolIndexedValue};
+use oramacore_fields::geopoint::{GeoPointIndexer, IndexedValue as GeoPointIndexedValue};
 use oramacore_lib::nlp::{
     chunker::{Chunker, ChunkerConfig},
     locales::Locale,
@@ -487,6 +488,7 @@ pub struct GeoPointFilterField {
     field_id: FieldId,
     field_path: Box<[String]>,
     is_array: bool,
+    indexer: GeoPointIndexer,
 }
 
 impl GeoPointFilterField {
@@ -495,35 +497,18 @@ impl GeoPointFilterField {
             field_id,
             field_path,
             is_array,
+            indexer: GeoPointIndexer::new(is_array),
         }
     }
 
     pub fn index_value(&self, value: &Value) -> Result<Vec<IndexedValue>> {
-        let data: Vec<GeoPoint> = match value {
-            Value::Object(map) => {
-                let lon = map.get("lon");
-                let lat = map.get("lat");
-
-                let output = lon
-                    .zip(lat)
-                    .and_then(|l| l.0.as_number().zip(l.1.as_number()))
-                    .and_then(|d| d.0.as_f64().zip(d.1.as_f64()))
-                    .map(|d| (d.0 as f32, d.1 as f32));
-
-                match output {
-                    Some(d) => vec![GeoPoint { lon: d.0, lat: d.1 }],
-                    _ => vec![],
-                }
-            }
-            _ => vec![],
-        };
-
-        let data = data
-            .into_iter()
-            .map(|t| IndexedValue::FilterGeoPoint(self.field_id, t))
-            .collect();
-
-        Ok(data)
+        // Delegate to GeoPointIndexer which handles both plain and array extraction.
+        // For arrays like [{"lat":1,"lon":2}, {"lat":3,"lon":4}], a single FilterGeoPoint2
+        // operation is emitted instead of multiple FilterGeoPoint operations.
+        match self.indexer.index_json(value) {
+            Some(indexed) => Ok(vec![IndexedValue::FilterGeoPoint2(self.field_id, indexed)]),
+            None => Ok(vec![]),
+        }
     }
 }
 
@@ -1079,6 +1064,9 @@ pub enum IndexedValue {
     /// New variant that carries an `oramacore_fields::bool::IndexedValue` directly,
     /// supporting both plain and array bool values in a single operation.
     FilterBool2(FieldId, BoolIndexedValue),
+    /// New variant that carries an `oramacore_fields::geopoint::IndexedValue` directly,
+    /// supporting both plain and array geopoint values in a single operation.
+    FilterGeoPoint2(FieldId, GeoPointIndexedValue),
 }
 
 fn join_vec_strings(v: &[&String]) -> String {

@@ -1,6 +1,6 @@
 pub use bool::BoolFieldInfo;
 pub use date::{CommittedDateField, CommittedDateFieldStats, DateFieldInfo};
-pub use geopoint::{CommittedGeoPointField, CommittedGeoPointFieldStats, GeoPointFieldInfo};
+pub use geopoint::GeoPointFieldInfo;
 pub use number::{CommittedNumberField, CommittedNumberFieldStats, NumberFieldInfo};
 pub use string::{
     CommittedStringField, CommittedStringFieldStats, StringFieldInfo, StringSearchParams,

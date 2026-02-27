@@ -30,8 +30,8 @@ use crate::{
         read::{
             analytics::SearchAnalyticEventOrigin,
             collection_document_storage::CollectionDocumentStorage, context::ReadSideContext,
-            CommittedDateFieldStats, CommittedGeoPointFieldStats, CommittedStringFieldStats,
-            ReadError, UncommittedDateFieldStats, UncommittedGeoPointFieldStats,
+            CommittedDateFieldStats, CommittedStringFieldStats,
+            ReadError, UncommittedDateFieldStats,
         },
         write::index::EnumStrategy,
         CollectionWriteOperation, Offset, ReplaceIndexReason,
@@ -1317,35 +1317,15 @@ impl CollectionReader {
                             }),
                         );
                     }
-                    IndexFieldStatsType::CommittedGeoPoint(CommittedGeoPointFieldStats {
-                        count,
-                    }) => {
+                    IndexFieldStatsType::GeoPointFieldStorage(stats) => {
                         final_stats.insert(
                             field.field_id,
                             FilterableField::GeoPoint(FilterableFieldGeoPoint {
                                 field_path: field.field_path.clone(),
                                 field_type: "geopoint".to_string(),
-                                count: *count,
+                                count: stats.count,
                             }),
                         );
-                    }
-                    IndexFieldStatsType::UncommittedGeoPoint(UncommittedGeoPointFieldStats {
-                        count,
-                    }) => {
-                        if *count > 0 {
-                            if let Some(FilterableField::GeoPoint(geo_stats)) =
-                                final_stats.get(&field.field_id)
-                            {
-                                final_stats.insert(
-                                    field.field_id,
-                                    FilterableField::GeoPoint(FilterableFieldGeoPoint {
-                                        field_path: field.field_path.clone(),
-                                        field_type: "geopoint".to_string(),
-                                        count: geo_stats.count + *count,
-                                    }),
-                                );
-                            }
-                        }
                     }
                     IndexFieldStatsType::CommittedDate(CommittedDateFieldStats {
                         min,
@@ -1602,6 +1582,9 @@ pub enum IndexFieldStatsType {
     #[serde(rename = "bool")]
     BoolFieldStorage(super::index::bool_field::BoolFieldStorageStats),
 
+    #[serde(rename = "geopoint")]
+    GeoPointFieldStorage(super::index::geopoint_field::GeoPointFieldStorageStats),
+
     #[serde(rename = "uncommitted_number")]
     UncommittedNumber(UncommittedNumberFieldStats),
     #[serde(rename = "committed_number")]
@@ -1611,11 +1594,6 @@ pub enum IndexFieldStatsType {
     UncommittedDate(UncommittedDateFieldStats),
     #[serde(rename = "committed_date")]
     CommittedDate(CommittedDateFieldStats),
-
-    #[serde(rename = "uncommitted_geopoint")]
-    UncommittedGeoPoint(UncommittedGeoPointFieldStats),
-    #[serde(rename = "committed_geopoint")]
-    CommittedGeoPoint(CommittedGeoPointFieldStats),
 
     #[serde(rename = "uncommitted_string_filter")]
     UncommittedStringFilter(UncommittedStringFilterFieldStats),

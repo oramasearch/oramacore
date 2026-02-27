@@ -6,7 +6,7 @@ use tracing::trace;
 
 use crate::types::{DateFilter, DocumentId, FieldId, Filter, GeoSearchFilter, NumberFilter, WhereFilter};
 
-use super::{bool_field::BoolFieldStorage, path_to_index_id_map::PathToIndexId, CommittedFields, FieldType, UncommittedFields};
+use super::{bool_field::BoolFieldStorage, geopoint_field::GeoPointFieldStorage, path_to_index_id_map::PathToIndexId, CommittedFields, FieldType, UncommittedFields};
 
 /// Trait for fields that support filtering operations.
 ///
@@ -242,6 +242,7 @@ fn calculate_filter_for_fields(
     document_count_estimate: u64,
     path_to_index_id_map: &PathToIndexId,
     bool_fields: &HashMap<FieldId, BoolFieldStorage>,
+    geopoint_fields: &HashMap<FieldId, GeoPointFieldStorage>,
     uncommitted_fields: &UncommittedFields,
     committed_fields: &CommittedFields,
     key: &str,
@@ -312,17 +313,24 @@ fn calculate_filter_for_fields(
             )
         }
         FieldType::GeoPoint => {
-            let uncommitted_field = uncommitted_fields
-                .geopoint_fields
+            let geopoint_field = geopoint_fields
                 .get(&field_id)
-                .ok_or_else(|| anyhow::anyhow!("Field not found in index"))?;
+                .ok_or_else(|| anyhow::anyhow!("GeoPoint field not found in index"))?;
 
-            calculate_filter_on_field(
+            let Filter::GeoPoint(geo_filter) = filter else {
+                // Wrong filter type for geopoint field - return empty set
+                return Ok(FilterResult::Filter(PlainFilterResult::new(
+                    document_count_estimate,
+                )));
+            };
+
+            let docs = geopoint_field
+                .filter(geo_filter)
+                .context("Failed to filter geopoint field")?;
+            Ok(FilterResult::Filter(PlainFilterResult::from_iter(
                 document_count_estimate,
-                uncommitted_field,
-                committed_fields.geopoint_fields.get(&field_id),
-                filter,
-            )
+                docs.into_iter(),
+            )))
         }
         _ => {
             // Unsupported field type - return empty set
@@ -358,6 +366,7 @@ fn calculate_filter(
     document_count_estimate: u64,
     path_to_index_id_map: &PathToIndexId,
     bool_fields: &HashMap<FieldId, BoolFieldStorage>,
+    geopoint_fields: &HashMap<FieldId, GeoPointFieldStorage>,
     where_filter: &WhereFilter,
     uncommitted_fields: &UncommittedFields,
     committed_fields: &CommittedFields,
@@ -379,6 +388,7 @@ fn calculate_filter(
             document_count_estimate,
             path_to_index_id_map,
             bool_fields,
+            geopoint_fields,
             uncommitted_fields,
             committed_fields,
             k,
@@ -394,6 +404,7 @@ fn calculate_filter(
                 document_count_estimate,
                 path_to_index_id_map,
                 bool_fields,
+                geopoint_fields,
                 f,
                 uncommitted_fields,
                 committed_fields,
@@ -409,6 +420,7 @@ fn calculate_filter(
                 document_count_estimate,
                 path_to_index_id_map,
                 bool_fields,
+                geopoint_fields,
                 f,
                 uncommitted_fields,
                 committed_fields,
@@ -435,6 +447,7 @@ fn calculate_filter(
             document_count_estimate,
             path_to_index_id_map,
             bool_fields,
+            geopoint_fields,
             filter,
             uncommitted_fields,
             committed_fields,
@@ -467,6 +480,7 @@ pub struct FilterContext<'index> {
     document_count: u64,
     path_to_index_id_map: &'index PathToIndexId,
     bool_fields: &'index HashMap<FieldId, BoolFieldStorage>,
+    geopoint_fields: &'index HashMap<FieldId, GeoPointFieldStorage>,
     uncommitted_fields: &'index UncommittedFields,
     committed_fields: &'index CommittedFields,
     uncommitted_deleted_documents: &'index HashSet<DocumentId>,
@@ -482,6 +496,7 @@ impl<'index> FilterContext<'index> {
         document_count: u64,
         path_to_index_id_map: &'index PathToIndexId,
         bool_fields: &'index HashMap<FieldId, BoolFieldStorage>,
+        geopoint_fields: &'index HashMap<FieldId, GeoPointFieldStorage>,
         uncommitted_fields: &'index UncommittedFields,
         committed_fields: &'index CommittedFields,
         uncommitted_deleted_documents: &'index HashSet<DocumentId>,
@@ -490,6 +505,7 @@ impl<'index> FilterContext<'index> {
             document_count,
             path_to_index_id_map,
             bool_fields,
+            geopoint_fields,
             uncommitted_fields,
             committed_fields,
             uncommitted_deleted_documents,
@@ -532,6 +548,7 @@ impl<'index> FilterContext<'index> {
             expected_items,
             self.path_to_index_id_map,
             self.bool_fields,
+            self.geopoint_fields,
             where_filter,
             self.uncommitted_fields,
             self.committed_fields,

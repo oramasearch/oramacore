@@ -14,7 +14,7 @@ use crate::{
             context::ReadSideContext,
             index::{
                 committed_field::{
-                    CommittedDateField, CommittedGeoPointField, CommittedStringField,
+                    CommittedDateField, CommittedStringField,
                     CommittedVectorField, DateFieldInfo, GeoPointFieldInfo, StringFieldInfo,
                 },
                 merge::{
@@ -40,12 +40,14 @@ use oramacore_lib::fs::{create_if_not_exists, BufferedFile};
 use oramacore_lib::nlp::{locales::Locale, TextParser};
 
 use self::bool_field::BoolFieldStorage;
+use self::geopoint_field::GeoPointFieldStorage;
 use super::collection::{IndexFieldStats, IndexFieldStatsType};
 use super::OffloadFieldConfig;
 pub mod bool_field;
 mod committed_field;
 pub mod facet;
 pub mod filter;
+pub mod geopoint_field;
 pub mod group;
 mod merge;
 mod path_to_index_id_map;
@@ -61,7 +63,7 @@ use crate::{
 };
 use anyhow::{Context, Result};
 pub use committed_field::{
-    CommittedDateFieldStats, CommittedGeoPointFieldStats, CommittedNumberFieldStats,
+    CommittedDateFieldStats, CommittedNumberFieldStats,
     CommittedStringFieldStats, CommittedStringFilterFieldStats, CommittedVectorFieldStats,
 };
 pub use group::GroupValue;
@@ -75,7 +77,7 @@ use std::{
     },
 };
 pub use uncommitted_field::{
-    UncommittedDateFieldStats, UncommittedGeoPointFieldStats, UncommittedNumberFieldStats,
+    UncommittedDateFieldStats, UncommittedNumberFieldStats,
     UncommittedStringFieldStats, UncommittedStringFilterFieldStats, UncommittedVectorFieldStats,
 };
 
@@ -92,7 +94,6 @@ pub struct UncommittedFields {
     pub number_fields: HashMap<FieldId, UncommittedNumberField>,
     pub string_filter_fields: HashMap<FieldId, UncommittedStringFilterField>,
     pub date_fields: HashMap<FieldId, UncommittedDateFilterField>,
-    pub geopoint_fields: HashMap<FieldId, UncommittedGeoPointFilterField>,
     pub string_fields: HashMap<FieldId, UncommittedStringField>,
     pub vector_fields: HashMap<FieldId, UncommittedVectorField>,
 }
@@ -102,7 +103,6 @@ pub struct CommittedFields {
     pub number_fields: HashMap<FieldId, CommittedNumberField>,
     pub string_filter_fields: HashMap<FieldId, CommittedStringFilterField>,
     pub date_fields: HashMap<FieldId, CommittedDateField>,
-    pub geopoint_fields: HashMap<FieldId, CommittedGeoPointField>,
     pub string_fields: HashMap<FieldId, CommittedStringField>,
     pub vector_fields: HashMap<FieldId, CommittedVectorField>,
 }
@@ -112,6 +112,7 @@ pub struct IndexSearchStore<'index> {
     pub committed_fields: OramaAsyncLockReadGuard<'index, CommittedFields>,
     pub uncommitted_fields: OramaAsyncLockReadGuard<'index, UncommittedFields>,
     pub bool_fields: &'index HashMap<FieldId, BoolFieldStorage>,
+    pub geopoint_fields: &'index HashMap<FieldId, GeoPointFieldStorage>,
     pub path_to_field_id_map: &'index PathToIndexId,
     pub uncommitted_deleted_documents: &'index HashSet<DocumentId>,
     pub text_parser: &'index TextParser,
@@ -147,6 +148,10 @@ pub struct Index {
     // Bool fields are managed directly by BoolFieldStorage (backed by oramacore_fields)
     // instead of being split across uncommitted/committed field maps.
     bool_fields: HashMap<FieldId, BoolFieldStorage>,
+
+    // GeoPoint fields are managed directly by GeoPointFieldStorage (backed by oramacore_fields)
+    // instead of being split across uncommitted/committed field maps.
+    geopoint_fields: HashMap<FieldId, GeoPointFieldStorage>,
 
     uncommitted_fields: OramaAsyncLock<UncommittedFields>,
     committed_fields: OramaAsyncLock<CommittedFields>,
@@ -192,6 +197,7 @@ impl Index {
             uncommitted_deleted_documents: HashSet::new(),
 
             bool_fields: HashMap::new(),
+            geopoint_fields: HashMap::new(),
 
             committed_fields: OramaAsyncLock::new("committed_fields", Default::default()),
             uncommitted_fields: OramaAsyncLock::new("uncommitted_fields", Default::default()),
@@ -275,16 +281,15 @@ impl Index {
         }
 
         debug!("Loading geopoint_field_ids");
+        let mut geopoint_fields = HashMap::new();
         for (field_id, info) in dump.geopoint_field_ids {
             filter_fields.insert(info.field_path.clone(), (field_id, FieldType::GeoPoint));
 
-            uncommitted_fields.geopoint_fields.insert(
-                field_id,
-                UncommittedGeoPointFilterField::empty(info.field_path.clone()),
-            );
-            let field = CommittedGeoPointField::try_load(info, offload_config)
+            debug!("GeoPointFieldStorage::try_load for field_id {:?}", field_id);
+            let field = GeoPointFieldStorage::try_load(info)
                 .context("Cannot load geopoint field")?;
-            committed_fields.geopoint_fields.insert(field_id, field);
+            debug!("DONE");
+            geopoint_fields.insert(field_id, field);
         }
 
         debug!("Loading string_filter_field_ids");
@@ -368,6 +373,7 @@ impl Index {
             uncommitted_deleted_documents: HashSet::new(),
 
             bool_fields,
+            geopoint_fields,
 
             committed_fields: OramaAsyncLock::new("committed_fields", committed_fields),
             uncommitted_fields: OramaAsyncLock::new("uncommitted_fields", uncommitted_fields),
@@ -400,6 +406,7 @@ impl Index {
             committed_fields,
             uncommitted_fields,
             bool_fields: &self.bool_fields,
+            geopoint_fields: &self.geopoint_fields,
             path_to_field_id_map: &self.path_to_index_id_map,
             uncommitted_deleted_documents: &self.uncommitted_deleted_documents,
             text_parser: &self.text_parser,
@@ -477,6 +484,10 @@ impl Index {
             .bool_fields
             .values()
             .any(|field| field.has_pending_ops())
+            || self
+                .geopoint_fields
+                .values()
+                .any(|field| field.has_pending_ops())
             || uncommitted_fields
                 .number_fields
                 .iter()
@@ -487,10 +498,6 @@ impl Index {
                 .any(|(_, field)| !field.is_empty())
             || uncommitted_fields
                 .date_fields
-                .iter()
-                .any(|(_, field)| !field.is_empty())
-            || uncommitted_fields
-                .geopoint_fields
                 .iter()
                 .any(|(_, field)| !field.is_empty())
             || uncommitted_fields
@@ -532,6 +539,14 @@ impl Index {
             }
         }
 
+        // Compact geopoint fields directly (they manage their own persistence)
+        for (_, geopoint_field) in &self.geopoint_fields {
+            if geopoint_field.has_pending_ops() {
+                geopoint_field.compact(offset.0 as u64)
+                    .context("Cannot compact geopoint field")?;
+            }
+        }
+
         let merged_numbers = merge_type(
             &data_dir_with_offset,
             &uncommitted_fields.number_fields,
@@ -563,22 +578,6 @@ impl Index {
             },
         )
         .context("Cannot merge date fields")?;
-
-        let merged_geopoints = merge_type(
-            &data_dir_with_offset,
-            &uncommitted_fields.geopoint_fields,
-            &committed_fields.geopoint_fields,
-            &self.uncommitted_deleted_documents,
-            is_promoted,
-            &self.offload_config,
-            FieldIndexCollectionCommitLabels {
-                collection: collection_id.as_str().to_string(),
-                index: self.id.as_str().to_string(),
-                side: "read",
-                field_type: "geopoint",
-            },
-        )
-        .context("Cannot merge geopoint fields")?;
 
         let merged_string_filters = merge_type(
             &data_dir_with_offset,
@@ -661,13 +660,6 @@ impl Index {
         overwrite_committed(
             self.id,
             offset,
-            merged_geopoints,
-            &mut committed_fields.geopoint_fields,
-            &mut uncommitted_fields.geopoint_fields,
-        );
-        overwrite_committed(
-            self.id,
-            offset,
             merged_string_filters,
             &mut committed_fields.string_filter_fields,
             &mut uncommitted_fields.string_filter_fields,
@@ -736,7 +728,7 @@ impl Index {
                 .iter()
                 .map(|(k, v)| (*k, v.metadata()))
                 .collect(),
-            geopoint_field_ids: committed_fields
+            geopoint_field_ids: self
                 .geopoint_fields
                 .iter()
                 .map(|(k, v)| (*k, v.metadata()))
@@ -812,7 +804,12 @@ impl Index {
         add(&mut field_data_dirs, &committed_fields.number_fields);
         add(&mut field_data_dirs, &committed_fields.string_filter_fields);
         add(&mut field_data_dirs, &committed_fields.date_fields);
-        add(&mut field_data_dirs, &committed_fields.geopoint_fields);
+        // GeoPoint fields are managed separately by GeoPointFieldStorage
+        field_data_dirs.extend(
+            self.geopoint_fields
+                .values()
+                .map(|f| f.base_path().to_path_buf()),
+        );
         add(&mut field_data_dirs, &committed_fields.string_fields);
         add(&mut field_data_dirs, &committed_fields.vector_fields);
 
@@ -866,6 +863,11 @@ impl Index {
         // Clean up old bool field versions (they manage their own persistence)
         for bool_field in self.bool_fields.values() {
             bool_field.cleanup();
+        }
+
+        // Clean up old geopoint field versions (they manage their own persistence)
+        for geopoint_field in self.geopoint_fields.values() {
+            geopoint_field.cleanup();
         }
 
         Ok(())
@@ -951,11 +953,52 @@ impl Index {
             *old_storage = new_storage;
         }
 
+        // Relocate geopoint fields from temp_indexes/ path to the permanent indexes/ path.
+        for (field_id, old_storage) in self.geopoint_fields.iter_mut() {
+            if old_storage.has_pending_ops() {
+                let version = old_storage.current_version_id() + 1;
+                old_storage
+                    .compact(version)
+                    .context("Cannot compact geopoint field before promotion")?;
+                old_storage.cleanup();
+            }
+
+            let old_path = old_storage.base_path().to_path_buf();
+            let new_path = new_data_dir.join("geopoint").join(field_id.0.to_string());
+
+            if old_path == new_path {
+                continue;
+            }
+
+            if old_path.exists() {
+                let options = fs_extra::dir::CopyOptions::new().overwrite(true);
+                if let Some(parent) = new_path.parent() {
+                    oramacore_lib::fs::create_if_not_exists(parent.to_path_buf())
+                        .context("Cannot create geopoint field parent directory")?;
+                }
+                fs_extra::copy_items(&[&old_path], new_path.parent().expect("geopoint path must have parent"), &options)
+                    .context("Cannot copy geopoint field directory during promotion")?;
+            }
+
+            let field_path = old_storage.field_path().into();
+            let new_storage = GeoPointFieldStorage::new(field_path, new_path)
+                .context("Cannot create GeoPointFieldStorage at new path after promotion")?;
+            *old_storage = new_storage;
+        }
+
         // Clean up old bool directory if it exists and is different
         let old_bool_dir = old_data_dir.join("bool");
         if old_bool_dir.exists() {
             if let Err(e) = std::fs::remove_dir_all(&old_bool_dir) {
                 warn!("Failed to remove old bool directory {:?}: {}", old_bool_dir, e);
+            }
+        }
+
+        // Clean up old geopoint directory if it exists and is different
+        let old_geopoint_dir = old_data_dir.join("geopoint");
+        if old_geopoint_dir.exists() {
+            if let Err(e) = std::fs::remove_dir_all(&old_geopoint_dir) {
+                warn!("Failed to remove old geopoint directory {:?}: {}", old_geopoint_dir, e);
             }
         }
 
@@ -1036,9 +1079,10 @@ impl Index {
                             field_id,
                             FieldType::GeoPoint,
                         );
-                        uncommitted_fields
-                            .geopoint_fields
-                            .insert(field_id, UncommittedGeoPointFilterField::empty(field_path));
+                        let geopoint_path = self.data_dir.join("geopoint").join(field_id.0.to_string());
+                        let storage = GeoPointFieldStorage::new(field_path, geopoint_path)
+                            .context("Failed to create GeoPointFieldStorage")?;
+                        self.geopoint_fields.insert(field_id, storage);
                     }
                     IndexWriteOperationFieldType::String => {
                         self.path_to_index_id_map.insert_score_field(
@@ -1109,12 +1153,12 @@ impl Index {
                             }
                         }
                         IndexedValue::FilterGeoPoint(field_id, geopoint) => {
-                            if let Some(field) =
-                                uncommitted_fields.geopoint_fields.get_mut(&field_id)
-                            {
-                                field.insert(doc_id, geopoint);
+                            if let Some(field) = self.geopoint_fields.get(&field_id) {
+                                if let Err(e) = field.insert(doc_id, geopoint) {
+                                    error!("Cannot insert geopoint for field {:?}: {}", field_id, e);
+                                }
                             } else {
-                                error!("Cannot find field {:?} in uncommitted fields", field_id);
+                                error!("Cannot find geopoint field {:?}", field_id);
                             }
                         }
                         IndexedValue::FilterBool2(field_id, ref bool_indexed_value) => {
@@ -1122,6 +1166,13 @@ impl Index {
                                 field.insert_indexed(doc_id, bool_indexed_value);
                             } else {
                                 error!("Cannot find bool field {:?}", field_id);
+                            }
+                        }
+                        IndexedValue::FilterGeoPoint2(field_id, ref geopoint_indexed_value) => {
+                            if let Some(field) = self.geopoint_fields.get(&field_id) {
+                                field.insert_indexed(doc_id, geopoint_indexed_value);
+                            } else {
+                                error!("Cannot find geopoint field {:?}", field_id);
                             }
                         }
                     }
@@ -1183,12 +1234,12 @@ impl Index {
                             }
                         }
                         IndexedValue::FilterGeoPoint(field_id, geopoint) => {
-                            if let Some(field) =
-                                uncommitted_fields.geopoint_fields.get_mut(&field_id)
-                            {
-                                field.insert(doc_id, geopoint);
+                            if let Some(field) = self.geopoint_fields.get(&field_id) {
+                                if let Err(e) = field.insert(doc_id, geopoint) {
+                                    error!("Cannot insert geopoint for field {:?}: {}", field_id, e);
+                                }
                             } else {
-                                error!("Cannot find field {:?} in uncommitted fields", field_id);
+                                error!("Cannot find geopoint field {:?}", field_id);
                             }
                         }
                         IndexedValue::FilterBool2(field_id, ref bool_indexed_value) => {
@@ -1196,6 +1247,13 @@ impl Index {
                                 field.insert_indexed(doc_id, bool_indexed_value);
                             } else {
                                 error!("Cannot find bool field {:?}", field_id);
+                            }
+                        }
+                        IndexedValue::FilterGeoPoint2(field_id, ref geopoint_indexed_value) => {
+                            if let Some(field) = self.geopoint_fields.get(&field_id) {
+                                field.insert_indexed(doc_id, geopoint_indexed_value);
+                            } else {
+                                error!("Cannot find geopoint field {:?}", field_id);
                             }
                         }
                     }
@@ -1228,6 +1286,13 @@ impl Index {
                 for doc_id in &doc_ids {
                     for (_, bool_field) in &self.bool_fields {
                         bool_field.delete(*doc_id);
+                    }
+                }
+
+                // Delete from geopoint fields directly (they manage their own deletion)
+                for doc_id in &doc_ids {
+                    for (_, geopoint_field) in &self.geopoint_fields {
+                        geopoint_field.delete(*doc_id);
                     }
                 }
 
@@ -1296,10 +1361,19 @@ impl Index {
             });
         }
 
+        // GeoPoint fields (managed by GeoPointFieldStorage, not split across uncommitted/committed)
+        for (field_id, geopoint_field) in &self.geopoint_fields {
+            let stats = geopoint_field.stats();
+            fields_stats.push(IndexFieldStats {
+                field_id: *field_id,
+                field_path: geopoint_field.field_path().join("."),
+                stats: IndexFieldStatsType::GeoPointFieldStorage(stats),
+            });
+        }
+
         // Uncommitted
         fields_stats.extend(extrapolate_stats(&uncommitted_fields.number_fields));
         fields_stats.extend(extrapolate_stats(&uncommitted_fields.date_fields));
-        fields_stats.extend(extrapolate_stats(&uncommitted_fields.geopoint_fields));
         fields_stats.extend(extrapolate_stats(&uncommitted_fields.string_filter_fields));
         fields_stats.extend(extrapolate_stats(&uncommitted_fields.string_fields));
         fields_stats.extend(extrapolate_stats(&uncommitted_fields.vector_fields));
@@ -1307,7 +1381,6 @@ impl Index {
         // Committed
         fields_stats.extend(extrapolate_stats(&committed_fields.number_fields));
         fields_stats.extend(extrapolate_stats(&committed_fields.date_fields));
-        fields_stats.extend(extrapolate_stats(&committed_fields.geopoint_fields));
         fields_stats.extend(extrapolate_stats(&committed_fields.string_filter_fields));
         fields_stats.extend(extrapolate_stats(&committed_fields.string_fields));
         fields_stats.extend(extrapolate_stats(&committed_fields.vector_fields));

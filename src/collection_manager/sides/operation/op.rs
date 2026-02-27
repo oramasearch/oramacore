@@ -579,6 +579,7 @@ mod tests {
 
     use crate::types::{CollectionId, DocumentId, RawJSONDocument, SerializableNumber};
     use oramacore_fields::bool::IndexedValue as BoolIndexedValue;
+    use oramacore_fields::geopoint::{GeoPoint as FieldsGeoPoint, IndexedValue as GeoPointIndexedValue};
     use oramacore_lib::nlp::locales::Locale;
 
     #[test]
@@ -717,6 +718,40 @@ mod tests {
                         indexed_values: Vec::from([IndexedValue::FilterBool2(
                             field_id,
                             BoolIndexedValue::Array(vec![true, false]),
+                        )]),
+                        omc: None,
+                    },
+                ),
+            ),
+            // Test FilterGeoPoint2 with plain value
+            WriteOperation::Collection(
+                collection_id,
+                CollectionWriteOperation::IndexWriteOperation(
+                    index_id,
+                    IndexWriteOperation::Index {
+                        doc_id: DocumentId(5),
+                        indexed_values: Vec::from([IndexedValue::FilterGeoPoint2(
+                            field_id,
+                            GeoPointIndexedValue::Plain(
+                                FieldsGeoPoint::new(41.9028, 12.4964).unwrap(),
+                            ),
+                        )]),
+                    },
+                ),
+            ),
+            // Test FilterGeoPoint2 with array value
+            WriteOperation::Collection(
+                collection_id,
+                CollectionWriteOperation::IndexWriteOperation(
+                    index_id,
+                    IndexWriteOperation::Index2 {
+                        doc_id: DocumentId(6),
+                        indexed_values: Vec::from([IndexedValue::FilterGeoPoint2(
+                            field_id,
+                            GeoPointIndexedValue::Array(vec![
+                                FieldsGeoPoint::new(41.9028, 12.4964).unwrap(),
+                                FieldsGeoPoint::new(48.8566, 2.3522).unwrap(),
+                            ]),
                         )]),
                         omc: None,
                     },
