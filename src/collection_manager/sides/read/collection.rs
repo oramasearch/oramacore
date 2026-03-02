@@ -30,8 +30,8 @@ use crate::{
         read::{
             analytics::SearchAnalyticEventOrigin,
             collection_document_storage::CollectionDocumentStorage, context::ReadSideContext,
-            CommittedDateFieldStats, CommittedStringFieldStats,
-            ReadError, UncommittedDateFieldStats,
+            CommittedStringFieldStats,
+            ReadError,
         },
         write::index::EnumStrategy,
         CollectionWriteOperation, Offset, ReplaceIndexReason,
@@ -1327,55 +1327,16 @@ impl CollectionReader {
                             }),
                         );
                     }
-                    IndexFieldStatsType::CommittedDate(CommittedDateFieldStats {
-                        min,
-                        max,
-                        ..
-                    }) => {
+                    IndexFieldStatsType::DateFieldStorage(_) => {
                         final_stats.insert(
                             field.field_id,
                             FilterableField::Date(FilterableFieldDate {
                                 field_path: field.field_path.clone(),
                                 field_type: "date".to_string(),
-                                min: min.clone(),
-                                max: max.clone(),
+                                min: None,
+                                max: None,
                             }),
                         );
-                    }
-                    IndexFieldStatsType::UncommittedDate(UncommittedDateFieldStats {
-                        min,
-                        max,
-                        ..
-                    }) => {
-                        if let Some(FilterableField::Date(date_stats)) =
-                            final_stats.get(&field.field_id)
-                        {
-                            let new_min = match (date_stats.min.clone(), min) {
-                                (Some(existing_min), Some(new_min)) => {
-                                    Some(OramaDate::try_from_i64(existing_min.as_i64().min(new_min.as_i64())).expect("Unable to conver i64 back to date format. This is a bug. Please report at https://github.com/oramasearch/oramacore"))
-                                }
-                                (Some(existing_min), None) => Some(existing_min),
-                                (None, Some(new_min)) => Some(new_min.clone()),
-                                (None, None) => None,
-                            };
-                            let new_max = match (date_stats.max.clone(), max) {
-                                (Some(existing_max), Some(new_max)) => {
-                                    Some(OramaDate::try_from_i64(existing_max.as_i64().max(new_max.as_i64())).expect("Unable to conver i64 back to date format. This is a bug. Please report at https://github.com/oramasearch/oramacore"))
-                                }
-                                (Some(existing_max), None) => Some(existing_max),
-                                (None, Some(new_max)) => Some(new_max.clone()),
-                                (None, None) => None,
-                            };
-                            final_stats.insert(
-                                field.field_id,
-                                FilterableField::Date(FilterableFieldDate {
-                                    field_path: field.field_path.clone(),
-                                    field_type: "date".to_string(),
-                                    min: new_min,
-                                    max: new_max,
-                                }),
-                            );
-                        }
                     }
                     IndexFieldStatsType::CommittedNumber(CommittedNumberFieldStats {
                         min,
@@ -1570,10 +1531,8 @@ pub enum IndexFieldStatsType {
     #[serde(rename = "committed_number")]
     CommittedNumber(CommittedNumberFieldStats),
 
-    #[serde(rename = "uncommitted_date")]
-    UncommittedDate(UncommittedDateFieldStats),
-    #[serde(rename = "committed_date")]
-    CommittedDate(CommittedDateFieldStats),
+    #[serde(rename = "date")]
+    DateFieldStorage(super::index::date_field::DateFieldStorageStats),
 
     #[serde(rename = "string_filter")]
     StringFilterFieldStorage(super::index::string_filter_field::StringFilterFieldStorageStats),

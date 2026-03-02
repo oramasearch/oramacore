@@ -8,9 +8,10 @@ use crate::{
 
 use super::{
     bool_field::BoolFieldStorage,
-    committed_field::{CommittedDateField, CommittedNumberField},
+    committed_field::CommittedNumberField,
+    date_field::DateFieldStorage,
     path_to_index_id_map::PathToIndexId,
-    uncommitted_field::{UncommittedDateFilterField, UncommittedNumberField},
+    uncommitted_field::UncommittedNumberField,
     CommittedFields, FieldType, UncommittedFields,
 };
 
@@ -201,15 +202,6 @@ impl Sortable for UncommittedNumberField {
     }
 }
 
-impl Sortable for UncommittedDateFilterField {
-    fn iter_sorted<'s>(&'s self) -> InternalBidirectionalSortIter<'s> {
-        Box::new(
-            self.iter_ref()
-                .map(|(timestamp, doc_ids)| (i64_to_number(timestamp), doc_ids)),
-        )
-    }
-}
-
 // =============================================================================
 // Sortable implementations for Committed fields
 // =============================================================================
@@ -223,15 +215,6 @@ impl Sortable for CommittedNumberField {
     }
 }
 
-impl Sortable for CommittedDateField {
-    fn iter_sorted<'s>(&'s self) -> InternalBidirectionalSortIter<'s> {
-        Box::new(
-            self.iter_ref()
-                .map(|(timestamp, doc_ids)| (i64_to_number(timestamp), doc_ids)),
-        )
-    }
-}
-
 // =============================================================================
 // IndexSortContext
 // =============================================================================
@@ -240,6 +223,7 @@ impl Sortable for CommittedDateField {
 pub struct IndexSortContext<'index> {
     path_to_index_id_map: &'index PathToIndexId,
     bool_fields: &'index HashMap<FieldId, BoolFieldStorage>,
+    date_fields: &'index HashMap<FieldId, DateFieldStorage>,
     uncommitted_fields: &'index UncommittedFields,
     committed_fields: &'index CommittedFields,
     field_name: String,
@@ -251,6 +235,7 @@ impl<'index> IndexSortContext<'index> {
     pub(crate) fn new(
         path_to_index_id_map: &'index PathToIndexId,
         bool_fields: &'index HashMap<FieldId, BoolFieldStorage>,
+        date_fields: &'index HashMap<FieldId, DateFieldStorage>,
         uncommitted_fields: &'index UncommittedFields,
         committed_fields: &'index CommittedFields,
         field_name: &str,
@@ -259,6 +244,7 @@ impl<'index> IndexSortContext<'index> {
         Self {
             path_to_index_id_map,
             bool_fields,
+            date_fields,
             uncommitted_fields,
             committed_fields,
             field_name: field_name.to_string(),
@@ -326,8 +312,7 @@ impl<'index> IndexSortContext<'index> {
                 Ok(iter)
             }
             FieldType::Date => {
-                let uncommitted = self
-                    .uncommitted_fields
+                let date_field = self
                     .date_fields
                     .get(&field_id)
                     .ok_or_else(|| {
@@ -336,10 +321,16 @@ impl<'index> IndexSortContext<'index> {
                             self.field_name
                         ))
                     })?;
-                let committed = self.committed_fields.date_fields.get(&field_id);
-                let iter = calculate_sort_on_field(uncommitted, committed, self.order);
-                // Wrap &HashSet references in DocBatch::HashSet for the public API
-                Ok(Box::new(iter.map(|(k, v)| (k, DocBatch::HashSet(v)))))
+
+                let ascending = matches!(self.order, SortOrder::Ascending);
+                let grouped = date_field.sort_grouped(ascending);
+
+                Ok(Box::new(grouped.map(|(timestamp, doc_ids)| {
+                    let key = i64_to_number(timestamp);
+                    let docs: Vec<DocumentId> =
+                        doc_ids.into_iter().map(DocumentId).collect();
+                    (key, DocBatch::Owned(docs))
+                })))
             }
             _ => Err(ReadError::InvalidSortField(
                 self.field_name.clone(),
@@ -353,6 +344,20 @@ impl<'index> IndexSortContext<'index> {
 // Helper functions
 // =============================================================================
 
+/// Converts an i64 timestamp to a Number for sorting.
+///
+/// Uses i32::MIN and i32::MAX as NEG_INF/POS_INF
+/// for values that exceed i32 range.
+fn i64_to_number(value: i64) -> Number {
+    if let Ok(i) = i32::try_from(value) {
+        Number::I32(i)
+    } else if value > 0 {
+        Number::I32(i32::MAX)
+    } else {
+        Number::I32(i32::MIN)
+    }
+}
+
 /// Converts a boolean value to a Number for sorting.
 ///
 /// false = 0, true = 1
@@ -362,19 +367,6 @@ fn bool_to_number(value: bool) -> Number {
         Number::I32(1)
     } else {
         Number::I32(0)
-    }
-}
-
-/// Converts an i64 timestamp to a Number for sorting.
-///
-/// Attempts to fit the value into an i32, clamping to i32::MIN/MAX if out of range.
-fn i64_to_number(value: i64) -> Number {
-    if let Ok(i) = i32::try_from(value) {
-        Number::I32(i)
-    } else if value > 0 {
-        Number::I32(i32::MAX)
-    } else {
-        Number::I32(i32::MIN)
     }
 }
 
@@ -483,18 +475,6 @@ mod tests {
     fn test_bool_to_number() {
         assert_eq!(bool_to_number(false), Number::I32(0));
         assert_eq!(bool_to_number(true), Number::I32(1));
-    }
-
-    #[test]
-    fn test_i64_to_number() {
-        assert_eq!(i64_to_number(0), Number::I32(0));
-        assert_eq!(i64_to_number(100), Number::I32(100));
-        assert_eq!(i64_to_number(-100), Number::I32(-100));
-        assert_eq!(i64_to_number(i32::MAX as i64), Number::I32(i32::MAX));
-        assert_eq!(i64_to_number(i32::MIN as i64), Number::I32(i32::MIN));
-        // Values beyond i32 range should clamp
-        assert_eq!(i64_to_number(i64::MAX), Number::I32(i32::MAX));
-        assert_eq!(i64_to_number(i64::MIN), Number::I32(i32::MIN));
     }
 
     #[test]

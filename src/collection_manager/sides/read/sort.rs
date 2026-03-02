@@ -58,6 +58,7 @@ fn sort_token_scores_by_field<'index>(
         let index_sort_context = IndexSortContext::new(
             store.path_to_field_id_map,
             store.bool_fields,
+            store.date_fields,
             &store.uncommitted_fields,
             &store.committed_fields,
             &sort_by.property,
@@ -73,6 +74,7 @@ fn sort_token_scores_by_field<'index>(
             let index_sort_context = IndexSortContext::new(
                 store.path_to_field_id_map,
                 store.bool_fields,
+                store.date_fields,
                 &store.uncommitted_fields,
                 &store.committed_fields,
                 &sort_by.property,
@@ -151,6 +153,7 @@ pub fn sort_groups<'index>(
                 let index_sort_context = IndexSortContext::new(
                     store.path_to_field_id_map,
                     store.bool_fields,
+                    store.date_fields,
                     &store.uncommitted_fields,
                     &store.committed_fields,
                     &sort_by.property,
@@ -170,6 +173,7 @@ pub fn sort_groups<'index>(
                     let index_sort_context = IndexSortContext::new(
                         store.path_to_field_id_map,
                         store.bool_fields,
+                        store.date_fields,
                         &store.uncommitted_fields,
                         &store.committed_fields,
                         &sort_by.property,

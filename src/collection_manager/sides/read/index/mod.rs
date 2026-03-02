@@ -14,7 +14,7 @@ use crate::{
             context::ReadSideContext,
             index::{
                 committed_field::{
-                    CommittedDateField, CommittedStringField,
+                    CommittedStringField,
                     CommittedVectorField, DateFieldInfo, GeoPointFieldInfo, StringFieldInfo,
                 },
                 merge::{
@@ -40,12 +40,14 @@ use oramacore_lib::fs::{create_if_not_exists, BufferedFile};
 use oramacore_lib::nlp::{locales::Locale, TextParser};
 
 use self::bool_field::BoolFieldStorage;
+use self::date_field::DateFieldStorage;
 use self::geopoint_field::GeoPointFieldStorage;
 use self::string_filter_field::StringFilterFieldStorage;
 use super::collection::{IndexFieldStats, IndexFieldStatsType};
 use super::OffloadFieldConfig;
 pub mod bool_field;
 mod committed_field;
+pub mod date_field;
 pub mod facet;
 pub mod filter;
 pub mod geopoint_field;
@@ -65,7 +67,7 @@ use crate::{
 };
 use anyhow::{Context, Result};
 pub use committed_field::{
-    CommittedDateFieldStats, CommittedNumberFieldStats,
+    CommittedNumberFieldStats,
     CommittedStringFieldStats, CommittedVectorFieldStats,
 };
 pub use group::GroupValue;
@@ -79,7 +81,7 @@ use std::{
     },
 };
 pub use uncommitted_field::{
-    UncommittedDateFieldStats, UncommittedNumberFieldStats,
+    UncommittedNumberFieldStats,
     UncommittedStringFieldStats, UncommittedVectorFieldStats,
 };
 
@@ -94,7 +96,6 @@ pub enum DeletionReason {
 #[derive(Default)]
 pub struct UncommittedFields {
     pub number_fields: HashMap<FieldId, UncommittedNumberField>,
-    pub date_fields: HashMap<FieldId, UncommittedDateFilterField>,
     pub string_fields: HashMap<FieldId, UncommittedStringField>,
     pub vector_fields: HashMap<FieldId, UncommittedVectorField>,
 }
@@ -102,7 +103,6 @@ pub struct UncommittedFields {
 #[derive(Default)]
 pub struct CommittedFields {
     pub number_fields: HashMap<FieldId, CommittedNumberField>,
-    pub date_fields: HashMap<FieldId, CommittedDateField>,
     pub string_fields: HashMap<FieldId, CommittedStringField>,
     pub vector_fields: HashMap<FieldId, CommittedVectorField>,
 }
@@ -112,6 +112,7 @@ pub struct IndexSearchStore<'index> {
     pub committed_fields: OramaAsyncLockReadGuard<'index, CommittedFields>,
     pub uncommitted_fields: OramaAsyncLockReadGuard<'index, UncommittedFields>,
     pub bool_fields: &'index HashMap<FieldId, BoolFieldStorage>,
+    pub date_fields: &'index HashMap<FieldId, DateFieldStorage>,
     pub geopoint_fields: &'index HashMap<FieldId, GeoPointFieldStorage>,
     pub string_filter_fields: &'index HashMap<FieldId, StringFilterFieldStorage>,
     pub path_to_field_id_map: &'index PathToIndexId,
@@ -153,6 +154,10 @@ pub struct Index {
     // GeoPoint fields are managed directly by GeoPointFieldStorage (backed by oramacore_fields)
     // instead of being split across uncommitted/committed field maps.
     geopoint_fields: HashMap<FieldId, GeoPointFieldStorage>,
+
+    // Date fields are managed directly by DateFieldStorage (backed by oramacore_fields I64Storage)
+    // instead of being split across uncommitted/committed field maps.
+    date_fields: HashMap<FieldId, DateFieldStorage>,
 
     // StringFilter fields are managed directly by StringFilterFieldStorage (backed by oramacore_fields)
     // instead of being split across uncommitted/committed field maps.
@@ -202,6 +207,7 @@ impl Index {
             uncommitted_deleted_documents: HashSet::new(),
 
             bool_fields: HashMap::new(),
+            date_fields: HashMap::new(),
             geopoint_fields: HashMap::new(),
             string_filter_fields: HashMap::new(),
 
@@ -274,16 +280,15 @@ impl Index {
         debug!("Number fields loaded");
 
         debug!("Loading date_field_ids");
+        let mut date_fields = HashMap::new();
         for (field_id, info) in dump.date_field_ids {
             filter_fields.insert(info.field_path.clone(), (field_id, FieldType::Date));
 
-            uncommitted_fields.date_fields.insert(
-                field_id,
-                UncommittedDateFilterField::empty(info.field_path.clone()),
-            );
-            let field = CommittedDateField::try_load(info, offload_config)
+            debug!("DateFieldStorage::try_load for field_id {:?}", field_id);
+            let field = DateFieldStorage::try_load(info)
                 .context("Cannot load date field")?;
-            committed_fields.date_fields.insert(field_id, field);
+            debug!("DONE");
+            date_fields.insert(field_id, field);
         }
 
         debug!("Loading geopoint_field_ids");
@@ -374,6 +379,7 @@ impl Index {
             uncommitted_deleted_documents: HashSet::new(),
 
             bool_fields,
+            date_fields,
             geopoint_fields,
             string_filter_fields,
 
@@ -408,6 +414,7 @@ impl Index {
             committed_fields,
             uncommitted_fields,
             bool_fields: &self.bool_fields,
+            date_fields: &self.date_fields,
             geopoint_fields: &self.geopoint_fields,
             string_filter_fields: &self.string_filter_fields,
             path_to_field_id_map: &self.path_to_index_id_map,
@@ -495,12 +502,12 @@ impl Index {
                 .string_filter_fields
                 .values()
                 .any(|field| field.has_pending_ops())
+            || self
+                .date_fields
+                .values()
+                .any(|field| field.has_pending_ops())
             || uncommitted_fields
                 .number_fields
-                .iter()
-                .any(|(_, field)| !field.is_empty())
-            || uncommitted_fields
-                .date_fields
                 .iter()
                 .any(|(_, field)| !field.is_empty())
             || uncommitted_fields
@@ -558,6 +565,14 @@ impl Index {
             }
         }
 
+        // Compact date fields directly (they manage their own persistence via I64Storage)
+        for (_, date_field) in &self.date_fields {
+            if date_field.has_pending_ops() {
+                date_field.compact(offset.0 as u64)
+                    .context("Cannot compact date field")?;
+            }
+        }
+
         let merged_numbers = merge_type(
             &data_dir_with_offset,
             &uncommitted_fields.number_fields,
@@ -573,22 +588,6 @@ impl Index {
             },
         )
         .context("Cannot merge number fields")?;
-
-        let merged_dates = merge_type(
-            &data_dir_with_offset,
-            &uncommitted_fields.date_fields,
-            &committed_fields.date_fields,
-            &self.uncommitted_deleted_documents,
-            is_promoted,
-            &self.offload_config,
-            FieldIndexCollectionCommitLabels {
-                collection: collection_id.as_str().to_string(),
-                index: self.id.as_str().to_string(),
-                side: "read",
-                field_type: "date",
-            },
-        )
-        .context("Cannot merge date fields")?;
 
         let merged_strings = merge_type(
             &data_dir_with_offset,
@@ -644,13 +643,6 @@ impl Index {
             merged_numbers,
             &mut committed_fields.number_fields,
             &mut uncommitted_fields.number_fields,
-        );
-        overwrite_committed(
-            self.id,
-            offset,
-            merged_dates,
-            &mut committed_fields.date_fields,
-            &mut uncommitted_fields.date_fields,
         );
         overwrite_committed(
             self.id,
@@ -711,7 +703,7 @@ impl Index {
                 .iter()
                 .map(|(k, v)| (*k, v.metadata()))
                 .collect(),
-            date_field_ids: committed_fields
+            date_field_ids: self
                 .date_fields
                 .iter()
                 .map(|(k, v)| (*k, v.metadata()))
@@ -796,7 +788,12 @@ impl Index {
                 .values()
                 .map(|f| f.base_path().to_path_buf()),
         );
-        add(&mut field_data_dirs, &committed_fields.date_fields);
+        // Date fields are managed separately by DateFieldStorage
+        field_data_dirs.extend(
+            self.date_fields
+                .values()
+                .map(|f| f.base_path().to_path_buf()),
+        );
         // GeoPoint fields are managed separately by GeoPointFieldStorage
         field_data_dirs.extend(
             self.geopoint_fields
@@ -866,6 +863,11 @@ impl Index {
         // Clean up old string_filter field versions (they manage their own persistence)
         for string_filter_field in self.string_filter_fields.values() {
             string_filter_field.cleanup();
+        }
+
+        // Clean up old date field versions (they manage their own persistence via I64Storage)
+        for date_field in self.date_fields.values() {
+            date_field.cleanup();
         }
 
         Ok(())
@@ -1017,6 +1019,39 @@ impl Index {
             *old_storage = new_storage;
         }
 
+        // Relocate date fields from temp_indexes/ path to the permanent indexes/ path.
+        for (field_id, old_storage) in self.date_fields.iter_mut() {
+            if old_storage.has_pending_ops() {
+                let version = old_storage.current_offset() + 1;
+                old_storage
+                    .compact(version)
+                    .context("Cannot compact date field before promotion")?;
+                old_storage.cleanup();
+            }
+
+            let old_path = old_storage.base_path().to_path_buf();
+            let new_path = new_data_dir.join("date").join(field_id.0.to_string());
+
+            if old_path == new_path {
+                continue;
+            }
+
+            if old_path.exists() {
+                let options = fs_extra::dir::CopyOptions::new().overwrite(true);
+                if let Some(parent) = new_path.parent() {
+                    oramacore_lib::fs::create_if_not_exists(parent.to_path_buf())
+                        .context("Cannot create date field parent directory")?;
+                }
+                fs_extra::copy_items(&[&old_path], new_path.parent().expect("date path must have parent"), &options)
+                    .context("Cannot copy date field directory during promotion")?;
+            }
+
+            let field_path = old_storage.field_path().into();
+            let new_storage = DateFieldStorage::new(field_path, new_path)
+                .context("Cannot create DateFieldStorage at new path after promotion")?;
+            *old_storage = new_storage;
+        }
+
         // Clean up old bool directory if it exists and is different
         let old_bool_dir = old_data_dir.join("bool");
         if old_bool_dir.exists() {
@@ -1038,6 +1073,14 @@ impl Index {
         if old_string_filter_dir.exists() {
             if let Err(e) = std::fs::remove_dir_all(&old_string_filter_dir) {
                 warn!("Failed to remove old string_filter directory {:?}: {}", old_string_filter_dir, e);
+            }
+        }
+
+        // Clean up old date directory if it exists and is different
+        let old_date_dir = old_data_dir.join("date");
+        if old_date_dir.exists() {
+            if let Err(e) = std::fs::remove_dir_all(&old_date_dir) {
+                warn!("Failed to remove old date directory {:?}: {}", old_date_dir, e);
             }
         }
 
@@ -1110,9 +1153,11 @@ impl Index {
                             field_id,
                             FieldType::Date,
                         );
-                        uncommitted_fields
-                            .date_fields
-                            .insert(field_id, UncommittedDateFilterField::empty(field_path));
+                        // Create DateFieldStorage with a stable path under the index data dir.
+                        let date_base_path = self.data_dir.join("date").join(field_id.0.to_string());
+                        let storage = DateFieldStorage::new(field_path, date_base_path)
+                            .context("Failed to create DateFieldStorage")?;
+                        self.date_fields.insert(field_id, storage);
                     }
                     IndexWriteOperationFieldType::GeoPoint => {
                         self.path_to_index_id_map.insert_filter_field(
@@ -1192,10 +1237,21 @@ impl Index {
                             }
                         }
                         IndexedValue::FilterDate(field_id, timestamp) => {
-                            if let Some(field) = uncommitted_fields.date_fields.get_mut(&field_id) {
-                                field.insert(doc_id, timestamp);
+                            if let Some(field) = self.date_fields.get(&field_id) {
+                                if let Err(e) = field.insert(doc_id, timestamp) {
+                                    error!("Cannot insert date for field {:?}: {}", field_id, e);
+                                }
                             } else {
-                                error!("Cannot find field {:?} in uncommitted fields", field_id);
+                                error!("Cannot find date field {:?}", field_id);
+                            }
+                        }
+                        IndexedValue::FilterDate2(field_id, ref date_indexed_value) => {
+                            if let Some(field) = self.date_fields.get(&field_id) {
+                                if let Err(e) = field.insert_indexed(doc_id, date_indexed_value) {
+                                    error!("Cannot insert indexed date for field {:?}: {}", field_id, e);
+                                }
+                            } else {
+                                error!("Cannot find date field {:?}", field_id);
                             }
                         }
                         IndexedValue::FilterGeoPoint(field_id, geopoint) => {
@@ -1278,10 +1334,21 @@ impl Index {
                             }
                         }
                         IndexedValue::FilterDate(field_id, timestamp) => {
-                            if let Some(field) = uncommitted_fields.date_fields.get_mut(&field_id) {
-                                field.insert(doc_id, timestamp);
+                            if let Some(field) = self.date_fields.get(&field_id) {
+                                if let Err(e) = field.insert(doc_id, timestamp) {
+                                    error!("Cannot insert date for field {:?}: {}", field_id, e);
+                                }
                             } else {
-                                error!("Cannot find field {:?} in uncommitted fields", field_id);
+                                error!("Cannot find date field {:?}", field_id);
+                            }
+                        }
+                        IndexedValue::FilterDate2(field_id, ref date_indexed_value) => {
+                            if let Some(field) = self.date_fields.get(&field_id) {
+                                if let Err(e) = field.insert_indexed(doc_id, date_indexed_value) {
+                                    error!("Cannot insert indexed date for field {:?}: {}", field_id, e);
+                                }
+                            } else {
+                                error!("Cannot find date field {:?}", field_id);
                             }
                         }
                         IndexedValue::FilterGeoPoint(field_id, geopoint) => {
@@ -1351,6 +1418,13 @@ impl Index {
                 for doc_id in &doc_ids {
                     for (_, string_filter_field) in &self.string_filter_fields {
                         string_filter_field.delete(*doc_id);
+                    }
+                }
+
+                // Delete from date fields directly (they manage their own deletion via I64Storage)
+                for doc_id in &doc_ids {
+                    for (_, date_field) in &self.date_fields {
+                        date_field.delete(*doc_id);
                     }
                 }
 
@@ -1439,15 +1513,23 @@ impl Index {
             });
         }
 
+        // Date fields (managed by DateFieldStorage, not split across uncommitted/committed)
+        for (field_id, date_field) in &self.date_fields {
+            let stats = date_field.stats();
+            fields_stats.push(IndexFieldStats {
+                field_id: *field_id,
+                field_path: date_field.field_path().join("."),
+                stats: IndexFieldStatsType::DateFieldStorage(stats),
+            });
+        }
+
         // Uncommitted
         fields_stats.extend(extrapolate_stats(&uncommitted_fields.number_fields));
-        fields_stats.extend(extrapolate_stats(&uncommitted_fields.date_fields));
         fields_stats.extend(extrapolate_stats(&uncommitted_fields.string_fields));
         fields_stats.extend(extrapolate_stats(&uncommitted_fields.vector_fields));
 
         // Committed
         fields_stats.extend(extrapolate_stats(&committed_fields.number_fields));
-        fields_stats.extend(extrapolate_stats(&committed_fields.date_fields));
         fields_stats.extend(extrapolate_stats(&committed_fields.string_fields));
         fields_stats.extend(extrapolate_stats(&committed_fields.vector_fields));
 

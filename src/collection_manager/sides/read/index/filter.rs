@@ -6,7 +6,7 @@ use tracing::trace;
 
 use crate::types::{DateFilter, DocumentId, FieldId, Filter, GeoSearchFilter, NumberFilter, WhereFilter};
 
-use super::{bool_field::BoolFieldStorage, geopoint_field::GeoPointFieldStorage, string_filter_field::StringFilterFieldStorage, path_to_index_id_map::PathToIndexId, CommittedFields, FieldType, UncommittedFields};
+use super::{bool_field::BoolFieldStorage, date_field::DateFieldStorage, geopoint_field::GeoPointFieldStorage, string_filter_field::StringFilterFieldStorage, path_to_index_id_map::PathToIndexId, CommittedFields, FieldType, UncommittedFields};
 
 /// Trait for fields that support filtering operations.
 ///
@@ -242,6 +242,7 @@ fn calculate_filter_for_fields(
     document_count_estimate: u64,
     path_to_index_id_map: &PathToIndexId,
     bool_fields: &HashMap<FieldId, BoolFieldStorage>,
+    date_fields: &HashMap<FieldId, DateFieldStorage>,
     geopoint_fields: &HashMap<FieldId, GeoPointFieldStorage>,
     string_filter_fields: &HashMap<FieldId, StringFilterFieldStorage>,
     uncommitted_fields: &UncommittedFields,
@@ -288,17 +289,22 @@ fn calculate_filter_for_fields(
             )
         }
         FieldType::Date => {
-            let uncommitted_field = uncommitted_fields
-                .date_fields
+            let date_field = date_fields
                 .get(&field_id)
-                .ok_or_else(|| anyhow::anyhow!("Field not found in index"))?;
+                .ok_or_else(|| anyhow::anyhow!("Date field not found in index"))?;
 
-            calculate_filter_on_field(
+            let Filter::Date(date_filter) = filter else {
+                // Wrong filter type for date field - return empty set
+                return Ok(FilterResult::Filter(PlainFilterResult::new(
+                    document_count_estimate,
+                )));
+            };
+
+            let docs = date_field.filter(date_filter);
+            Ok(FilterResult::Filter(PlainFilterResult::from_iter(
                 document_count_estimate,
-                uncommitted_field,
-                committed_fields.date_fields.get(&field_id),
-                filter,
-            )
+                docs.into_iter(),
+            )))
         }
         FieldType::StringFilter => {
             let string_filter_field = string_filter_fields
@@ -372,6 +378,7 @@ fn calculate_filter(
     document_count_estimate: u64,
     path_to_index_id_map: &PathToIndexId,
     bool_fields: &HashMap<FieldId, BoolFieldStorage>,
+    date_fields: &HashMap<FieldId, DateFieldStorage>,
     geopoint_fields: &HashMap<FieldId, GeoPointFieldStorage>,
     string_filter_fields: &HashMap<FieldId, StringFilterFieldStorage>,
     where_filter: &WhereFilter,
@@ -395,6 +402,7 @@ fn calculate_filter(
             document_count_estimate,
             path_to_index_id_map,
             bool_fields,
+            date_fields,
             geopoint_fields,
             string_filter_fields,
             uncommitted_fields,
@@ -412,6 +420,7 @@ fn calculate_filter(
                 document_count_estimate,
                 path_to_index_id_map,
                 bool_fields,
+                date_fields,
                 geopoint_fields,
                 string_filter_fields,
                 f,
@@ -429,6 +438,7 @@ fn calculate_filter(
                 document_count_estimate,
                 path_to_index_id_map,
                 bool_fields,
+                date_fields,
                 geopoint_fields,
                 string_filter_fields,
                 f,
@@ -457,6 +467,7 @@ fn calculate_filter(
             document_count_estimate,
             path_to_index_id_map,
             bool_fields,
+            date_fields,
             geopoint_fields,
             string_filter_fields,
             filter,
@@ -491,6 +502,7 @@ pub struct FilterContext<'index> {
     document_count: u64,
     path_to_index_id_map: &'index PathToIndexId,
     bool_fields: &'index HashMap<FieldId, BoolFieldStorage>,
+    date_fields: &'index HashMap<FieldId, DateFieldStorage>,
     geopoint_fields: &'index HashMap<FieldId, GeoPointFieldStorage>,
     string_filter_fields: &'index HashMap<FieldId, StringFilterFieldStorage>,
     uncommitted_fields: &'index UncommittedFields,
@@ -508,6 +520,7 @@ impl<'index> FilterContext<'index> {
         document_count: u64,
         path_to_index_id_map: &'index PathToIndexId,
         bool_fields: &'index HashMap<FieldId, BoolFieldStorage>,
+        date_fields: &'index HashMap<FieldId, DateFieldStorage>,
         geopoint_fields: &'index HashMap<FieldId, GeoPointFieldStorage>,
         string_filter_fields: &'index HashMap<FieldId, StringFilterFieldStorage>,
         uncommitted_fields: &'index UncommittedFields,
@@ -518,6 +531,7 @@ impl<'index> FilterContext<'index> {
             document_count,
             path_to_index_id_map,
             bool_fields,
+            date_fields,
             geopoint_fields,
             string_filter_fields,
             uncommitted_fields,
@@ -562,6 +576,7 @@ impl<'index> FilterContext<'index> {
             expected_items,
             self.path_to_index_id_map,
             self.bool_fields,
+            self.date_fields,
             self.geopoint_fields,
             self.string_filter_fields,
             where_filter,

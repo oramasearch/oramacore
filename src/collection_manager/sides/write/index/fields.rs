@@ -23,6 +23,7 @@ use crate::{
 
 use oramacore_fields::bool::{BoolIndexer, IndexedValue as BoolIndexedValue};
 use oramacore_fields::geopoint::{GeoPointIndexer, IndexedValue as GeoPointIndexedValue};
+use oramacore_fields::number::IndexedValue as NumberIndexedValue;
 use oramacore_fields::string_filter::{
     IndexedValue as StringFilterIndexedValue, StringIndexer,
 };
@@ -501,12 +502,21 @@ impl DateFilterField {
             _ => vec![],
         };
 
-        let data = data
-            .into_iter()
-            .map(|t| IndexedValue::FilterDate(self.field_id, t.as_i64()))
-            .collect();
+        if data.is_empty() {
+            return Ok(vec![]);
+        }
 
-        Ok(data)
+        // Emit a single FilterDate2 with either Plain or Array
+        let indexed_value = if self.is_array || data.len() > 1 {
+            NumberIndexedValue::Array(data.iter().map(|d| d.as_i64()).collect())
+        } else {
+            NumberIndexedValue::Plain(data[0].as_i64())
+        };
+
+        Ok(vec![IndexedValue::FilterDate2(
+            self.field_id,
+            indexed_value,
+        )])
     }
 }
 
@@ -1096,6 +1106,9 @@ pub enum IndexedValue {
     /// New variant that carries an `oramacore_fields::string_filter::IndexedValue` directly,
     /// supporting both plain and array string filter values in a single operation.
     FilterString2(FieldId, StringFilterIndexedValue),
+    /// New variant that carries an `oramacore_fields::number::IndexedValue<i64>` directly,
+    /// supporting both plain and array date values in a single operation.
+    FilterDate2(FieldId, NumberIndexedValue<i64>),
 }
 
 fn join_vec_strings(v: &[&String]) -> String {

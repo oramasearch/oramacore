@@ -1,5 +1,5 @@
 pub use bool::BoolFieldInfo;
-pub use date::{CommittedDateField, CommittedDateFieldStats, DateFieldInfo};
+pub use date::DateFieldInfo;
 pub use geopoint::GeoPointFieldInfo;
 pub use number::{CommittedNumberField, CommittedNumberFieldStats, NumberFieldInfo};
 pub use string::{

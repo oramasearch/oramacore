@@ -318,6 +318,7 @@ async fn search_on_indexes(
             search_store.document_count,
             search_store.path_to_field_id_map,
             search_store.bool_fields,
+            search_store.date_fields,
             search_store.geopoint_fields,
             search_store.string_filter_fields,
             &search_store.uncommitted_fields,

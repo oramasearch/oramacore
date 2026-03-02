@@ -580,6 +580,7 @@ mod tests {
     use crate::types::{CollectionId, DocumentId, RawJSONDocument, SerializableNumber};
     use oramacore_fields::bool::IndexedValue as BoolIndexedValue;
     use oramacore_fields::geopoint::{GeoPoint as FieldsGeoPoint, IndexedValue as GeoPointIndexedValue};
+    use oramacore_fields::number::IndexedValue as NumberIndexedValue;
     use oramacore_fields::string_filter::IndexedValue as StringFilterIndexedValue;
     use oramacore_lib::nlp::locales::Locale;
 
@@ -784,6 +785,38 @@ mod tests {
                             StringFilterIndexedValue::Array(vec![
                                 "blue".to_string(),
                                 "green".to_string(),
+                            ]),
+                        )]),
+                        omc: None,
+                    },
+                ),
+            ),
+            // Test FilterDate2 with plain value
+            WriteOperation::Collection(
+                collection_id,
+                CollectionWriteOperation::IndexWriteOperation(
+                    index_id,
+                    IndexWriteOperation::Index {
+                        doc_id: DocumentId(9),
+                        indexed_values: Vec::from([IndexedValue::FilterDate2(
+                            field_id,
+                            NumberIndexedValue::Plain(1719792000000_i64),
+                        )]),
+                    },
+                ),
+            ),
+            // Test FilterDate2 with array value
+            WriteOperation::Collection(
+                collection_id,
+                CollectionWriteOperation::IndexWriteOperation(
+                    index_id,
+                    IndexWriteOperation::Index2 {
+                        doc_id: DocumentId(10),
+                        indexed_values: Vec::from([IndexedValue::FilterDate2(
+                            field_id,
+                            NumberIndexedValue::Array(vec![
+                                1719792000000_i64,
+                                1722470400000_i64,
                             ]),
                         )]),
                         omc: None,
