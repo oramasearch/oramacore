@@ -40,6 +40,7 @@ mod replace_index;
 mod replace_index_bool_promotion;
 mod replace_index_date_promotion;
 mod replace_index_geopoint_promotion;
+mod replace_index_number_promotion;
 mod replace_index_string_filter_promotion;
 mod shelves;
 mod shutdown;

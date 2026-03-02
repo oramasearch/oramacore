@@ -1,7 +1,7 @@
 pub use bool::BoolFieldInfo;
 pub use date::DateFieldInfo;
 pub use geopoint::GeoPointFieldInfo;
-pub use number::{CommittedNumberField, CommittedNumberFieldStats, NumberFieldInfo};
+pub use number::NumberFieldInfo;
 pub use string::{
     CommittedStringField, CommittedStringFieldStats, StringFieldInfo, StringSearchParams,
 };

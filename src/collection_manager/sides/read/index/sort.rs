@@ -8,11 +8,10 @@ use crate::{
 
 use super::{
     bool_field::BoolFieldStorage,
-    committed_field::CommittedNumberField,
     date_field::DateFieldStorage,
+    number_field::NumberFieldStorage,
     path_to_index_id_map::PathToIndexId,
-    uncommitted_field::UncommittedNumberField,
-    CommittedFields, FieldType, UncommittedFields,
+    FieldType,
 };
 
 // =============================================================================
@@ -193,29 +192,6 @@ trait Sortable {
 }
 
 // =============================================================================
-// Sortable implementations for Uncommitted fields
-// =============================================================================
-
-impl Sortable for UncommittedNumberField {
-    fn iter_sorted<'s>(&'s self) -> InternalBidirectionalSortIter<'s> {
-        Box::new(self.iter_ref())
-    }
-}
-
-// =============================================================================
-// Sortable implementations for Committed fields
-// =============================================================================
-
-impl Sortable for CommittedNumberField {
-    fn iter_sorted<'s>(&'s self) -> InternalBidirectionalSortIter<'s> {
-        Box::new(
-            self.iter_ref()
-                .map(|(serializable_number, doc_ids)| (serializable_number.0, doc_ids)),
-        )
-    }
-}
-
-// =============================================================================
 // IndexSortContext
 // =============================================================================
 
@@ -223,9 +199,8 @@ impl Sortable for CommittedNumberField {
 pub struct IndexSortContext<'index> {
     path_to_index_id_map: &'index PathToIndexId,
     bool_fields: &'index HashMap<FieldId, BoolFieldStorage>,
+    number_fields: &'index HashMap<FieldId, NumberFieldStorage>,
     date_fields: &'index HashMap<FieldId, DateFieldStorage>,
-    uncommitted_fields: &'index UncommittedFields,
-    committed_fields: &'index CommittedFields,
     field_name: String,
     order: SortOrder,
 }
@@ -235,18 +210,16 @@ impl<'index> IndexSortContext<'index> {
     pub(crate) fn new(
         path_to_index_id_map: &'index PathToIndexId,
         bool_fields: &'index HashMap<FieldId, BoolFieldStorage>,
+        number_fields: &'index HashMap<FieldId, NumberFieldStorage>,
         date_fields: &'index HashMap<FieldId, DateFieldStorage>,
-        uncommitted_fields: &'index UncommittedFields,
-        committed_fields: &'index CommittedFields,
         field_name: &str,
         order: SortOrder,
     ) -> Self {
         Self {
             path_to_index_id_map,
             bool_fields,
+            number_fields,
             date_fields,
-            uncommitted_fields,
-            committed_fields,
             field_name: field_name.to_string(),
             order,
         }
@@ -266,8 +239,7 @@ impl<'index> IndexSortContext<'index> {
 
         match field_type {
             FieldType::Number => {
-                let uncommitted = self
-                    .uncommitted_fields
+                let number_field = self
                     .number_fields
                     .get(&field_id)
                     .ok_or_else(|| {
@@ -276,10 +248,12 @@ impl<'index> IndexSortContext<'index> {
                             self.field_name
                         ))
                     })?;
-                let committed = self.committed_fields.number_fields.get(&field_id);
-                let iter = calculate_sort_on_field(uncommitted, committed, self.order);
-                // Wrap &HashSet references in DocBatch::HashSet for the public API
-                Ok(Box::new(iter.map(|(k, v)| (k, DocBatch::HashSet(v)))))
+                let ascending = matches!(self.order, SortOrder::Ascending);
+                let iter = number_field.sort_grouped(ascending);
+                // Wrap already-collected Vec<DocumentId> in DocBatch::Owned
+                Ok(Box::new(iter.map(|(k, doc_ids)| {
+                    (k, DocBatch::Owned(doc_ids))
+                })))
             }
             FieldType::Bool => {
                 let bool_field = self

@@ -2067,23 +2067,10 @@ enum FieldStatType {
         false_count: usize,
         true_count: usize,
     },
-    #[serde(rename = "uncommitted_number")]
-    UncommittedNumber {
-        #[serde(default)]
-        _min: Option<f64>,
-        #[serde(default)]
-        _max: Option<f64>,
+    #[serde(rename = "number")]
+    Number {
         #[serde(default)]
         count: usize,
-    },
-    #[serde(rename = "committed_number")]
-    CommittedNumber {
-        #[serde(default)]
-        _min: Option<f64>,
-        #[serde(default)]
-        _max: Option<f64>,
-        #[serde(default)]
-        document_count: usize,
     },
     #[serde(rename = "string_filter")]
     StringFilter {
@@ -2121,8 +2108,7 @@ impl FieldStatType {
                 false_count,
                 true_count,
             } => false_count + true_count,
-            UncommittedNumber { count, .. } => *count,
-            CommittedNumber { document_count, .. } => *document_count,
+            Number { count, .. } => *count,
             StringFilter { document_count, .. } => *document_count,
             UncommittedString { global_info, .. } | CommittedString { global_info, .. } => {
                 global_info.total_documents
@@ -2136,7 +2122,7 @@ impl FieldStatType {
         use FieldStatType::*;
         match self {
             Bool { .. } => "boolean",
-            UncommittedNumber { .. } | CommittedNumber { .. } => "number",
+            Number { .. } => "number",
             StringFilter { .. } => "string_filter",
             UncommittedString { .. } | CommittedString { .. } => "string",
             UncommittedVector { .. } | CommittedVector { .. } => "vector",

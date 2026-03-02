@@ -13,24 +13,21 @@ use tokio::sync::mpsc::Sender;
 use crate::{
     ai::automatic_embeddings_selector::{AutomaticEmbeddingsSelector, ChosenProperties},
     collection_manager::sides::{
-        write::{embedding::MultiEmbeddingCalculationRequest, WriteSideContext},
-        Term, TermStringField,
+        Term, TermStringField, read::number_field::NumberFieldIndexedValue, write::{WriteSideContext, embedding::MultiEmbeddingCalculationRequest, index}
     },
     lock::OramaAsyncLock,
     python::embeddings::Model,
     types::{CollectionId, DocumentId, FieldId, IndexId, Number, OramaDate, SerializableNumber},
 };
 
-use oramacore_fields::bool::{BoolIndexer, IndexedValue as BoolIndexedValue};
+use oramacore_fields::{bool::{BoolIndexer, IndexedValue as BoolIndexedValue}, number::NumberIndexer};
 use oramacore_fields::geopoint::{GeoPointIndexer, IndexedValue as GeoPointIndexedValue};
 use oramacore_fields::number::IndexedValue as NumberIndexedValue;
 use oramacore_fields::string_filter::{
     IndexedValue as StringFilterIndexedValue, StringIndexer,
 };
 use oramacore_lib::nlp::{
-    chunker::{Chunker, ChunkerConfig},
-    locales::Locale,
-    TextParser,
+    TextParser, chunker::{Chunker, ChunkerConfig}, locales::Locale, stop_words::el
 };
 
 use super::{get_value, EmbeddingStringCalculation};
@@ -295,6 +292,8 @@ pub struct NumberFilterField {
     field_id: FieldId,
     field_path: Box<[String]>,
     is_array: bool,
+    indexer_i64: NumberIndexer<i64>,
+    indexer_f64: NumberIndexer<f64>,
 }
 
 impl NumberFilterField {
@@ -303,43 +302,25 @@ impl NumberFilterField {
             field_id,
             field_path,
             is_array,
+            indexer_i64: NumberIndexer::new(is_array),
+            indexer_f64: NumberIndexer::new(is_array),
         }
     }
 
     pub fn index_value(&self, value: &Value) -> Result<Vec<IndexedValue>> {
-        let data: Vec<Number> = match value {
-            Value::Number(n) => {
-                if let Some(i) = n.as_i64() {
-                    vec![Number::I32(i as i32)]
-                } else if let Some(f) = n.as_f64() {
-                    vec![Number::F32(f as f32)]
-                } else {
-                    vec![]
-                }
-            }
-            Value::Array(arr) => arr
-                .iter()
-                .filter_map(|v| {
-                    if let Value::Number(n) = v {
-                        if let Some(i) = n.as_i64() {
-                            Some(Number::I32(i as i32))
-                        } else {
-                            n.as_f64().map(|f| Number::F32(f as f32))
-                        }
-                    } else {
-                        None
-                    }
-                })
-                .collect::<Vec<_>>(),
-            _ => vec![],
-        };
 
-        let data = data
-            .into_iter()
-            .map(|num| IndexedValue::FilterNumber(self.field_id, SerializableNumber(num)))
-            .collect();
-
-        Ok(data)
+        if let Some(indexed) = self.indexer_i64.index_json(value) {
+            return Ok(vec![IndexedValue::FilterNumber2(
+                self.field_id,
+                NumberFieldIndexedValue::I64(indexed),
+            )]);
+        } else if let Some(indexed) = self.indexer_f64.index_json(value) {
+            return Ok(vec![IndexedValue::FilterNumber2(
+                self.field_id,
+                NumberFieldIndexedValue::F64(indexed),
+            )]);
+        }
+        return Ok(vec![]);
     }
 }
 
@@ -1109,6 +1090,9 @@ pub enum IndexedValue {
     /// New variant that carries an `oramacore_fields::number::IndexedValue<i64>` directly,
     /// supporting both plain and array date values in a single operation.
     FilterDate2(FieldId, NumberIndexedValue<i64>),
+    /// New variant that carries a `NumberFieldIndexedValue` (either I64 or F64),
+    /// supporting the dual-storage number field.
+    FilterNumber2(FieldId, NumberFieldIndexedValue),
 }
 
 fn join_vec_strings(v: &[&String]) -> String {

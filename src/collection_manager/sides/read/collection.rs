@@ -39,15 +39,15 @@ use crate::{
     lock::{OramaAsyncLock, OramaAsyncLockReadGuard, OramaAsyncLockWriteGuard, OramaSyncLock},
     types::{
         ApiKey, CollectionId, CollectionStatsRequest, Document, DocumentId, FieldId, IndexId,
-        InteractionMessage, Number, OramaDate, RawJSONDocument, ReadApiKey, Role,
+        InteractionMessage, OramaDate, RawJSONDocument, ReadApiKey, Role,
     },
 };
 
 use super::{
     index::{Index, IndexStats},
-    CollectionCommitConfig, CommittedNumberFieldStats,
+    CollectionCommitConfig,
     CommittedVectorFieldStats, DeletionReason, OffloadFieldConfig, ReadSide,
-    UncommittedNumberFieldStats, UncommittedStringFieldStats,
+    UncommittedStringFieldStats,
     UncommittedVectorFieldStats,
 };
 use oramacore_lib::values::ValuesReader;
@@ -1338,57 +1338,16 @@ impl CollectionReader {
                             }),
                         );
                     }
-                    IndexFieldStatsType::CommittedNumber(CommittedNumberFieldStats {
-                        min,
-                        max,
-                        ..
-                    }) => {
+                    IndexFieldStatsType::NumberFieldStorage(ref stats) => {
                         final_stats.insert(
                             field.field_id,
                             FilterableField::Number(FilterableFieldNumber {
                                 field_path: field.field_path.clone(),
                                 field_type: "number".to_string(),
-                                min: match min {
-                                    Number::I32(i) => *i as f64,
-                                    Number::F32(f) => *f as f64,
-                                },
-                                max: match max {
-                                    Number::I32(i) => *i as f64,
-                                    Number::F32(f) => *f as f64,
-                                },
+                                min: stats.min.map(|n| n.as_f32() as f64).unwrap_or_default(),
+                                max: stats.max.map(|n| n.as_f32() as f64).unwrap_or_default(),
                             }),
                         );
-                    }
-                    IndexFieldStatsType::UncommittedNumber(UncommittedNumberFieldStats {
-                        min,
-                        max,
-                        ..
-                    }) => {
-                        if let Some(FilterableField::Number(number_stats)) =
-                            final_stats.get(&field.field_id)
-                        {
-                            let min_as_f64 = match min {
-                                Number::I32(i) => *i as f64,
-                                Number::F32(f) => *f as f64,
-                            };
-                            let max_as_f64 = match max {
-                                Number::I32(i) => *i as f64,
-                                Number::F32(f) => *f as f64,
-                            };
-
-                            let new_min = min_as_f64.min(number_stats.min);
-                            let new_max = max_as_f64.max(number_stats.max);
-
-                            final_stats.insert(
-                                field.field_id,
-                                FilterableField::Number(FilterableFieldNumber {
-                                    field_path: field.field_path.clone(),
-                                    field_type: "number".to_string(),
-                                    min: new_min,
-                                    max: new_max,
-                                }),
-                            );
-                        }
                     }
                     IndexFieldStatsType::StringFilterFieldStorage(ref stats) => {
                         final_stats.insert(
@@ -1526,10 +1485,8 @@ pub enum IndexFieldStatsType {
     #[serde(rename = "geopoint")]
     GeoPointFieldStorage(super::index::geopoint_field::GeoPointFieldStorageStats),
 
-    #[serde(rename = "uncommitted_number")]
-    UncommittedNumber(UncommittedNumberFieldStats),
-    #[serde(rename = "committed_number")]
-    CommittedNumber(CommittedNumberFieldStats),
+    #[serde(rename = "number")]
+    NumberFieldStorage(super::index::number_field::NumberFieldStorageStats),
 
     #[serde(rename = "date")]
     DateFieldStorage(super::index::date_field::DateFieldStorageStats),

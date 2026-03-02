@@ -1,6 +1,6 @@
 use chrono::{DateTime, Utc};
 use committed_field::{
-    BoolFieldInfo, CommittedNumberField,
+    BoolFieldInfo,
     NumberFieldInfo, StringFilterFieldInfo, VectorFieldInfo,
 };
 use path_to_index_id_map::PathToIndexId;
@@ -42,6 +42,7 @@ use oramacore_lib::nlp::{locales::Locale, TextParser};
 use self::bool_field::BoolFieldStorage;
 use self::date_field::DateFieldStorage;
 use self::geopoint_field::GeoPointFieldStorage;
+use self::number_field::NumberFieldStorage;
 use self::string_filter_field::StringFilterFieldStorage;
 use super::collection::{IndexFieldStats, IndexFieldStatsType};
 use super::OffloadFieldConfig;
@@ -53,6 +54,7 @@ pub mod filter;
 pub mod geopoint_field;
 pub mod group;
 mod merge;
+pub mod number_field;
 mod path_to_index_id_map;
 mod sort;
 pub mod string_filter_field;
@@ -67,7 +69,6 @@ use crate::{
 };
 use anyhow::{Context, Result};
 pub use committed_field::{
-    CommittedNumberFieldStats,
     CommittedStringFieldStats, CommittedVectorFieldStats,
 };
 pub use group::GroupValue;
@@ -81,7 +82,6 @@ use std::{
     },
 };
 pub use uncommitted_field::{
-    UncommittedNumberFieldStats,
     UncommittedStringFieldStats, UncommittedVectorFieldStats,
 };
 
@@ -95,14 +95,12 @@ pub enum DeletionReason {
 
 #[derive(Default)]
 pub struct UncommittedFields {
-    pub number_fields: HashMap<FieldId, UncommittedNumberField>,
     pub string_fields: HashMap<FieldId, UncommittedStringField>,
     pub vector_fields: HashMap<FieldId, UncommittedVectorField>,
 }
 
 #[derive(Default)]
 pub struct CommittedFields {
-    pub number_fields: HashMap<FieldId, CommittedNumberField>,
     pub string_fields: HashMap<FieldId, CommittedStringField>,
     pub vector_fields: HashMap<FieldId, CommittedVectorField>,
 }
@@ -112,6 +110,7 @@ pub struct IndexSearchStore<'index> {
     pub committed_fields: OramaAsyncLockReadGuard<'index, CommittedFields>,
     pub uncommitted_fields: OramaAsyncLockReadGuard<'index, UncommittedFields>,
     pub bool_fields: &'index HashMap<FieldId, BoolFieldStorage>,
+    pub number_fields: &'index HashMap<FieldId, NumberFieldStorage>,
     pub date_fields: &'index HashMap<FieldId, DateFieldStorage>,
     pub geopoint_fields: &'index HashMap<FieldId, GeoPointFieldStorage>,
     pub string_filter_fields: &'index HashMap<FieldId, StringFilterFieldStorage>,
@@ -158,6 +157,10 @@ pub struct Index {
     // Date fields are managed directly by DateFieldStorage (backed by oramacore_fields I64Storage)
     // instead of being split across uncommitted/committed field maps.
     date_fields: HashMap<FieldId, DateFieldStorage>,
+
+    // Number fields are managed directly by NumberFieldStorage (backed by dual oramacore_fields I64/F64 storages)
+    // instead of being split across uncommitted/committed field maps.
+    number_fields: HashMap<FieldId, NumberFieldStorage>,
 
     // StringFilter fields are managed directly by StringFilterFieldStorage (backed by oramacore_fields)
     // instead of being split across uncommitted/committed field maps.
@@ -207,6 +210,7 @@ impl Index {
             uncommitted_deleted_documents: HashSet::new(),
 
             bool_fields: HashMap::new(),
+            number_fields: HashMap::new(),
             date_fields: HashMap::new(),
             geopoint_fields: HashMap::new(),
             string_filter_fields: HashMap::new(),
@@ -266,16 +270,15 @@ impl Index {
         debug!("Bool fields loaded");
 
         debug!("Loading number_field_ids");
+        let mut number_fields = HashMap::new();
         for (field_id, info) in dump.number_field_ids {
             filter_fields.insert(info.field_path.clone(), (field_id, FieldType::Number));
 
-            uncommitted_fields.number_fields.insert(
-                field_id,
-                UncommittedNumberField::empty(info.field_path.clone()),
-            );
-            let field = CommittedNumberField::try_load(info, offload_config)
+            debug!("NumberFieldStorage::try_load for field_id {:?}", field_id);
+            let field = NumberFieldStorage::try_load(info)
                 .context("Cannot load number field")?;
-            committed_fields.number_fields.insert(field_id, field);
+            debug!("DONE");
+            number_fields.insert(field_id, field);
         }
         debug!("Number fields loaded");
 
@@ -379,6 +382,7 @@ impl Index {
             uncommitted_deleted_documents: HashSet::new(),
 
             bool_fields,
+            number_fields,
             date_fields,
             geopoint_fields,
             string_filter_fields,
@@ -414,6 +418,7 @@ impl Index {
             committed_fields,
             uncommitted_fields,
             bool_fields: &self.bool_fields,
+            number_fields: &self.number_fields,
             date_fields: &self.date_fields,
             geopoint_fields: &self.geopoint_fields,
             string_filter_fields: &self.string_filter_fields,
@@ -506,10 +511,10 @@ impl Index {
                 .date_fields
                 .values()
                 .any(|field| field.has_pending_ops())
-            || uncommitted_fields
+            || self
                 .number_fields
-                .iter()
-                .any(|(_, field)| !field.is_empty())
+                .values()
+                .any(|field| field.has_pending_ops())
             || uncommitted_fields
                 .string_fields
                 .iter()
@@ -573,21 +578,13 @@ impl Index {
             }
         }
 
-        let merged_numbers = merge_type(
-            &data_dir_with_offset,
-            &uncommitted_fields.number_fields,
-            &committed_fields.number_fields,
-            &self.uncommitted_deleted_documents,
-            is_promoted,
-            &self.offload_config,
-            FieldIndexCollectionCommitLabels {
-                collection: collection_id.as_str().to_string(),
-                index: self.id.as_str().to_string(),
-                side: "read",
-                field_type: "number",
-            },
-        )
-        .context("Cannot merge number fields")?;
+        // Compact number fields directly (they manage their own persistence via dual I64/F64 storages)
+        for (_, number_field) in &self.number_fields {
+            if number_field.has_pending_ops() {
+                number_field.compact(offset.0 as u64)
+                    .context("Cannot compact number field")?;
+            }
+        }
 
         let merged_strings = merge_type(
             &data_dir_with_offset,
@@ -637,13 +634,6 @@ impl Index {
         let mut uncommitted_fields = self.uncommitted_fields.write("commit").await;
         let mut committed_fields = self.committed_fields.write("commit").await;
 
-        overwrite_committed(
-            self.id,
-            offset,
-            merged_numbers,
-            &mut committed_fields.number_fields,
-            &mut uncommitted_fields.number_fields,
-        );
         overwrite_committed(
             self.id,
             offset,
@@ -698,7 +688,7 @@ impl Index {
                 .iter()
                 .map(|(k, v)| (*k, v.metadata()))
                 .collect(),
-            number_field_ids: committed_fields
+            number_field_ids: self
                 .number_fields
                 .iter()
                 .map(|(k, v)| (*k, v.metadata()))
@@ -781,7 +771,12 @@ impl Index {
                 .values()
                 .map(|f| f.base_path().to_path_buf()),
         );
-        add(&mut field_data_dirs, &committed_fields.number_fields);
+        // Number fields are managed separately by NumberFieldStorage
+        field_data_dirs.extend(
+            self.number_fields
+                .values()
+                .map(|f| f.base_path().to_path_buf()),
+        );
         // StringFilter fields are managed separately by StringFilterFieldStorage
         field_data_dirs.extend(
             self.string_filter_fields
@@ -868,6 +863,11 @@ impl Index {
         // Clean up old date field versions (they manage their own persistence via I64Storage)
         for date_field in self.date_fields.values() {
             date_field.cleanup();
+        }
+
+        // Clean up old number field versions (they manage their own persistence via dual I64/F64 storages)
+        for number_field in self.number_fields.values() {
+            number_field.cleanup();
         }
 
         Ok(())
@@ -1052,6 +1052,39 @@ impl Index {
             *old_storage = new_storage;
         }
 
+        // Relocate number fields from temp_indexes/ path to the permanent indexes/ path.
+        for (field_id, old_storage) in self.number_fields.iter_mut() {
+            if old_storage.has_pending_ops() {
+                let version = old_storage.current_offset() + 1;
+                old_storage
+                    .compact(version)
+                    .context("Cannot compact number field before promotion")?;
+                old_storage.cleanup();
+            }
+
+            let old_path = old_storage.base_path().to_path_buf();
+            let new_path = new_data_dir.join("number").join(field_id.0.to_string());
+
+            if old_path == new_path {
+                continue;
+            }
+
+            if old_path.exists() {
+                let options = fs_extra::dir::CopyOptions::new().overwrite(true);
+                if let Some(parent) = new_path.parent() {
+                    oramacore_lib::fs::create_if_not_exists(parent.to_path_buf())
+                        .context("Cannot create number field parent directory")?;
+                }
+                fs_extra::copy_items(&[&old_path], new_path.parent().expect("number path must have parent"), &options)
+                    .context("Cannot copy number field directory during promotion")?;
+            }
+
+            let field_path = old_storage.field_path().into();
+            let new_storage = NumberFieldStorage::new(field_path, new_path)
+                .context("Cannot create NumberFieldStorage at new path after promotion")?;
+            *old_storage = new_storage;
+        }
+
         // Clean up old bool directory if it exists and is different
         let old_bool_dir = old_data_dir.join("bool");
         if old_bool_dir.exists() {
@@ -1081,6 +1114,14 @@ impl Index {
         if old_date_dir.exists() {
             if let Err(e) = std::fs::remove_dir_all(&old_date_dir) {
                 warn!("Failed to remove old date directory {:?}: {}", old_date_dir, e);
+            }
+        }
+
+        // Clean up old number directory if it exists and is different
+        let old_number_dir = old_data_dir.join("number");
+        if old_number_dir.exists() {
+            if let Err(e) = std::fs::remove_dir_all(&old_number_dir) {
+                warn!("Failed to remove old number directory {:?}: {}", old_number_dir, e);
             }
         }
 
@@ -1131,9 +1172,11 @@ impl Index {
                             field_id,
                             FieldType::Number,
                         );
-                        uncommitted_fields
-                            .number_fields
-                            .insert(field_id, UncommittedNumberField::empty(field_path));
+                        // Create NumberFieldStorage with a stable path under the index data dir.
+                        let number_base_path = self.data_dir.join("number").join(field_id.0.to_string());
+                        let storage = NumberFieldStorage::new(field_path, number_base_path)
+                            .context("Failed to create NumberFieldStorage")?;
+                        self.number_fields.insert(field_id, storage);
                     }
                     IndexWriteOperationFieldType::StringFilter => {
                         self.path_to_index_id_map.insert_filter_field(
@@ -1207,11 +1250,21 @@ impl Index {
                             }
                         }
                         IndexedValue::FilterNumber(field_id, number) => {
-                            if let Some(field) = uncommitted_fields.number_fields.get_mut(&field_id)
-                            {
-                                field.insert(doc_id, number.0);
+                            if let Some(field) = self.number_fields.get(&field_id) {
+                                if let Err(e) = field.insert(doc_id, number.0) {
+                                    error!("Failed to insert number value: {e:?}");
+                                }
                             } else {
-                                error!("Cannot find field {:?} in uncommitted fields", field_id);
+                                error!("Cannot find number field {:?}", field_id);
+                            }
+                        }
+                        IndexedValue::FilterNumber2(field_id, ref number_indexed_value) => {
+                            if let Some(field) = self.number_fields.get(&field_id) {
+                                if let Err(e) = field.insert_indexed(doc_id, number_indexed_value) {
+                                    error!("Failed to insert indexed number value: {e:?}");
+                                }
+                            } else {
+                                error!("Cannot find number field {:?}", field_id);
                             }
                         }
                         IndexedValue::FilterString(field_id, string_value) => {
@@ -1304,11 +1357,21 @@ impl Index {
                             }
                         }
                         IndexedValue::FilterNumber(field_id, number) => {
-                            if let Some(field) = uncommitted_fields.number_fields.get_mut(&field_id)
-                            {
-                                field.insert(doc_id, number.0);
+                            if let Some(field) = self.number_fields.get(&field_id) {
+                                if let Err(e) = field.insert(doc_id, number.0) {
+                                    error!("Failed to insert number value: {e:?}");
+                                }
                             } else {
-                                error!("Cannot find field {:?} in uncommitted fields", field_id);
+                                error!("Cannot find number field {:?}", field_id);
+                            }
+                        }
+                        IndexedValue::FilterNumber2(field_id, ref number_indexed_value) => {
+                            if let Some(field) = self.number_fields.get(&field_id) {
+                                if let Err(e) = field.insert_indexed(doc_id, number_indexed_value) {
+                                    error!("Failed to insert indexed number value: {e:?}");
+                                }
+                            } else {
+                                error!("Cannot find number field {:?}", field_id);
                             }
                         }
                         IndexedValue::FilterString(field_id, string_value) => {
@@ -1428,6 +1491,13 @@ impl Index {
                     }
                 }
 
+                // Delete from number fields directly (they manage their own deletion via dual I64/F64 storages)
+                for doc_id in &doc_ids {
+                    for (_, number_field) in &self.number_fields {
+                        number_field.delete(*doc_id);
+                    }
+                }
+
                 self.uncommitted_deleted_documents.extend(doc_ids);
                 self.document_count = self.document_count.saturating_sub(len);
             }
@@ -1523,13 +1593,21 @@ impl Index {
             });
         }
 
+        // Number fields (managed by NumberFieldStorage, not split across uncommitted/committed)
+        for (field_id, number_field) in &self.number_fields {
+            let stats = number_field.stats();
+            fields_stats.push(IndexFieldStats {
+                field_id: *field_id,
+                field_path: number_field.field_path().join("."),
+                stats: IndexFieldStatsType::NumberFieldStorage(stats),
+            });
+        }
+
         // Uncommitted
-        fields_stats.extend(extrapolate_stats(&uncommitted_fields.number_fields));
         fields_stats.extend(extrapolate_stats(&uncommitted_fields.string_fields));
         fields_stats.extend(extrapolate_stats(&uncommitted_fields.vector_fields));
 
         // Committed
-        fields_stats.extend(extrapolate_stats(&committed_fields.number_fields));
         fields_stats.extend(extrapolate_stats(&committed_fields.string_fields));
         fields_stats.extend(extrapolate_stats(&committed_fields.vector_fields));
 

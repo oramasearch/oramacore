@@ -4,9 +4,9 @@ use anyhow::{bail, Context, Result};
 use oramacore_lib::filters::{FilterResult, PlainFilterResult};
 use tracing::trace;
 
-use crate::types::{DateFilter, DocumentId, FieldId, Filter, GeoSearchFilter, NumberFilter, WhereFilter};
+use crate::types::{DateFilter, DocumentId, FieldId, Filter, GeoSearchFilter, WhereFilter};
 
-use super::{bool_field::BoolFieldStorage, date_field::DateFieldStorage, geopoint_field::GeoPointFieldStorage, string_filter_field::StringFilterFieldStorage, path_to_index_id_map::PathToIndexId, CommittedFields, FieldType, UncommittedFields};
+use super::{bool_field::BoolFieldStorage, date_field::DateFieldStorage, geopoint_field::GeoPointFieldStorage, number_field::NumberFieldStorage, string_filter_field::StringFilterFieldStorage, path_to_index_id_map::PathToIndexId, FieldType};
 
 /// Trait for fields that support filtering operations.
 ///
@@ -89,18 +89,6 @@ impl TryFromFilter for bool {
             Ok(b)
         } else {
             Err(anyhow::anyhow!("Failed to convert filter to bool"))
-        }
-    }
-}
-
-impl TryFromFilter for NumberFilter {
-    type Error = anyhow::Error;
-
-    fn try_from_filter(filter: &Filter) -> Result<&Self, Self::Error> {
-        if let Filter::Number(num_filter) = filter {
-            Ok(num_filter)
-        } else {
-            Err(anyhow::anyhow!("Failed to convert filter to number filter"))
         }
     }
 }
@@ -242,11 +230,10 @@ fn calculate_filter_for_fields(
     document_count_estimate: u64,
     path_to_index_id_map: &PathToIndexId,
     bool_fields: &HashMap<FieldId, BoolFieldStorage>,
+    number_fields: &HashMap<FieldId, NumberFieldStorage>,
     date_fields: &HashMap<FieldId, DateFieldStorage>,
     geopoint_fields: &HashMap<FieldId, GeoPointFieldStorage>,
     string_filter_fields: &HashMap<FieldId, StringFilterFieldStorage>,
-    uncommitted_fields: &UncommittedFields,
-    committed_fields: &CommittedFields,
     key: &str,
     filter: &Filter,
 ) -> Result<FilterResult<DocumentId>> {
@@ -276,17 +263,22 @@ fn calculate_filter_for_fields(
             )))
         }
         FieldType::Number => {
-            let uncommitted_field = uncommitted_fields
-                .number_fields
+            let number_field = number_fields
                 .get(&field_id)
-                .ok_or_else(|| anyhow::anyhow!("Field not found in index"))?;
+                .ok_or_else(|| anyhow::anyhow!("Number field not found in index"))?;
 
-            calculate_filter_on_field(
+            let Filter::Number(number_filter) = filter else {
+                // Wrong filter type for number field - return empty set
+                return Ok(FilterResult::Filter(PlainFilterResult::new(
+                    document_count_estimate,
+                )));
+            };
+
+            let docs = number_field.filter(number_filter);
+            Ok(FilterResult::Filter(PlainFilterResult::from_iter(
                 document_count_estimate,
-                uncommitted_field,
-                committed_fields.number_fields.get(&field_id),
-                filter,
-            )
+                docs,
+            )))
         }
         FieldType::Date => {
             let date_field = date_fields
@@ -378,12 +370,11 @@ fn calculate_filter(
     document_count_estimate: u64,
     path_to_index_id_map: &PathToIndexId,
     bool_fields: &HashMap<FieldId, BoolFieldStorage>,
+    number_fields: &HashMap<FieldId, NumberFieldStorage>,
     date_fields: &HashMap<FieldId, DateFieldStorage>,
     geopoint_fields: &HashMap<FieldId, GeoPointFieldStorage>,
     string_filter_fields: &HashMap<FieldId, StringFilterFieldStorage>,
     where_filter: &WhereFilter,
-    uncommitted_fields: &UncommittedFields,
-    committed_fields: &CommittedFields,
 ) -> Result<FilterResult<DocumentId>> {
     let mut results = Vec::new();
 
@@ -402,11 +393,10 @@ fn calculate_filter(
             document_count_estimate,
             path_to_index_id_map,
             bool_fields,
+            number_fields,
             date_fields,
             geopoint_fields,
             string_filter_fields,
-            uncommitted_fields,
-            committed_fields,
             k,
             filter,
         )?;
@@ -420,12 +410,11 @@ fn calculate_filter(
                 document_count_estimate,
                 path_to_index_id_map,
                 bool_fields,
+                number_fields,
                 date_fields,
                 geopoint_fields,
                 string_filter_fields,
                 f,
-                uncommitted_fields,
-                committed_fields,
             )?;
             results.push(result);
         }
@@ -438,12 +427,11 @@ fn calculate_filter(
                 document_count_estimate,
                 path_to_index_id_map,
                 bool_fields,
+                number_fields,
                 date_fields,
                 geopoint_fields,
                 string_filter_fields,
                 f,
-                uncommitted_fields,
-                committed_fields,
             )?;
             or.push(result);
         }
@@ -467,12 +455,11 @@ fn calculate_filter(
             document_count_estimate,
             path_to_index_id_map,
             bool_fields,
+            number_fields,
             date_fields,
             geopoint_fields,
             string_filter_fields,
             filter,
-            uncommitted_fields,
-            committed_fields,
         )?;
         results.push(FilterResult::Not(Box::new(result)));
     }
@@ -502,11 +489,10 @@ pub struct FilterContext<'index> {
     document_count: u64,
     path_to_index_id_map: &'index PathToIndexId,
     bool_fields: &'index HashMap<FieldId, BoolFieldStorage>,
+    number_fields: &'index HashMap<FieldId, NumberFieldStorage>,
     date_fields: &'index HashMap<FieldId, DateFieldStorage>,
     geopoint_fields: &'index HashMap<FieldId, GeoPointFieldStorage>,
     string_filter_fields: &'index HashMap<FieldId, StringFilterFieldStorage>,
-    uncommitted_fields: &'index UncommittedFields,
-    committed_fields: &'index CommittedFields,
     uncommitted_deleted_documents: &'index HashSet<DocumentId>,
 }
 
@@ -520,22 +506,20 @@ impl<'index> FilterContext<'index> {
         document_count: u64,
         path_to_index_id_map: &'index PathToIndexId,
         bool_fields: &'index HashMap<FieldId, BoolFieldStorage>,
+        number_fields: &'index HashMap<FieldId, NumberFieldStorage>,
         date_fields: &'index HashMap<FieldId, DateFieldStorage>,
         geopoint_fields: &'index HashMap<FieldId, GeoPointFieldStorage>,
         string_filter_fields: &'index HashMap<FieldId, StringFilterFieldStorage>,
-        uncommitted_fields: &'index UncommittedFields,
-        committed_fields: &'index CommittedFields,
         uncommitted_deleted_documents: &'index HashSet<DocumentId>,
     ) -> Self {
         Self {
             document_count,
             path_to_index_id_map,
             bool_fields,
+            number_fields,
             date_fields,
             geopoint_fields,
             string_filter_fields,
-            uncommitted_fields,
-            committed_fields,
             uncommitted_deleted_documents,
         }
     }
@@ -576,12 +560,11 @@ impl<'index> FilterContext<'index> {
             expected_items,
             self.path_to_index_id_map,
             self.bool_fields,
+            self.number_fields,
             self.date_fields,
             self.geopoint_fields,
             self.string_filter_fields,
             where_filter,
-            self.uncommitted_fields,
-            self.committed_fields,
         )?;
 
         // Integrate deleted documents using AND + NOT logic

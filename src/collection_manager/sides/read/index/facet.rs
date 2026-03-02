@@ -3,18 +3,15 @@ use std::collections::HashMap;
 use anyhow::{bail, Result};
 use tracing::{info, warn};
 
-use crate::{
-    collection_manager::sides::read::index::committed_field::CommittedNumberField,
-    collection_manager::sides::read::index::uncommitted_field::UncommittedNumberField,
-    types::{
-        BoolFacetDefinition, DocumentId, FacetDefinition, FacetResult, FieldId,
-        NumberFacetDefinition, NumberFilter,
-    },
+use crate::types::{
+    BoolFacetDefinition, DocumentId, FacetDefinition, FacetResult, FieldId,
+    NumberFacetDefinition,
 };
 
 use super::{
-    bool_field::BoolFieldStorage, path_to_index_id_map::PathToIndexId,
-    string_filter_field::StringFilterFieldStorage, CommittedFields, FieldType, UncommittedFields,
+    bool_field::BoolFieldStorage, number_field::NumberFieldStorage,
+    path_to_index_id_map::PathToIndexId, string_filter_field::StringFilterFieldStorage,
+    FieldType,
 };
 
 // =============================================================================
@@ -117,60 +114,6 @@ impl TryFromFacetDefinition for NumberFacetDefinition {
 
 
 // =============================================================================
-// Facetable implementations for Number fields
-// =============================================================================
-
-impl Facetable for UncommittedNumberField {
-    type FacetParam = NumberFacetDefinition;
-
-    fn calculate_facet(
-        &self,
-        facet_param: &Self::FacetParam,
-        token_scores: &HashMap<DocumentId, f32>,
-    ) -> Result<HashMap<String, usize>> {
-        let mut result = HashMap::new();
-
-        for range in &facet_param.ranges {
-            let filter = NumberFilter::Between((range.from, range.to));
-            let count = self
-                .filter(&filter)
-                .filter(|doc_id| token_scores.contains_key(doc_id))
-                .count();
-
-            let label = format!("{}-{}", range.from, range.to);
-            result.insert(label, count);
-        }
-
-        Ok(result)
-    }
-}
-
-impl Facetable for CommittedNumberField {
-    type FacetParam = NumberFacetDefinition;
-
-    fn calculate_facet(
-        &self,
-        facet_param: &Self::FacetParam,
-        token_scores: &HashMap<DocumentId, f32>,
-    ) -> Result<HashMap<String, usize>> {
-        let mut result = HashMap::new();
-
-        for range in &facet_param.ranges {
-            let filter = NumberFilter::Between((range.from, range.to));
-            let count = self
-                .filter(&filter)?
-                .filter(|doc_id| token_scores.contains_key(doc_id))
-                .count();
-
-            let label = format!("{}-{}", range.from, range.to);
-            result.insert(label, count);
-        }
-
-        Ok(result)
-    }
-}
-
-// =============================================================================
 // Helper functions
 // =============================================================================
 
@@ -253,19 +196,23 @@ fn calculate_facet_for_field(
     field_id: FieldId,
     field_type: FieldType,
     bool_fields: &HashMap<FieldId, BoolFieldStorage>,
+    number_fields: &HashMap<FieldId, NumberFieldStorage>,
     string_filter_fields: &HashMap<FieldId, StringFilterFieldStorage>,
-    uncommitted_fields: &UncommittedFields,
-    committed_fields: &CommittedFields,
     facet_definition: &FacetDefinition,
     token_scores: &HashMap<DocumentId, f32>,
 ) -> Result<HashMap<String, usize>> {
     match field_type {
-        FieldType::Number => calculate_facet_on_field(
-            uncommitted_fields.number_fields.get(&field_id),
-            committed_fields.number_fields.get(&field_id),
-            facet_definition,
-            token_scores,
-        ),
+        FieldType::Number => {
+            let number_field = number_fields
+                .get(&field_id)
+                .ok_or_else(|| anyhow::anyhow!("Cannot find number field {field_id:?}"))?;
+
+            let FacetDefinition::Number(facet_param) = facet_definition else {
+                bail!("Expected Number facet definition for Number field");
+            };
+
+            number_field.calculate_facet(facet_param, token_scores)
+        }
         FieldType::Bool => {
             let bool_field = bool_fields
                 .get(&field_id)
@@ -318,9 +265,8 @@ pub struct FacetParams<'search> {
 pub struct FacetContext<'index> {
     path_to_index_id_map: &'index PathToIndexId,
     bool_fields: &'index HashMap<FieldId, BoolFieldStorage>,
+    number_fields: &'index HashMap<FieldId, NumberFieldStorage>,
     string_filter_fields: &'index HashMap<FieldId, StringFilterFieldStorage>,
-    uncommitted_fields: &'index UncommittedFields,
-    committed_fields: &'index CommittedFields,
 }
 
 impl<'index> FacetContext<'index> {
@@ -332,16 +278,14 @@ impl<'index> FacetContext<'index> {
     pub fn new(
         path_to_index_id_map: &'index PathToIndexId,
         bool_fields: &'index HashMap<FieldId, BoolFieldStorage>,
+        number_fields: &'index HashMap<FieldId, NumberFieldStorage>,
         string_filter_fields: &'index HashMap<FieldId, StringFilterFieldStorage>,
-        uncommitted_fields: &'index UncommittedFields,
-        committed_fields: &'index CommittedFields,
     ) -> Self {
         Self {
             path_to_index_id_map,
             bool_fields,
+            number_fields,
             string_filter_fields,
-            uncommitted_fields,
-            committed_fields,
         }
     }
 
@@ -397,9 +341,8 @@ impl<'index> FacetContext<'index> {
                 field_id,
                 field_type,
                 self.bool_fields,
+                self.number_fields,
                 self.string_filter_fields,
-                self.uncommitted_fields,
-                self.committed_fields,
                 facet_definition,
                 params.token_scores,
             )?;

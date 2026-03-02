@@ -3,15 +3,12 @@ use std::collections::{HashMap, HashSet};
 use anyhow::{bail, Result};
 use std::hash::Hash;
 
-use crate::{
-    collection_manager::sides::read::index::committed_field::CommittedNumberField,
-    collection_manager::sides::read::index::uncommitted_field::UncommittedNumberField,
-    types::{DocumentId, FieldId, Number, NumberFilter},
-};
+use crate::types::{DocumentId, FieldId, Number};
 
 use super::{
-    bool_field::BoolFieldStorage, path_to_index_id_map::PathToIndexId,
-    string_filter_field::StringFilterFieldStorage, CommittedFields, FieldType, UncommittedFields,
+    bool_field::BoolFieldStorage, number_field::NumberFieldStorage,
+    path_to_index_id_map::PathToIndexId, string_filter_field::StringFilterFieldStorage,
+    FieldType,
 };
 
 // =============================================================================
@@ -126,31 +123,6 @@ trait Groupable {
 // Groupable implementations
 // =============================================================================
 
-impl Groupable for UncommittedNumberField {
-    type GroupParam = Number;
-
-    fn get_values(&self) -> Box<dyn Iterator<Item = Number> + '_> {
-        Box::new(self.iter().map(|(n, _)| n))
-    }
-
-    fn get_doc_ids(&self, variant: &Number) -> Result<Box<dyn Iterator<Item = DocumentId> + '_>> {
-        Ok(Box::new(self.filter(&NumberFilter::Equal(*variant))))
-    }
-}
-
-impl Groupable for CommittedNumberField {
-    type GroupParam = Number;
-
-    fn get_values(&self) -> Box<dyn Iterator<Item = Number> + '_> {
-        Box::new(self.iter().map(|(n, _)| n.0))
-    }
-
-    fn get_doc_ids(&self, variant: &Number) -> Result<Box<dyn Iterator<Item = DocumentId> + '_>> {
-        Ok(Box::new(self.filter(&NumberFilter::Equal(*variant))?))
-    }
-}
-
-
 // =============================================================================
 // GroupParams and GroupContext
 // =============================================================================
@@ -173,9 +145,8 @@ pub struct GroupParams<'search> {
 pub struct GroupContext<'index> {
     path_to_index_id_map: &'index PathToIndexId,
     bool_fields: &'index HashMap<FieldId, BoolFieldStorage>,
+    number_fields: &'index HashMap<FieldId, NumberFieldStorage>,
     string_filter_fields: &'index HashMap<FieldId, StringFilterFieldStorage>,
-    uncommitted_fields: &'index UncommittedFields,
-    committed_fields: &'index CommittedFields,
 }
 
 impl<'index> GroupContext<'index> {
@@ -187,16 +158,14 @@ impl<'index> GroupContext<'index> {
     pub fn new(
         path_to_index_id_map: &'index PathToIndexId,
         bool_fields: &'index HashMap<FieldId, BoolFieldStorage>,
+        number_fields: &'index HashMap<FieldId, NumberFieldStorage>,
         string_filter_fields: &'index HashMap<FieldId, StringFilterFieldStorage>,
-        uncommitted_fields: &'index UncommittedFields,
-        committed_fields: &'index CommittedFields,
     ) -> Self {
         Self {
             path_to_index_id_map,
             bool_fields,
+            number_fields,
             string_filter_fields,
-            uncommitted_fields,
-            committed_fields,
         }
     }
 
@@ -234,9 +203,8 @@ impl<'index> GroupContext<'index> {
                 *field_id,
                 *field_type,
                 self.bool_fields,
+                self.number_fields,
                 self.string_filter_fields,
-                self.uncommitted_fields,
-                self.committed_fields,
             )?;
             all_variants.insert(*field_id, field_variants);
         }
@@ -367,9 +335,8 @@ fn calculate_group_for_field(
     field_id: FieldId,
     field_type: FieldType,
     bool_fields: &HashMap<FieldId, BoolFieldStorage>,
+    number_fields: &HashMap<FieldId, NumberFieldStorage>,
     string_filter_fields: &HashMap<FieldId, StringFilterFieldStorage>,
-    uncommitted_fields: &UncommittedFields,
-    committed_fields: &CommittedFields,
 ) -> Result<HashMap<GroupValue, HashSet<DocumentId>>> {
     match field_type {
         FieldType::Bool => {
@@ -386,12 +353,11 @@ fn calculate_group_for_field(
             Ok(result)
         }
         FieldType::Number => {
-            let uncommitted = uncommitted_fields
-                .number_fields
+            let number_field = number_fields
                 .get(&field_id)
                 .ok_or_else(|| anyhow::anyhow!("Cannot find number field {field_id:?}"))?;
-            let committed = committed_fields.number_fields.get(&field_id);
-            calculate_group_on_field(uncommitted, committed)
+
+            Ok(number_field.get_grouped_docs())
         }
         FieldType::StringFilter => {
             let string_filter_field = string_filter_fields
