@@ -15,7 +15,7 @@ use crate::{
             index::{
                 committed_field::{
                     CommittedStringField,
-                    CommittedVectorField, DateFieldInfo, GeoPointFieldInfo, StringFieldInfo,
+                    DateFieldInfo, GeoPointFieldInfo, StringFieldInfo,
                 },
                 merge::{
                     merge_field, CommittedField, CommittedFieldMetadata, Field, UncommittedField,
@@ -41,6 +41,7 @@ use oramacore_lib::nlp::{locales::Locale, TextParser};
 
 use self::bool_field::BoolFieldStorage;
 use self::date_field::DateFieldStorage;
+use self::embedding_field::EmbeddingFieldStorage;
 use self::geopoint_field::GeoPointFieldStorage;
 use self::number_field::NumberFieldStorage;
 use self::string_filter_field::StringFilterFieldStorage;
@@ -49,6 +50,7 @@ use super::OffloadFieldConfig;
 pub mod bool_field;
 mod committed_field;
 pub mod date_field;
+pub mod embedding_field;
 pub mod facet;
 pub mod filter;
 pub mod geopoint_field;
@@ -68,9 +70,7 @@ use crate::{
     types::FieldId,
 };
 use anyhow::{Context, Result};
-pub use committed_field::{
-    CommittedStringFieldStats, CommittedVectorFieldStats,
-};
+pub use committed_field::CommittedStringFieldStats;
 pub use group::GroupValue;
 pub use sort::{DocBatch, DocBatchIntoIter, DocBatchIter, IndexSortContext, SortedDocIdsIter};
 use std::{
@@ -81,9 +81,7 @@ use std::{
         Arc,
     },
 };
-pub use uncommitted_field::{
-    UncommittedStringFieldStats, UncommittedVectorFieldStats,
-};
+pub use uncommitted_field::UncommittedStringFieldStats;
 
 #[derive(Debug, Clone, Copy)]
 pub enum DeletionReason {
@@ -96,13 +94,11 @@ pub enum DeletionReason {
 #[derive(Default)]
 pub struct UncommittedFields {
     pub string_fields: HashMap<FieldId, UncommittedStringField>,
-    pub vector_fields: HashMap<FieldId, UncommittedVectorField>,
 }
 
 #[derive(Default)]
 pub struct CommittedFields {
     pub string_fields: HashMap<FieldId, CommittedStringField>,
-    pub vector_fields: HashMap<FieldId, CommittedVectorField>,
 }
 
 pub struct IndexSearchStore<'index> {
@@ -114,6 +110,7 @@ pub struct IndexSearchStore<'index> {
     pub date_fields: &'index HashMap<FieldId, DateFieldStorage>,
     pub geopoint_fields: &'index HashMap<FieldId, GeoPointFieldStorage>,
     pub string_filter_fields: &'index HashMap<FieldId, StringFilterFieldStorage>,
+    pub embedding_fields: &'index HashMap<FieldId, EmbeddingFieldStorage>,
     pub path_to_field_id_map: &'index PathToIndexId,
     pub uncommitted_deleted_documents: &'index HashSet<DocumentId>,
     pub text_parser: &'index TextParser,
@@ -166,6 +163,10 @@ pub struct Index {
     // instead of being split across uncommitted/committed field maps.
     string_filter_fields: HashMap<FieldId, StringFilterFieldStorage>,
 
+    // Embedding fields are managed directly by EmbeddingFieldStorage (backed by oramacore_fields)
+    // instead of being split across uncommitted/committed field maps.
+    embedding_fields: HashMap<FieldId, EmbeddingFieldStorage>,
+
     uncommitted_fields: OramaAsyncLock<UncommittedFields>,
     committed_fields: OramaAsyncLock<CommittedFields>,
 
@@ -214,6 +215,7 @@ impl Index {
             date_fields: HashMap::new(),
             geopoint_fields: HashMap::new(),
             string_filter_fields: HashMap::new(),
+            embedding_fields: HashMap::new(),
 
             committed_fields: OramaAsyncLock::new("committed_fields", Default::default()),
             uncommitted_fields: OramaAsyncLock::new("uncommitted_fields", Default::default()),
@@ -256,7 +258,7 @@ impl Index {
 
         let mut uncommitted_fields = UncommittedFields::default();
         let mut committed_fields = CommittedFields::default();
-        let mut bool_fields = HashMap::new();
+        let mut bool_fields = HashMap::with_capacity(dump.bool_field_ids.len());
         debug!("Loading bool fields");
         for (field_id, info) in dump.bool_field_ids {
             filter_fields.insert(info.field_path.clone(), (field_id, FieldType::Bool));
@@ -270,7 +272,7 @@ impl Index {
         debug!("Bool fields loaded");
 
         debug!("Loading number_field_ids");
-        let mut number_fields = HashMap::new();
+        let mut number_fields = HashMap::with_capacity(dump.number_field_ids.len());
         for (field_id, info) in dump.number_field_ids {
             filter_fields.insert(info.field_path.clone(), (field_id, FieldType::Number));
 
@@ -283,7 +285,7 @@ impl Index {
         debug!("Number fields loaded");
 
         debug!("Loading date_field_ids");
-        let mut date_fields = HashMap::new();
+        let mut date_fields = HashMap::with_capacity(dump.date_field_ids.len());
         for (field_id, info) in dump.date_field_ids {
             filter_fields.insert(info.field_path.clone(), (field_id, FieldType::Date));
 
@@ -295,7 +297,7 @@ impl Index {
         }
 
         debug!("Loading geopoint_field_ids");
-        let mut geopoint_fields = HashMap::new();
+        let mut geopoint_fields = HashMap::with_capacity(dump.geopoint_field_ids.len());
         for (field_id, info) in dump.geopoint_field_ids {
             filter_fields.insert(info.field_path.clone(), (field_id, FieldType::GeoPoint));
 
@@ -307,7 +309,7 @@ impl Index {
         }
 
         debug!("Loading string_filter_field_ids");
-        let mut string_filter_fields = HashMap::new();
+        let mut string_filter_fields = HashMap::with_capacity(dump.string_filter_field_ids.len());
         for (field_id, info) in dump.string_filter_field_ids {
             filter_fields.insert(info.field_path.clone(), (field_id, FieldType::StringFilter));
 
@@ -330,16 +332,15 @@ impl Index {
         }
 
         debug!("Loading vector_field_ids");
+        let mut embedding_fields = HashMap::with_capacity(dump.vector_field_ids.len());
         for (field_id, info) in dump.vector_field_ids {
             score_fields.insert(info.field_path.clone(), (field_id, FieldType::Vector));
 
-            uncommitted_fields.vector_fields.insert(
-                field_id,
-                UncommittedVectorField::empty(info.field_path.clone(), info.model),
-            );
-            let field = CommittedVectorField::try_load(info, offload_config)
-                .context("Cannot load vector field")?;
-            committed_fields.vector_fields.insert(field_id, field);
+            debug!("EmbeddingFieldStorage::try_load for field_id {:?}", field_id);
+            let field = EmbeddingFieldStorage::try_load(info)
+                .context("Cannot load embedding field")?;
+            debug!("DONE");
+            embedding_fields.insert(field_id, field);
         }
         debug!("Vector fields loaded");
 
@@ -386,6 +387,7 @@ impl Index {
             date_fields,
             geopoint_fields,
             string_filter_fields,
+            embedding_fields,
 
             committed_fields: OramaAsyncLock::new("committed_fields", committed_fields),
             uncommitted_fields: OramaAsyncLock::new("uncommitted_fields", uncommitted_fields),
@@ -422,6 +424,7 @@ impl Index {
             date_fields: &self.date_fields,
             geopoint_fields: &self.geopoint_fields,
             string_filter_fields: &self.string_filter_fields,
+            embedding_fields: &self.embedding_fields,
             path_to_field_id_map: &self.path_to_index_id_map,
             uncommitted_deleted_documents: &self.uncommitted_deleted_documents,
             text_parser: &self.text_parser,
@@ -440,6 +443,7 @@ impl Index {
             self.document_count,
             &uncommitted_fields,
             &committed_fields,
+            &self.embedding_fields,
             &self.text_parser,
             &self.context,
             &self.path_to_index_id_map,
@@ -515,12 +519,12 @@ impl Index {
                 .number_fields
                 .values()
                 .any(|field| field.has_pending_ops())
+            || self
+                .embedding_fields
+                .values()
+                .any(|field| field.has_pending_ops())
             || uncommitted_fields
                 .string_fields
-                .iter()
-                .any(|(_, field)| !field.is_empty())
-            || uncommitted_fields
-                .vector_fields
                 .iter()
                 .any(|(_, field)| !field.is_empty())
             || !self.uncommitted_deleted_documents.is_empty();
@@ -586,6 +590,14 @@ impl Index {
             }
         }
 
+        // Compact embedding fields directly (they manage their own persistence via EmbeddingStorage)
+        for (_, embedding_field) in &self.embedding_fields {
+            if embedding_field.has_pending_ops() {
+                embedding_field.compact(offset.0 as u64)
+                    .context("Cannot compact embedding field")?;
+            }
+        }
+
         let merged_strings = merge_type(
             &data_dir_with_offset,
             &uncommitted_fields.string_fields,
@@ -601,22 +613,6 @@ impl Index {
             },
         )
         .context("Cannot merge string fields")?;
-
-        let merged_vectors = merge_type(
-            &data_dir_with_offset,
-            &uncommitted_fields.vector_fields,
-            &committed_fields.vector_fields,
-            &self.uncommitted_deleted_documents,
-            is_promoted,
-            &self.offload_config,
-            FieldIndexCollectionCommitLabels {
-                collection: collection_id.as_str().to_string(),
-                index: self.id.as_str().to_string(),
-                side: "read",
-                field_type: "vector",
-            },
-        )
-        .context("Cannot merge vector fields")?;
 
         // Once all changed in merged_* maps are collected,
         // we can proceed to replace the committed fields with the merged ones
@@ -640,13 +636,6 @@ impl Index {
             merged_strings,
             &mut committed_fields.string_fields,
             &mut uncommitted_fields.string_fields,
-        );
-        overwrite_committed(
-            self.id,
-            offset,
-            merged_vectors,
-            &mut committed_fields.vector_fields,
-            &mut uncommitted_fields.vector_fields,
         );
 
         // Merge and commit OMC values
@@ -713,8 +702,8 @@ impl Index {
                 .iter()
                 .map(|(k, v)| (*k, v.metadata()))
                 .collect(),
-            vector_field_ids: committed_fields
-                .vector_fields
+            vector_field_ids: self
+                .embedding_fields
                 .iter()
                 .map(|(k, v)| (*k, v.metadata()))
                 .collect(),
@@ -795,8 +784,13 @@ impl Index {
                 .values()
                 .map(|f| f.base_path().to_path_buf()),
         );
+        // Embedding fields are managed separately by EmbeddingFieldStorage
+        field_data_dirs.extend(
+            self.embedding_fields
+                .values()
+                .map(|f| f.base_path().to_path_buf()),
+        );
         add(&mut field_data_dirs, &committed_fields.string_fields);
-        add(&mut field_data_dirs, &committed_fields.vector_fields);
 
         trace!("Field data dirs to keep: {:?}", field_data_dirs);
 
@@ -870,6 +864,11 @@ impl Index {
             number_field.cleanup();
         }
 
+        // Clean up old embedding field versions (they manage their own persistence via EmbeddingStorage)
+        for embedding_field in self.embedding_fields.values() {
+            embedding_field.cleanup();
+        }
+
         Ok(())
     }
 
@@ -878,9 +877,7 @@ impl Index {
         for string_field in lock.string_fields.values() {
             string_field.unload_if_not_used();
         }
-        for vector_field in lock.vector_fields.values() {
-            vector_field.unload_if_not_used();
-        }
+        // EmbeddingStorage uses mmap-based segments, no manual unloading needed.
         drop(lock);
     }
 
@@ -1085,6 +1082,40 @@ impl Index {
             *old_storage = new_storage;
         }
 
+        // Relocate embedding fields from temp_indexes/ path to the permanent indexes/ path.
+        for (field_id, old_storage) in self.embedding_fields.iter_mut() {
+            if old_storage.has_pending_ops() {
+                let version = old_storage.current_version_number() + 1;
+                old_storage
+                    .compact(version)
+                    .context("Cannot compact embedding field before promotion")?;
+                old_storage.cleanup();
+            }
+
+            let old_path = old_storage.base_path().to_path_buf();
+            let new_path = new_data_dir.join("embedding").join(field_id.0.to_string());
+
+            if old_path == new_path {
+                continue;
+            }
+
+            if old_path.exists() {
+                let options = fs_extra::dir::CopyOptions::new().overwrite(true);
+                if let Some(parent) = new_path.parent() {
+                    oramacore_lib::fs::create_if_not_exists(parent.to_path_buf())
+                        .context("Cannot create embedding field parent directory")?;
+                }
+                fs_extra::copy_items(&[&old_path], new_path.parent().expect("embedding path must have parent"), &options)
+                    .context("Cannot copy embedding field directory during promotion")?;
+            }
+
+            let field_path = old_storage.field_path().into();
+            let model = old_storage.model();
+            let new_storage = EmbeddingFieldStorage::new(field_path, new_path, model)
+                .context("Cannot create EmbeddingFieldStorage at new path after promotion")?;
+            *old_storage = new_storage;
+        }
+
         // Clean up old bool directory if it exists and is different
         let old_bool_dir = old_data_dir.join("bool");
         if old_bool_dir.exists() {
@@ -1122,6 +1153,14 @@ impl Index {
         if old_number_dir.exists() {
             if let Err(e) = std::fs::remove_dir_all(&old_number_dir) {
                 warn!("Failed to remove old number directory {:?}: {}", old_number_dir, e);
+            }
+        }
+
+        // Clean up old embedding directory if it exists and is different
+        let old_embedding_dir = old_data_dir.join("embedding");
+        if old_embedding_dir.exists() {
+            if let Err(e) = std::fs::remove_dir_all(&old_embedding_dir) {
+                warn!("Failed to remove old embedding directory {:?}: {}", old_embedding_dir, e);
             }
         }
 
@@ -1229,9 +1268,10 @@ impl Index {
                             field_id,
                             FieldType::Vector,
                         );
-                        uncommitted_fields
-                            .vector_fields
-                            .insert(field_id, UncommittedVectorField::empty(field_path, model));
+                        let embedding_path = self.data_dir.join("embedding").join(field_id.0.to_string());
+                        let storage = EmbeddingFieldStorage::new(field_path, embedding_path, model)
+                            .context("Failed to create EmbeddingFieldStorage")?;
+                        self.embedding_fields.insert(field_id, storage);
                     }
                 };
             }
@@ -1442,14 +1482,12 @@ impl Index {
             }
             IndexWriteOperation::IndexEmbedding { data } => {
                 for (field_id, data) in data {
-                    if let Some(field) = uncommitted_fields.vector_fields.get_mut(&field_id) {
+                    if let Some(field) = self.embedding_fields.get(&field_id) {
                         for (doc_id, vectors) in data {
-                            if let Err(e) = field.insert(doc_id, vectors) {
-                                error!(error = ?e, "Cannot insert vector. Skip it.");
-                            }
+                            field.insert(doc_id, vectors);
                         }
                     } else {
-                        error!("Cannot find field {:?} in uncommitted fields", field_id);
+                        error!("Cannot find embedding field {:?}", field_id);
                     }
                 }
             }
@@ -1498,6 +1536,13 @@ impl Index {
                     }
                 }
 
+                // Delete from embedding fields directly (they manage their own deletion via EmbeddingStorage)
+                for doc_id in &doc_ids {
+                    for (_, embedding_field) in &self.embedding_fields {
+                        embedding_field.delete(*doc_id);
+                    }
+                }
+
                 self.uncommitted_deleted_documents.extend(doc_ids);
                 self.document_count = self.document_count.saturating_sub(len);
             }
@@ -1532,13 +1577,11 @@ impl Index {
 
     // Since we only have one embedding model for all indexes in a collection,
     // we can get the first index model and return it early.
-    pub async fn get_model(&self) -> Option<Model> {
-        let uncommitted_fields = self.uncommitted_fields.read("get_model").await;
-        uncommitted_fields
-            .vector_fields
+    pub fn get_model(&self) -> Option<Model> {
+        self.embedding_fields
             .values()
             .next()
-            .map(|f| f.get_model())
+            .map(|f| f.model())
     }
 
     pub async fn stats(&self, is_temp: bool) -> Result<IndexStats> {
@@ -1605,11 +1648,19 @@ impl Index {
 
         // Uncommitted
         fields_stats.extend(extrapolate_stats(&uncommitted_fields.string_fields));
-        fields_stats.extend(extrapolate_stats(&uncommitted_fields.vector_fields));
 
         // Committed
         fields_stats.extend(extrapolate_stats(&committed_fields.string_fields));
-        fields_stats.extend(extrapolate_stats(&committed_fields.vector_fields));
+
+        // Embedding fields (managed by EmbeddingFieldStorage, not split across uncommitted/committed)
+        for (field_id, embedding_field) in &self.embedding_fields {
+            let stats = embedding_field.stats();
+            fields_stats.push(IndexFieldStats {
+                field_id: *field_id,
+                field_path: embedding_field.field_path().join("."),
+                stats: IndexFieldStatsType::EmbeddingFieldStorage(stats),
+            });
+        }
 
         fields_stats.sort_by_key(|e| e.field_id.0);
 

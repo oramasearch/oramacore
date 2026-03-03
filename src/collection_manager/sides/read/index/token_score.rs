@@ -18,8 +18,8 @@ use crate::{
 };
 
 use super::{
-    merge::Field, path_to_index_id_map::PathToIndexId, CommittedFields, FieldType, ReadSideContext,
-    TextParser, UncommittedFields,
+    embedding_field::EmbeddingFieldStorage, merge::Field, path_to_index_id_map::PathToIndexId,
+    CommittedFields, FieldType, ReadSideContext, TextParser, UncommittedFields,
 };
 
 /// Parameters required for token score calculation.
@@ -49,6 +49,7 @@ pub struct TokenScoreContext<'index> {
     document_count: u64,
     uncommitted_fields: &'index UncommittedFields,
     committed_fields: &'index CommittedFields,
+    embedding_fields: &'index HashMap<FieldId, EmbeddingFieldStorage>,
     text_parser: &'index TextParser,
     context: &'index ReadSideContext,
     path_to_field_id_map: &'index PathToIndexId,
@@ -66,6 +67,7 @@ impl<'index> TokenScoreContext<'index> {
         document_count: u64,
         uncommitted_fields: &'index UncommittedFields,
         committed_fields: &'index CommittedFields,
+        embedding_fields: &'index HashMap<FieldId, EmbeddingFieldStorage>,
         text_parser: &'index TextParser,
         context: &'index ReadSideContext,
         path_to_field_id_map: &'index PathToIndexId,
@@ -75,6 +77,7 @@ impl<'index> TokenScoreContext<'index> {
             document_count,
             uncommitted_fields,
             committed_fields,
+            embedding_fields,
             text_parser,
             context,
             path_to_field_id_map,
@@ -144,18 +147,9 @@ impl<'index> TokenScoreContext<'index> {
             .collect()
     }
 
-    /// Calculates vector field properties by collecting all vector fields from
-    /// uncommitted and committed field collections.
+    /// Calculates vector field properties by collecting all embedding field IDs.
     fn calculate_vector_properties(&self) -> Result<Vec<FieldId>> {
-        let properties: HashSet<_> = self
-            .uncommitted_fields
-            .vector_fields
-            .keys()
-            .chain(self.committed_fields.vector_fields.keys())
-            .copied()
-            .collect();
-
-        Ok(properties.into_iter().collect())
+        Ok(self.embedding_fields.keys().copied().collect())
     }
 
     /// Calculates string field properties based on the Properties specification.
@@ -355,8 +349,7 @@ impl<'index> TokenScoreContext<'index> {
     /// Performs vector similarity search using embeddings.
     ///
     /// This method calculates embeddings for the search term and performs similarity
-    /// search across all specified vector fields. It handles both uncommitted and
-    /// committed field data.
+    /// search across all embedding fields via EmbeddingFieldStorage.
     fn search_vector(
         &self,
         term: &str,
@@ -368,16 +361,15 @@ impl<'index> TokenScoreContext<'index> {
         let mut output: HashMap<DocumentId, f32> = HashMap::new();
 
         for field_id in properties {
-            let Some(uncommitted) = self.uncommitted_fields.vector_fields.get(&field_id) else {
-                bail!("Cannot search on field {field_id:?}: unknown field");
+            let Some(embedding_field) = self.embedding_fields.get(&field_id) else {
+                bail!("Cannot search on field {field_id:?}: unknown embedding field");
             };
-            let committed = self.committed_fields.vector_fields.get(&field_id);
 
-            let model = uncommitted.get_model();
+            let model = embedding_field.model();
 
             // We don't cache the embedding.
-            // We can do that because, for now, an index and an collection has only one embedding field.
-            // Anyway, if the user seach in different index, we are re-calculating the embedding.
+            // We can do that because, for now, an index and a collection has only one embedding field.
+            // Anyway, if the user searches in different indexes, we are re-calculating the embedding.
             // We should put a sort of cache here.
             // TODO: think about this.
             let targets = self
@@ -395,10 +387,7 @@ impl<'index> TokenScoreContext<'index> {
                     filtered_doc_ids,
                 };
 
-                uncommitted.search(&params, &mut output)?;
-                if let Some(committed) = committed {
-                    committed.search(&params, &mut output)?;
-                }
+                embedding_field.search(&params, &mut output)?;
             }
         }
 

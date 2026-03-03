@@ -41,8 +41,6 @@ use std::{
 };
 use tracing::error;
 
-use crate::types::FieldId;
-
 /// BM25F field parameters for scoring
 ///
 /// Contains field-specific parameters that allow BM25F to weight
@@ -167,7 +165,6 @@ impl<K: Eq + Hash + Debug + Clone> BM25Scorer<K> {
     pub fn add_field(
         &mut self,
         key: K,
-        _field_id: FieldId,
         term_occurrence_in_field: u32,
         field_length: u32,
         average_field_length: f32,
@@ -182,10 +179,10 @@ impl<K: Eq + Hash + Debug + Clone> BM25Scorer<K> {
 
         match self {
             Self::Plain(scorer) => {
-                scorer.add_field(key, _field_id, normalized_tf, field_params.weight)
+                scorer.add_field(key, normalized_tf, field_params.weight)
             }
             Self::WithThreshold(scorer) => {
-                scorer.add_field(key, _field_id, normalized_tf, field_params.weight)
+                scorer.add_field(key, normalized_tf, field_params.weight)
             }
         }
     }
@@ -240,7 +237,6 @@ impl<K: Eq + Hash + Debug + Clone> BM25Scorer<K> {
     pub fn add(
         &mut self,
         key: K,
-        _field_id: FieldId,
         term_occurrence_in_field: u32,
         field_length: u32,
         average_field_length: f32,
@@ -346,7 +342,7 @@ impl<K: Eq + Hash + Debug + Clone> BM25FScorerWithThreshold<K> {
     }
 
     /// Add a field contribution for the current term
-    pub fn add_field(&mut self, key: K, _field_id: FieldId, normalized_tf: f32, weight: f32) {
+    pub fn add_field(&mut self, key: K, normalized_tf: f32, weight: f32) {
         let contribution = BM25FFieldContribution {
             normalized_tf,
             weight,
@@ -461,7 +457,7 @@ impl<K: Eq + Hash + Debug + Clone> BM25FScorerPlain<K> {
     }
 
     /// Add a field contribution for the current term
-    pub fn add_field(&mut self, key: K, _field_id: FieldId, normalized_tf: f32, weight: f32) {
+    pub fn add_field(&mut self, key: K, normalized_tf: f32, weight: f32) {
         let contribution = BM25FFieldContribution {
             normalized_tf,
             weight,
@@ -533,7 +529,6 @@ mod tests {
 
         scorer.add(
             "doc1",
-            FieldId(0),
             5,     // term_occurrence_in_field
             100,   // field_length
             100.0, // average_field_length
@@ -569,7 +564,6 @@ mod tests {
 
         scorer.add(
             "doc1",
-            FieldId(0),
             5,
             100,
             100.0,
@@ -582,7 +576,6 @@ mod tests {
         );
         scorer.add(
             "doc2",
-            FieldId(0),
             5,
             100,
             100.0,
@@ -595,7 +588,6 @@ mod tests {
         );
         scorer.add(
             "doc3",
-            FieldId(0),
             5,
             100,
             100.0,
@@ -629,7 +621,6 @@ mod tests {
 
         scorer.add(
             "doc1",
-            FieldId(1),
             5,
             100,
             100.0,
@@ -642,7 +633,6 @@ mod tests {
         );
         scorer.add(
             "doc1",
-            FieldId(2),
             5,
             100,
             100.0,
@@ -683,7 +673,6 @@ mod tests {
 
         scorer.add(
             "doc1",
-            FieldId(0),
             5,
             200,
             100.0,
@@ -696,7 +685,6 @@ mod tests {
         );
         scorer.add(
             "doc2",
-            FieldId(0),
             5,
             200,
             100.0,
@@ -728,7 +716,6 @@ mod tests {
         };
 
         // Same document, same conditions
-        let field_id = FieldId(0);
         let term_occurrence = 5_u32;
         let field_length = 100_u32;
         let average_field_length = 100.0_f32;
@@ -738,7 +725,6 @@ mod tests {
 
         scorer_no_boost.add(
             "doc1",
-            field_id,
             term_occurrence,
             field_length,
             average_field_length,
@@ -752,7 +738,6 @@ mod tests {
 
         scorer_with_boost.add(
             "doc1",
-            field_id,
             term_occurrence,
             field_length,
             average_field_length,
@@ -799,14 +784,9 @@ mod tests {
             b: 0.75,
         };
 
-        let title_field = FieldId(1);
-        let content_field = FieldId(2);
-        let tags_field = FieldId(3);
-
         // Add same term occurrence across different fields
         scorer.add(
             "doc1",
-            title_field,
             3,  // term occurs 3 times in title
             50, // title is shorter
             50.0,
@@ -820,7 +800,6 @@ mod tests {
 
         scorer.add(
             "doc1",
-            content_field,
             3,   // same term occurrence in content
             200, // content is longer
             200.0,
@@ -834,7 +813,6 @@ mod tests {
 
         scorer.add(
             "doc1",
-            tags_field,
             3,  // same term occurrence in tags
             20, // tags are shortest
             20.0,
@@ -856,7 +834,6 @@ mod tests {
         let mut title_only = BM25Scorer::plain();
         title_only.add(
             "doc1",
-            title_field,
             3,
             50,
             50.0,
@@ -872,7 +849,6 @@ mod tests {
         let mut content_only = BM25Scorer::plain();
         content_only.add(
             "doc1",
-            content_field,
             3,
             200,
             200.0,
@@ -904,7 +880,6 @@ mod tests {
 
             scorer.add(
                 "doc1",
-                FieldId(0),
                 5,
                 100,
                 100.0,
@@ -977,7 +952,6 @@ mod tests {
         // Add field contributions for the same term
         scorer.add_field(
             doc_key,
-            FieldId(1),
             title_tf,
             title_len,
             title_avglen,
@@ -985,7 +959,6 @@ mod tests {
         );
         scorer.add_field(
             doc_key,
-            FieldId(2),
             content_tf,
             content_len,
             content_avglen,
@@ -1046,8 +1019,8 @@ mod tests {
         let term_docs = 10_usize;
 
         // Add contributions using canonical BM25F
-        canonical_scorer.add_field(doc_key, FieldId(1), 3, 50, 40.0, &field1_params);
-        canonical_scorer.add_field(doc_key, FieldId(2), 2, 100, 80.0, &field2_params);
+        canonical_scorer.add_field(doc_key, 3, 50, 40.0, &field1_params);
+        canonical_scorer.add_field(doc_key, 2, 100, 80.0, &field2_params);
         canonical_scorer.finalize_term_plain(term_docs, corpus_docs, k, 1.0);
 
         let canonical_score = canonical_scorer.get_scores()[doc_key];

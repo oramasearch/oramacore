@@ -2088,15 +2088,11 @@ enum FieldStatType {
         key_count: usize,
         global_info: GlobalInfo,
     },
-    #[serde(rename = "uncommitted_vector")]
-    UncommittedVector {
-        document_count: usize,
-        vector_count: usize,
-    },
-    #[serde(rename = "committed_vector")]
-    CommittedVector {
+    #[serde(rename = "embedding")]
+    Embedding {
+        #[allow(dead_code)]
         dimensions: usize,
-        vector_count: usize,
+        embedding_count: usize,
     },
 }
 
@@ -2113,8 +2109,7 @@ impl FieldStatType {
             UncommittedString { global_info, .. } | CommittedString { global_info, .. } => {
                 global_info.total_documents
             }
-            UncommittedVector { document_count, .. } => *document_count,
-            CommittedVector { .. } => 1,
+            Embedding { embedding_count, .. } => *embedding_count,
         }
     }
 
@@ -2125,7 +2120,7 @@ impl FieldStatType {
             Number { .. } => "number",
             StringFilter { .. } => "string_filter",
             UncommittedString { .. } | CommittedString { .. } => "string",
-            UncommittedVector { .. } | CommittedVector { .. } => "vector",
+            Embedding { .. } => "vector",
         }
     }
 

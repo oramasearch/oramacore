@@ -6,9 +6,7 @@ pub use string::{
     CommittedStringField, CommittedStringFieldStats, StringFieldInfo, StringSearchParams,
 };
 pub use string_filter::StringFilterFieldInfo;
-pub use vector::{
-    CommittedVectorField, CommittedVectorFieldStats, VectorFieldInfo, VectorSearchParams,
-};
+pub use vector::{VectorFieldInfo, VectorSearchParams};
 
 mod bool;
 mod date;

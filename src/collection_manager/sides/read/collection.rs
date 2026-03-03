@@ -46,9 +46,8 @@ use crate::{
 use super::{
     index::{Index, IndexStats},
     CollectionCommitConfig,
-    CommittedVectorFieldStats, DeletionReason, OffloadFieldConfig, ReadSide,
+    DeletionReason, OffloadFieldConfig, ReadSide,
     UncommittedStringFieldStats,
-    UncommittedVectorFieldStats,
 };
 use oramacore_lib::values::ValuesReader;
 
@@ -1203,7 +1202,7 @@ impl CollectionReader {
 
             // This should only happen on the first iteration
             if embedding_model.is_none() {
-                if let Some(model) = i.get_model().await {
+                if let Some(model) = i.get_model() {
                     let serializable_model = model.to_string();
                     embedding_model = Some(serializable_model.to_string());
                 }
@@ -1290,8 +1289,7 @@ impl CollectionReader {
                         &stat.stats,
                         IndexFieldStatsType::CommittedString(_)
                             | IndexFieldStatsType::UncommittedString(_)
-                            | IndexFieldStatsType::CommittedVector(_)
-                            | IndexFieldStatsType::UncommittedVector(_)
+                            | IndexFieldStatsType::EmbeddingFieldStorage(_)
                     )
                 });
                 index_stats
@@ -1499,10 +1497,8 @@ pub enum IndexFieldStatsType {
     #[serde(rename = "committed_string")]
     CommittedString(CommittedStringFieldStats),
 
-    #[serde(rename = "uncommitted_vector")]
-    UncommittedVector(UncommittedVectorFieldStats),
-    #[serde(rename = "committed_vector")]
-    CommittedVector(CommittedVectorFieldStats),
+    #[serde(rename = "embedding")]
+    EmbeddingFieldStorage(super::index::embedding_field::EmbeddingFieldStorageStats),
 }
 
 #[derive(Serialize, Debug)]

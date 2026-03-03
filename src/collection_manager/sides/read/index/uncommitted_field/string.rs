@@ -195,8 +195,6 @@ impl UncommittedStringField {
                     // We should also here consider the phrase matching.
                     // TODO: Implement phrase matching
 
-                    let field_id = context.field_id;
-
                     let field_params = BM25FFieldParams {
                         weight: context.boost, // User-defined field boost as BM25F weight
                         b: 0.75,               // Default normalization parameter
@@ -204,7 +202,6 @@ impl UncommittedStringField {
 
                     scorer.add_field(
                         *doc_id,
-                        field_id,
                         term_occurrence_in_field,
                         field_length,
                         average_field_length,

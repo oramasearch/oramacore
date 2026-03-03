@@ -405,9 +405,10 @@ export default { beforeAnswer }
             };
 
             let vector_count = match &field_stats.stats {
-                IndexFieldStatsType::UncommittedVector(field_stats) => field_stats.document_count,
-                IndexFieldStatsType::CommittedVector(field_stats) => field_stats.vector_count,
-                _ => return Err(anyhow!("Expected vector field stats type")),
+                IndexFieldStatsType::EmbeddingFieldStorage(field_stats) => {
+                    field_stats.vector_count
+                }
+                _ => return Err(anyhow!("Expected embedding field stats type")),
             };
 
             if vector_count == 2 {

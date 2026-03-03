@@ -137,7 +137,6 @@ impl StringLayout {
 
                 scorer.add_field(
                     *doc_id,
-                    field_id,
                     term_occurrence_in_field,
                     field_length,
                     average_field_length,
@@ -302,7 +301,6 @@ impl StringLayout {
 
                 scorer.add_field(
                     doc_id,
-                    field_id,
                     term_occurrence_in_field as u32,
                     field_length,
                     average_field_length,

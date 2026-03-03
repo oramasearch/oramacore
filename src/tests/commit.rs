@@ -44,7 +44,7 @@ async fn test_commit_after_operation_limit_reached() {
                     | IndexFieldStatsType::NumberFieldStorage(_)
                     | IndexFieldStatsType::StringFilterFieldStorage(_)
                     | IndexFieldStatsType::CommittedString(_)
-                    | IndexFieldStatsType::CommittedVector(_)
+                    | IndexFieldStatsType::EmbeddingFieldStorage(_)
             )
         })
     });
@@ -80,8 +80,8 @@ async fn test_empty_index_reload() {
         .map(|index| index.fields_stats.len())
         .sum();
 
-    // Embedding fields (committed and uncommitted)
-    assert_eq!(total_fields, 2, "Expected no fields in the index");
+    // Single unified embedding field
+    assert_eq!(total_fields, 1, "Expected only the embedding field in the index");
 
     drop(test_context);
 }
@@ -241,7 +241,7 @@ async fn test_commit_after_collection_operation_limit_reached() {
                     | IndexFieldStatsType::NumberFieldStorage(_)
                     | IndexFieldStatsType::StringFilterFieldStorage(_)
                     | IndexFieldStatsType::CommittedString(_)
-                    | IndexFieldStatsType::CommittedVector(_)
+                    | IndexFieldStatsType::EmbeddingFieldStorage(_)
             )
         })
     });
