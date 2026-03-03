@@ -594,7 +594,9 @@ mod sort_iter {
                 ),
             ];
             let mut merged = MergeSortedIterator::<u8, ()>::new(SortOrder::Ascending, ());
-            merged.add(Box::new(data.iter().map(|(k, v)| (*k, DocBatch::HashSet(v)))));
+            merged.add(Box::new(
+                data.iter().map(|(k, v)| (*k, DocBatch::HashSet(v))),
+            ));
             let collected: Vec<_> = merged.collect();
             assert_eq!(collected.len(), 2);
             assert_eq!(collected[0].0, 0);
@@ -634,9 +636,15 @@ mod sort_iter {
             ];
 
             let mut merged = MergeSortedIterator::<u8, ()>::new(SortOrder::Ascending, ());
-            merged.add(Box::new(data1.iter().map(|(k, v)| (*k, DocBatch::HashSet(v)))));
-            merged.add(Box::new(data2.iter().map(|(k, v)| (*k, DocBatch::HashSet(v)))));
-            merged.add(Box::new(data3.iter().map(|(k, v)| (*k, DocBatch::HashSet(v)))));
+            merged.add(Box::new(
+                data1.iter().map(|(k, v)| (*k, DocBatch::HashSet(v))),
+            ));
+            merged.add(Box::new(
+                data2.iter().map(|(k, v)| (*k, DocBatch::HashSet(v))),
+            ));
+            merged.add(Box::new(
+                data3.iter().map(|(k, v)| (*k, DocBatch::HashSet(v))),
+            ));
 
             let collected: Vec<_> = merged.collect();
             let keys: Vec<u8> = collected.iter().map(|(k, _)| *k).collect();
@@ -674,9 +682,15 @@ mod sort_iter {
             ];
 
             let mut merged = MergeSortedIterator::<u8, ()>::new(SortOrder::Descending, ());
-            merged.add(Box::new(data1.iter().map(|(k, v)| (*k, DocBatch::HashSet(v)))));
-            merged.add(Box::new(data2.iter().map(|(k, v)| (*k, DocBatch::HashSet(v)))));
-            merged.add(Box::new(data3.iter().map(|(k, v)| (*k, DocBatch::HashSet(v)))));
+            merged.add(Box::new(
+                data1.iter().map(|(k, v)| (*k, DocBatch::HashSet(v))),
+            ));
+            merged.add(Box::new(
+                data2.iter().map(|(k, v)| (*k, DocBatch::HashSet(v))),
+            ));
+            merged.add(Box::new(
+                data3.iter().map(|(k, v)| (*k, DocBatch::HashSet(v))),
+            ));
 
             let collected: Vec<_> = merged.collect();
             let keys: Vec<u8> = collected.iter().map(|(k, _)| *k).collect();
@@ -706,8 +720,12 @@ mod sort_iter {
             ];
 
             let mut merged = MergeSortedIterator::<u8, ()>::new(SortOrder::Ascending, ());
-            merged.add(Box::new(data1.iter().map(|(k, v)| (*k, DocBatch::HashSet(v)))));
-            merged.add(Box::new(data2.iter().map(|(k, v)| (*k, DocBatch::HashSet(v)))));
+            merged.add(Box::new(
+                data1.iter().map(|(k, v)| (*k, DocBatch::HashSet(v))),
+            ));
+            merged.add(Box::new(
+                data2.iter().map(|(k, v)| (*k, DocBatch::HashSet(v))),
+            ));
 
             let collected: Vec<_> = merged.collect();
             let keys: Vec<u8> = collected.iter().map(|(k, _)| *k).collect();
@@ -735,7 +753,9 @@ mod sort_iter {
             ];
 
             let mut merged = MergeSortedIterator::<u8, ()>::new(SortOrder::Ascending, ());
-            merged.add(Box::new(data.iter().map(|(k, v)| (*k, DocBatch::HashSet(v)))));
+            merged.add(Box::new(
+                data.iter().map(|(k, v)| (*k, DocBatch::HashSet(v))),
+            ));
 
             let collected: Vec<_> = merged.collect();
             let keys: Vec<u8> = collected.iter().map(|(k, _)| *k).collect();
@@ -751,7 +771,9 @@ mod sort_iter {
         fn test_single_empty_iterator() {
             let data: Vec<(u8, HashSet<DocumentId>)> = vec![];
             let mut merged = MergeSortedIterator::<u8, ()>::new(SortOrder::Ascending, ());
-            merged.add(Box::new(data.iter().map(|(k, v)| (*k, DocBatch::HashSet(v)))));
+            merged.add(Box::new(
+                data.iter().map(|(k, v)| (*k, DocBatch::HashSet(v))),
+            ));
 
             let collected: Vec<_> = merged.collect();
             assert!(collected.is_empty());
@@ -771,10 +793,18 @@ mod sort_iter {
             ];
 
             let mut merged = MergeSortedIterator::<u8, ()>::new(SortOrder::Ascending, ());
-            merged.add(Box::new(empty1.iter().map(|(k, v)| (*k, DocBatch::HashSet(v)))));
-            merged.add(Box::new(data1.iter().map(|(k, v)| (*k, DocBatch::HashSet(v)))));
-            merged.add(Box::new(empty2.iter().map(|(k, v)| (*k, DocBatch::HashSet(v)))));
-            merged.add(Box::new(data2.iter().map(|(k, v)| (*k, DocBatch::HashSet(v)))));
+            merged.add(Box::new(
+                empty1.iter().map(|(k, v)| (*k, DocBatch::HashSet(v))),
+            ));
+            merged.add(Box::new(
+                data1.iter().map(|(k, v)| (*k, DocBatch::HashSet(v))),
+            ));
+            merged.add(Box::new(
+                empty2.iter().map(|(k, v)| (*k, DocBatch::HashSet(v))),
+            ));
+            merged.add(Box::new(
+                data2.iter().map(|(k, v)| (*k, DocBatch::HashSet(v))),
+            ));
 
             let collected: Vec<_> = merged.collect();
             let keys: Vec<u8> = collected.iter().map(|(k, _)| *k).collect();
@@ -794,9 +824,15 @@ mod sort_iter {
             let data3 = [(3_u8, HashSet::from([DocumentId(30)]))];
 
             let mut merged = MergeSortedIterator::<u8, ()>::new(SortOrder::Ascending, ());
-            merged.add(Box::new(data1.iter().map(|(k, v)| (*k, DocBatch::HashSet(v)))));
-            merged.add(Box::new(data2.iter().map(|(k, v)| (*k, DocBatch::HashSet(v)))));
-            merged.add(Box::new(data3.iter().map(|(k, v)| (*k, DocBatch::HashSet(v)))));
+            merged.add(Box::new(
+                data1.iter().map(|(k, v)| (*k, DocBatch::HashSet(v))),
+            ));
+            merged.add(Box::new(
+                data2.iter().map(|(k, v)| (*k, DocBatch::HashSet(v))),
+            ));
+            merged.add(Box::new(
+                data3.iter().map(|(k, v)| (*k, DocBatch::HashSet(v))),
+            ));
 
             let collected: Vec<_> = merged.collect();
             let keys: Vec<u8> = collected.iter().map(|(k, _)| *k).collect();
@@ -831,9 +867,15 @@ mod sort_iter {
             ];
 
             let mut merged = MergeSortedIterator::<u8, ()>::new(SortOrder::Ascending, ());
-            merged.add(Box::new(data1.iter().map(|(k, v)| (*k, DocBatch::HashSet(v)))));
-            merged.add(Box::new(data2.iter().map(|(k, v)| (*k, DocBatch::HashSet(v)))));
-            merged.add(Box::new(data3.iter().map(|(k, v)| (*k, DocBatch::HashSet(v)))));
+            merged.add(Box::new(
+                data1.iter().map(|(k, v)| (*k, DocBatch::HashSet(v))),
+            ));
+            merged.add(Box::new(
+                data2.iter().map(|(k, v)| (*k, DocBatch::HashSet(v))),
+            ));
+            merged.add(Box::new(
+                data3.iter().map(|(k, v)| (*k, DocBatch::HashSet(v))),
+            ));
 
             let collected: Vec<_> = merged.collect();
             let keys: Vec<u8> = collected.iter().map(|(k, _)| *k).collect();
@@ -862,8 +904,12 @@ mod sort_iter {
             ];
 
             let mut merged = MergeSortedIterator::<u8, ()>::new(SortOrder::Descending, ());
-            merged.add(Box::new(data1.iter().map(|(k, v)| (*k, DocBatch::HashSet(v)))));
-            merged.add(Box::new(data2.iter().map(|(k, v)| (*k, DocBatch::HashSet(v)))));
+            merged.add(Box::new(
+                data1.iter().map(|(k, v)| (*k, DocBatch::HashSet(v))),
+            ));
+            merged.add(Box::new(
+                data2.iter().map(|(k, v)| (*k, DocBatch::HashSet(v))),
+            ));
 
             let collected: Vec<_> = merged.collect();
             let keys: Vec<u8> = collected.iter().map(|(k, _)| *k).collect();
@@ -896,8 +942,12 @@ mod sort_iter {
             ];
 
             let mut merged = MergeSortedIterator::<u8, ()>::new(SortOrder::Ascending, ());
-            merged.add(Box::new(data1.iter().map(|(k, v)| (*k, DocBatch::HashSet(v)))));
-            merged.add(Box::new(data2.iter().map(|(k, v)| (*k, DocBatch::HashSet(v)))));
+            merged.add(Box::new(
+                data1.iter().map(|(k, v)| (*k, DocBatch::HashSet(v))),
+            ));
+            merged.add(Box::new(
+                data2.iter().map(|(k, v)| (*k, DocBatch::HashSet(v))),
+            ));
 
             let collected: Vec<_> = merged.collect();
             let keys: Vec<u8> = collected.iter().map(|(k, _)| *k).collect();
@@ -932,8 +982,12 @@ mod sort_iter {
             ];
 
             let mut merged = MergeSortedIterator::<u8, ()>::new(SortOrder::Ascending, ());
-            merged.add(Box::new(data1.iter().map(|(k, v)| (*k, DocBatch::HashSet(v)))));
-            merged.add(Box::new(data2.iter().map(|(k, v)| (*k, DocBatch::HashSet(v)))));
+            merged.add(Box::new(
+                data1.iter().map(|(k, v)| (*k, DocBatch::HashSet(v))),
+            ));
+            merged.add(Box::new(
+                data2.iter().map(|(k, v)| (*k, DocBatch::HashSet(v))),
+            ));
 
             let collected: Vec<_> = merged.collect();
             let keys: Vec<u8> = collected.iter().map(|(k, _)| *k).collect();
@@ -974,8 +1028,12 @@ mod sort_iter {
             ];
 
             let mut merged = MergeSortedIterator::<u8, ()>::new(SortOrder::Ascending, ());
-            merged.add(Box::new(data1.iter().map(|(k, v)| (*k, DocBatch::HashSet(v)))));
-            merged.add(Box::new(data2.iter().map(|(k, v)| (*k, DocBatch::HashSet(v)))));
+            merged.add(Box::new(
+                data1.iter().map(|(k, v)| (*k, DocBatch::HashSet(v))),
+            ));
+            merged.add(Box::new(
+                data2.iter().map(|(k, v)| (*k, DocBatch::HashSet(v))),
+            ));
 
             let collected: Vec<_> = merged.collect();
             let keys: Vec<u8> = collected.iter().map(|(k, _)| *k).collect();
@@ -1003,16 +1061,26 @@ mod sort_iter {
             ];
 
             let mut merged = MergeSortedIterator::<i16, ()>::new(SortOrder::Descending, ());
-            merged.add(Box::new(data1.iter().map(|(k, v)| (*k, DocBatch::HashSet(v)))));
-            merged.add(Box::new(data2.iter().map(|(k, v)| (*k, DocBatch::HashSet(v)))));
+            merged.add(Box::new(
+                data1.iter().map(|(k, v)| (*k, DocBatch::HashSet(v))),
+            ));
+            merged.add(Box::new(
+                data2.iter().map(|(k, v)| (*k, DocBatch::HashSet(v))),
+            ));
 
             let collected: Vec<_> = merged.collect();
             let keys: Vec<i16> = collected.iter().map(|(k, _)| *k).collect();
 
             // Should be in descending order
             assert_eq!(keys, vec![32767, 1000, 0, -1000, -32768]);
-            assert!(batch_eq(&collected[0].1, HashSet::from([DocumentId(32767)])));
-            assert!(batch_eq(&collected[4].1, HashSet::from([DocumentId(32768)])));
+            assert!(batch_eq(
+                &collected[0].1,
+                HashSet::from([DocumentId(32767)])
+            ));
+            assert!(batch_eq(
+                &collected[4].1,
+                HashSet::from([DocumentId(32768)])
+            ));
         }
 
         // =============================================================================
@@ -1031,7 +1099,9 @@ mod sort_iter {
             // Filter that only includes DocumentId(20) and DocumentId(31)
             let filter_set: HashSet<DocumentId> = HashSet::from([DocumentId(20), DocumentId(31)]);
             let mut merged = MergeSortedIterator::<u8, _>::new(SortOrder::Ascending, &filter_set);
-            merged.add(Box::new(data.iter().map(|(k, v)| (*k, DocBatch::HashSet(v)))));
+            merged.add(Box::new(
+                data.iter().map(|(k, v)| (*k, DocBatch::HashSet(v))),
+            ));
 
             let collected: Vec<_> = merged.collect();
 
@@ -1063,7 +1133,9 @@ mod sort_iter {
             scores.insert(DocumentId(30), 2.0);
 
             let mut merged = MergeSortedIterator::<u8, _>::new(SortOrder::Ascending, &scores);
-            merged.add(Box::new(data.iter().map(|(k, v)| (*k, DocBatch::HashSet(v)))));
+            merged.add(Box::new(
+                data.iter().map(|(k, v)| (*k, DocBatch::HashSet(v))),
+            ));
 
             let collected: Vec<_> = merged.collect();
 
@@ -1106,7 +1178,9 @@ mod sort_iter {
             };
 
             let mut merged = MergeSortedIterator::<u8, _>::new(SortOrder::Ascending, filter);
-            merged.add(Box::new(data.iter().map(|(k, v)| (*k, DocBatch::HashSet(v)))));
+            merged.add(Box::new(
+                data.iter().map(|(k, v)| (*k, DocBatch::HashSet(v))),
+            ));
 
             let collected: Vec<_> = merged.collect();
 
@@ -1132,7 +1206,9 @@ mod sort_iter {
 
             // () filter should include everything
             let mut merged = MergeSortedIterator::<u8, ()>::new(SortOrder::Ascending, ());
-            merged.add(Box::new(data.iter().map(|(k, v)| (*k, DocBatch::HashSet(v)))));
+            merged.add(Box::new(
+                data.iter().map(|(k, v)| (*k, DocBatch::HashSet(v))),
+            ));
 
             let collected: Vec<_> = merged.collect();
 
@@ -1157,7 +1233,9 @@ mod sort_iter {
             // Filter that matches nothing
             let filter_set: HashSet<DocumentId> = HashSet::from([DocumentId(999)]);
             let mut merged = MergeSortedIterator::<u8, _>::new(SortOrder::Ascending, &filter_set);
-            merged.add(Box::new(data.iter().map(|(k, v)| (*k, DocBatch::HashSet(v)))));
+            merged.add(Box::new(
+                data.iter().map(|(k, v)| (*k, DocBatch::HashSet(v))),
+            ));
 
             let collected: Vec<_> = merged.collect();
 

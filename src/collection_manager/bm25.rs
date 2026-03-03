@@ -178,9 +178,7 @@ impl<K: Eq + Hash + Debug + Clone> BM25Scorer<K> {
         );
 
         match self {
-            Self::Plain(scorer) => {
-                scorer.add_field(key, normalized_tf, field_params.weight)
-            }
+            Self::Plain(scorer) => scorer.add_field(key, normalized_tf, field_params.weight),
             Self::WithThreshold(scorer) => {
                 scorer.add_field(key, normalized_tf, field_params.weight)
             }
@@ -845,18 +843,7 @@ mod tests {
 
         // Test individual field contributions by running separate scorers
         let mut title_only = BM25Scorer::plain();
-        title_only.add(
-            "doc1",
-            3,
-            50,
-            50.0,
-            100.0,
-            10,
-            1.2,
-            &title_params,
-            1.0,
-            0,
-        );
+        title_only.add("doc1", 3, 50, 50.0, 100.0, 10, 1.2, &title_params, 1.0, 0);
         let title_score = title_only.get_scores()["doc1"];
 
         let mut content_only = BM25Scorer::plain();
@@ -891,18 +878,7 @@ mod tests {
                 b: 0.75,
             };
 
-            scorer.add(
-                "doc1",
-                5,
-                100,
-                100.0,
-                100.0,
-                10,
-                1.2,
-                &field_params,
-                1.0,
-                0,
-            );
+            scorer.add("doc1", 5, 100, 100.0, 100.0, 10, 1.2, &field_params, 1.0, 0);
 
             let score = scorer.get_scores()["doc1"];
             scores.push(score);
@@ -963,13 +939,7 @@ mod tests {
         let content_avglen = 150.0_f32;
 
         // Add field contributions for the same term
-        scorer.add_field(
-            doc_key,
-            title_tf,
-            title_len,
-            title_avglen,
-            &title_params,
-        );
+        scorer.add_field(doc_key, title_tf, title_len, title_avglen, &title_params);
         scorer.add_field(
             doc_key,
             content_tf,

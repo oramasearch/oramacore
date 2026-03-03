@@ -81,7 +81,10 @@ async fn test_empty_index_reload() {
         .sum();
 
     // Single unified embedding field
-    assert_eq!(total_fields, 1, "Expected only the embedding field in the index");
+    assert_eq!(
+        total_fields, 1,
+        "Expected only the embedding field in the index"
+    );
 
     drop(test_context);
 }

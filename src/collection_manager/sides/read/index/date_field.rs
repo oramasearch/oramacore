@@ -103,9 +103,8 @@ impl DateFieldStorage {
                             .get_items((true, i64::MIN), (true, i64::MAX))
                             .context("Cannot get items for date field migration")?;
 
-                        let storage =
-                            I64Storage::new(base_path.clone(), Threshold::default())
-                                .context("Failed to create I64Storage for OrderedKeyIndex migration")?;
+                        let storage = I64Storage::new(base_path.clone(), Threshold::default())
+                            .context("Failed to create I64Storage for OrderedKeyIndex migration")?;
 
                         for item in items {
                             for doc_id in &item.values {
@@ -114,9 +113,9 @@ impl DateFieldStorage {
                                     .context("Failed to insert during OrderedKeyIndex migration")?;
                             }
                         }
-                        storage
-                            .compact(1)
-                            .context("Failed to compact migrated I64Storage from OrderedKeyIndex")?;
+                        storage.compact(1).context(
+                            "Failed to compact migrated I64Storage from OrderedKeyIndex",
+                        )?;
                         storage.cleanup();
 
                         info!("Migrated date field from OrderedKeyIndex to I64Storage");
@@ -163,7 +162,11 @@ impl DateFieldStorage {
 
     /// Inserts a document using an already-extracted `NumberIndexedValue<i64>`.
     /// This accepts both `Plain(i64)` and `Array(Vec<i64>)` variants.
-    pub fn insert_indexed(&self, doc_id: DocumentId, value: &NumberIndexedValue<i64>) -> Result<()> {
+    pub fn insert_indexed(
+        &self,
+        doc_id: DocumentId,
+        value: &NumberIndexedValue<i64>,
+    ) -> Result<()> {
         self.storage
             .insert(value, doc_id.0)
             .context("Failed to insert indexed date value")
@@ -204,10 +207,7 @@ impl DateFieldStorage {
     /// Filters documents by date filter, returning collected doc IDs.
     pub fn filter(&self, date_filter: &DateFilter) -> impl Iterator<Item = DocumentId> {
         let filter_op = date_filter_to_filter_op(date_filter);
-        self.storage
-            .filter(filter_op)
-            .into_iter()
-            .map(DocumentId)
+        self.storage.filter(filter_op).into_iter().map(DocumentId)
     }
 
     // =========================================================================

@@ -1,8 +1,4 @@
-use std::{
-    collections::HashMap,
-    fmt::Debug,
-    sync::Arc,
-};
+use std::{collections::HashMap, fmt::Debug, sync::Arc};
 
 use anyhow::{Context, Result};
 use schemars::JsonSchema;
@@ -13,7 +9,9 @@ use tokio::sync::mpsc::Sender;
 use crate::{
     ai::automatic_embeddings_selector::{AutomaticEmbeddingsSelector, ChosenProperties},
     collection_manager::sides::{
-        Term, TermStringField, read::number_field::NumberFieldIndexedValue, write::{WriteSideContext, embedding::MultiEmbeddingCalculationRequest}
+        read::number_field::NumberFieldIndexedValue,
+        write::{embedding::MultiEmbeddingCalculationRequest, WriteSideContext},
+        Term, TermStringField,
     },
     lock::OramaAsyncLock,
     python::embeddings::Model,
@@ -27,13 +25,11 @@ use oramacore_fields::string::{
     IndexedValue as StringIndexedValue, StringIndexer as FieldsStringIndexer,
     Tokenizer as FieldsTokenizer,
 };
-use oramacore_fields::string_filter::{
-    IndexedValue as StringFilterIndexedValue, StringIndexer,
-};
+use oramacore_fields::string_filter::{IndexedValue as StringFilterIndexedValue, StringIndexer};
 use oramacore_lib::nlp::{
-    TextParser,
     chunker::{Chunker, ChunkerConfig},
     locales::Locale,
+    TextParser,
 };
 
 use super::{get_value, EmbeddingStringCalculation};
@@ -314,7 +310,6 @@ impl NumberFilterField {
     }
 
     pub fn index_value(&self, value: &Value) -> Result<Vec<IndexedValue>> {
-
         if let Some(indexed) = self.indexer_i64.index_json(value) {
             return Ok(vec![IndexedValue::FilterNumber2(
                 self.field_id,
@@ -326,7 +321,7 @@ impl NumberFilterField {
                 NumberFieldIndexedValue::F64(indexed),
             )]);
         }
-        return Ok(vec![]);
+        Ok(vec![])
     }
 }
 
@@ -423,16 +418,12 @@ impl StringFilterField {
 
     /// Transforms indexed values for Explicit enum strategy by extracting
     /// the inner value from "enum(...)" syntax via `enumerative::parse`.
-    fn transform_explicit(
-        indexed: StringFilterIndexedValue,
-    ) -> Option<StringFilterIndexedValue> {
+    fn transform_explicit(indexed: StringFilterIndexedValue) -> Option<StringFilterIndexedValue> {
         match indexed {
-            StringFilterIndexedValue::Plain(s) => {
-                oramacore_lib::casting::enumerative::parse(&s)
-                    .ok()
-                    .flatten()
-                    .map(StringFilterIndexedValue::Plain)
-            }
+            StringFilterIndexedValue::Plain(s) => oramacore_lib::casting::enumerative::parse(&s)
+                .ok()
+                .flatten()
+                .map(StringFilterIndexedValue::Plain),
             StringFilterIndexedValue::Array(arr) => {
                 let filtered: Vec<String> = arr
                     .into_iter()
@@ -1089,7 +1080,9 @@ mod tests {
 
         // Verify indexed value via serde: terms should contain "first", "second", "third"
         let serialized = serde_json::to_value(indexed).expect("should serialize");
-        let terms = serialized["terms"].as_object().expect("terms should be object");
+        let terms = serialized["terms"]
+            .as_object()
+            .expect("terms should be object");
         assert_eq!(terms.len(), 3);
         assert!(terms.contains_key("first"));
         assert!(terms.contains_key("second"));

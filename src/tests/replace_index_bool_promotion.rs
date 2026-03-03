@@ -74,7 +74,10 @@ async fn test_bool_field_promotion_from_temp_index() {
         )
         .await
         .unwrap();
-    assert_eq!(result.count, 1, "Runtime index should still have only its own document");
+    assert_eq!(
+        result.count, 1,
+        "Runtime index should still have only its own document"
+    );
 
     // Promote: replace the runtime index with the temp index.
     collection_client
@@ -97,7 +100,10 @@ async fn test_bool_field_promotion_from_temp_index() {
         .await
         .unwrap();
     // Documents 0,2,4,6,8,10,12,14,16,18 have active=true → 10 docs
-    assert_eq!(result.count, 10, "After promotion, 10 documents should have active=true");
+    assert_eq!(
+        result.count, 10,
+        "After promotion, 10 documents should have active=true"
+    );
 
     let result = collection_client
         .search(
@@ -111,7 +117,10 @@ async fn test_bool_field_promotion_from_temp_index() {
         .await
         .unwrap();
     // Documents 1,3,5,7,9,11,13,15,17,19 have active=false → 10 docs
-    assert_eq!(result.count, 10, "After promotion, 10 documents should have active=false");
+    assert_eq!(
+        result.count, 10,
+        "After promotion, 10 documents should have active=false"
+    );
 
     // Commit after promotion to verify compaction works at the new path.
     test_context.commit_all().await.unwrap();
@@ -127,7 +136,10 @@ async fn test_bool_field_promotion_from_temp_index() {
         )
         .await
         .unwrap();
-    assert_eq!(result.count, 10, "After post-promotion commit, bool filter should still work");
+    assert_eq!(
+        result.count, 10,
+        "After post-promotion commit, bool filter should still work"
+    );
 
     // Reload the entire system and verify data persists.
     let collection_id = collection_client.collection_id;
@@ -150,7 +162,10 @@ async fn test_bool_field_promotion_from_temp_index() {
         )
         .await
         .unwrap();
-    assert_eq!(result.count, 10, "After reload, bool field data should persist");
+    assert_eq!(
+        result.count, 10,
+        "After reload, bool field data should persist"
+    );
 
     let result = collection_client
         .search(
@@ -163,7 +178,10 @@ async fn test_bool_field_promotion_from_temp_index() {
         )
         .await
         .unwrap();
-    assert_eq!(result.count, 10, "After reload, bool field false filter should persist");
+    assert_eq!(
+        result.count, 10,
+        "After reload, bool field false filter should persist"
+    );
 
     drop(test_context);
 }
@@ -256,7 +274,10 @@ async fn test_bool_field_promotion_with_uncommitted_data() {
         )
         .await
         .unwrap();
-    assert_eq!(result.count, 2, "Should find 2 documents with enabled=false");
+    assert_eq!(
+        result.count, 2,
+        "Should find 2 documents with enabled=false"
+    );
 
     // Commit after promotion to persist all data (including the previously uncommitted batch).
     test_context.commit_all().await.unwrap();
@@ -272,7 +293,10 @@ async fn test_bool_field_promotion_with_uncommitted_data() {
         )
         .await
         .unwrap();
-    assert_eq!(result.count, 2, "After commit, should still find 2 documents with enabled=true");
+    assert_eq!(
+        result.count, 2,
+        "After commit, should still find 2 documents with enabled=true"
+    );
 
     // Verify data persists after reload.
     let collection_id = collection_client.collection_id;
@@ -295,7 +319,10 @@ async fn test_bool_field_promotion_with_uncommitted_data() {
         )
         .await
         .unwrap();
-    assert_eq!(result.count, 2, "After reload, should persist enabled=true documents");
+    assert_eq!(
+        result.count, 2,
+        "After reload, should persist enabled=true documents"
+    );
 
     let result = collection_client
         .search(
@@ -308,7 +335,10 @@ async fn test_bool_field_promotion_with_uncommitted_data() {
         )
         .await
         .unwrap();
-    assert_eq!(result.count, 2, "After reload, should persist enabled=false documents");
+    assert_eq!(
+        result.count, 2,
+        "After reload, should persist enabled=false documents"
+    );
 
     drop(test_context);
 }
@@ -454,7 +484,10 @@ async fn test_bool_field_insert_after_promotion() {
         )
         .await
         .unwrap();
-    assert_eq!(result.count, 3, "After reload, available=true count should be 3");
+    assert_eq!(
+        result.count, 3,
+        "After reload, available=true count should be 3"
+    );
 
     let result = collection_client
         .search(
@@ -467,7 +500,10 @@ async fn test_bool_field_insert_after_promotion() {
         )
         .await
         .unwrap();
-    assert_eq!(result.count, 2, "After reload, available=false count should be 2");
+    assert_eq!(
+        result.count, 2,
+        "After reload, available=false count should be 2"
+    );
 
     drop(test_context);
 }

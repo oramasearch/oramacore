@@ -148,12 +148,7 @@ impl StringFieldStorage {
     /// Inserts a document using the legacy `InsertStringTerms` format.
     /// Converts old format positions (usize) to new format (u32) and builds
     /// an `IndexedValue` that `StringStorage` understands.
-    pub fn insert_legacy(
-        &self,
-        doc_id: DocumentId,
-        field_length: u16,
-        terms: InsertStringTerms,
-    ) {
+    pub fn insert_legacy(&self, doc_id: DocumentId, field_length: u16, terms: InsertStringTerms) {
         let mut new_terms = std::collections::HashMap::with_capacity(terms.len());
         for (term, term_field) in terms {
             let TermStringField {
@@ -199,10 +194,7 @@ impl StringFieldStorage {
 
     /// Collects raw per-token normalized TF contributions for cross-field BM25F scoring.
     /// Does not compute IDF -- that is done at the corpus level in token_score.rs.
-    pub fn collect_contributions(
-        &self,
-        params: &SearchParams<'_>,
-    ) -> Result<ContributionsResult> {
+    pub fn collect_contributions(&self, params: &SearchParams<'_>) -> Result<ContributionsResult> {
         self.storage
             .collect_contributions(params)
             .map_err(|e| anyhow::anyhow!("StringStorage collect_contributions failed: {e}"))
@@ -217,9 +209,7 @@ impl StringFieldStorage {
         self.storage
             .collect_contributions_with_filter(params, filter)
             .map_err(|e| {
-                anyhow::anyhow!(
-                    "StringStorage collect_contributions_with_filter failed: {e}"
-                )
+                anyhow::anyhow!("StringStorage collect_contributions_with_filter failed: {e}")
             })
     }
 

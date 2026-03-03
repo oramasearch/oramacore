@@ -190,7 +190,9 @@ impl FieldStatType {
             String {
                 total_documents, ..
             } => *total_documents as usize,
-            Embedding { embedding_count, .. } => *embedding_count,
+            Embedding {
+                embedding_count, ..
+            } => *embedding_count,
         }
     }
 
@@ -208,10 +210,7 @@ impl FieldStatType {
 
     /// Checks if this is an unfilterable string field
     fn is_unfilterable_string(&self) -> bool {
-        matches!(
-            self,
-            FieldStatType::String { .. }
-        )
+        matches!(self, FieldStatType::String { .. })
     }
 
     /// Extracts keys if this is a string filter field

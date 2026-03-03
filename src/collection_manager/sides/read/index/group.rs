@@ -7,8 +7,7 @@ use crate::types::{DocumentId, FieldId, Number};
 
 use super::{
     bool_field::BoolFieldStorage, number_field::NumberFieldStorage,
-    path_to_index_id_map::PathToIndexId, string_filter_field::StringFilterFieldStorage,
-    FieldType,
+    path_to_index_id_map::PathToIndexId, string_filter_field::StringFilterFieldStorage, FieldType,
 };
 
 // =============================================================================

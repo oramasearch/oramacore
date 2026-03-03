@@ -2,8 +2,8 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use oramacore_fields::geopoint::{
-    GeoFilterOp, GeoPoint as FieldsGeoPoint, GeoPointStorage, GeoPolygon, IndexedValue as GeoPointIndexedValue,
-    Threshold,
+    GeoFilterOp, GeoPoint as FieldsGeoPoint, GeoPointStorage, GeoPolygon,
+    IndexedValue as GeoPointIndexedValue, Threshold,
 };
 use oramacore_lib::bkd::BKDTree;
 use oramacore_lib::fs::BufferedFile;
@@ -44,9 +44,8 @@ pub struct GeoPointFieldStorageStats {
 impl GeoPointFieldStorage {
     /// Creates a new GeoPointFieldStorage at the given path.
     pub fn new(field_path: Box<[String]>, base_path: PathBuf) -> Result<Self> {
-        let storage =
-            GeoPointStorage::new(base_path.clone(), Threshold::default(), MAX_SEGMENTS)
-                .context("Failed to create GeoPointStorage")?;
+        let storage = GeoPointStorage::new(base_path.clone(), Threshold::default(), MAX_SEGMENTS)
+            .context("Failed to create GeoPointStorage")?;
         Ok(Self {
             field_path,
             base_path,
@@ -62,11 +61,10 @@ impl GeoPointFieldStorage {
 
         if old_file.exists() {
             // Migration path: read old bincode format (BKDTree<f32, DocumentId>)
-            let old_tree: BKDTree<f32, DocumentId> =
-                BufferedFile::open(&old_file)
-                    .context("Cannot open old geopoint_tree.bin")?
-                    .read_bincode_data()
-                    .context("Cannot deserialize old geopoint_tree.bin")?;
+            let old_tree: BKDTree<f32, DocumentId> = BufferedFile::open(&old_file)
+                .context("Cannot open old geopoint_tree.bin")?
+                .read_bincode_data()
+                .context("Cannot deserialize old geopoint_tree.bin")?;
 
             let storage =
                 GeoPointStorage::new(base_path.clone(), Threshold::default(), MAX_SEGMENTS)
@@ -77,10 +75,7 @@ impl GeoPointFieldStorage {
                 let lat = point.coords.lat as f64;
                 let lon = point.coords.lon as f64;
                 if let Ok(geo_point) = FieldsGeoPoint::new(lat, lon) {
-                    storage.insert(
-                        GeoPointIndexedValue::Plain(geo_point),
-                        point.data.0,
-                    );
+                    storage.insert(GeoPointIndexedValue::Plain(geo_point), point.data.0);
                 }
             }
 
@@ -224,8 +219,7 @@ fn geo_search_filter_to_op(filter: &GeoSearchFilter) -> Result<GeoFilterOp> {
                         .context("Invalid polygon vertex coordinates")
                 })
                 .collect();
-            let polygon =
-                GeoPolygon::new(vertices?).context("Failed to create GeoPolygon")?;
+            let polygon = GeoPolygon::new(vertices?).context("Failed to create GeoPolygon")?;
             if p.inside {
                 Ok(GeoFilterOp::Polygon { polygon })
             } else {

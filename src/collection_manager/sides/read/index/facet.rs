@@ -4,14 +4,12 @@ use anyhow::{bail, Result};
 use tracing::{info, warn};
 
 use crate::types::{
-    BoolFacetDefinition, DocumentId, FacetDefinition, FacetResult, FieldId,
-    NumberFacetDefinition,
+    BoolFacetDefinition, DocumentId, FacetDefinition, FacetResult, FieldId, NumberFacetDefinition,
 };
 
 use super::{
     bool_field::BoolFieldStorage, number_field::NumberFieldStorage,
-    path_to_index_id_map::PathToIndexId, string_filter_field::StringFilterFieldStorage,
-    FieldType,
+    path_to_index_id_map::PathToIndexId, string_filter_field::StringFilterFieldStorage, FieldType,
 };
 
 // =============================================================================
@@ -111,7 +109,6 @@ impl TryFromFacetDefinition for NumberFacetDefinition {
         }
     }
 }
-
 
 // =============================================================================
 // Helper functions

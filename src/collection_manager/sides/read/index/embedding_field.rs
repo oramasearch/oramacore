@@ -143,7 +143,10 @@ impl EmbeddingFieldStorage {
                     HNSW2Index::deserialize_bincode_compat(&data)
                         .context("Cannot deserialize legacy HNSW file")?;
 
-                info!("Migrating {} embeddings from legacy HNSW format", index.len());
+                info!(
+                    "Migrating {} embeddings from legacy HNSW format",
+                    index.len()
+                );
 
                 for (doc_id, vector) in index.into_data() {
                     if let Some(indexed_value) = indexer.index_vec(&vector) {
@@ -157,7 +160,10 @@ impl EmbeddingFieldStorage {
                     .read_bincode_data()
                     .context("Cannot deserialize BruteForce file")?;
 
-                info!("Migrating {} embeddings from legacy BruteForce format", index.len());
+                info!(
+                    "Migrating {} embeddings from legacy BruteForce format",
+                    index.len()
+                );
 
                 for (doc_id, vector) in index.into_data() {
                     if let Some(indexed_value) = indexer.index_vec(&vector) {

@@ -44,8 +44,7 @@ use crate::{
 
 use super::{
     index::{Index, IndexStats},
-    CollectionCommitConfig,
-    DeletionReason, OffloadFieldConfig, ReadSide,
+    CollectionCommitConfig, DeletionReason, OffloadFieldConfig, ReadSide,
 };
 use oramacore_lib::values::ValuesReader;
 
@@ -1058,7 +1057,10 @@ impl CollectionReader {
                 // Replace the temp index id with the new one.
                 // Pass the permanent data_dir so bool fields can be relocated
                 // from temp_indexes/ to indexes/.
-                let new_data_dir = self.data_dir.join("indexes").join(runtime_index_id.as_str());
+                let new_data_dir = self
+                    .data_dir
+                    .join("indexes")
+                    .join(runtime_index_id.as_str());
                 new_index.promote_to_runtime_index(runtime_index_id, new_data_dir)?;
                 runtime_index_lock.push(new_index);
 

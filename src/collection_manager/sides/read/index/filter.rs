@@ -6,7 +6,11 @@ use tracing::trace;
 
 use crate::types::{DateFilter, DocumentId, FieldId, Filter, GeoSearchFilter, WhereFilter};
 
-use super::{bool_field::BoolFieldStorage, date_field::DateFieldStorage, geopoint_field::GeoPointFieldStorage, number_field::NumberFieldStorage, string_filter_field::StringFilterFieldStorage, path_to_index_id_map::PathToIndexId, FieldType};
+use super::{
+    bool_field::BoolFieldStorage, date_field::DateFieldStorage,
+    geopoint_field::GeoPointFieldStorage, number_field::NumberFieldStorage,
+    path_to_index_id_map::PathToIndexId, string_filter_field::StringFilterFieldStorage, FieldType,
+};
 
 /// Trait for fields that support filtering operations.
 ///
@@ -254,7 +258,8 @@ fn calculate_filter_for_fields(
                 )));
             };
 
-            let docs = bool_field.filter_docs(*bool_value)
+            let docs = bool_field
+                .filter_docs(*bool_value)
                 .into_iter()
                 .map(DocumentId);
             Ok(FilterResult::Filter(PlainFilterResult::from_iter(

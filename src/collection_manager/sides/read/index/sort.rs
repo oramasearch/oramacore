@@ -7,11 +7,8 @@ use crate::{
 };
 
 use super::{
-    bool_field::BoolFieldStorage,
-    date_field::DateFieldStorage,
-    number_field::NumberFieldStorage,
-    path_to_index_id_map::PathToIndexId,
-    FieldType,
+    bool_field::BoolFieldStorage, date_field::DateFieldStorage, number_field::NumberFieldStorage,
+    path_to_index_id_map::PathToIndexId, FieldType,
 };
 
 // =============================================================================
@@ -239,38 +236,38 @@ impl<'index> IndexSortContext<'index> {
 
         match field_type {
             FieldType::Number => {
-                let number_field = self
-                    .number_fields
-                    .get(&field_id)
-                    .ok_or_else(|| {
-                        ReadError::Generic(anyhow::anyhow!(
-                            "Field {} is not a number field",
-                            self.field_name
-                        ))
-                    })?;
+                let number_field = self.number_fields.get(&field_id).ok_or_else(|| {
+                    ReadError::Generic(anyhow::anyhow!(
+                        "Field {} is not a number field",
+                        self.field_name
+                    ))
+                })?;
                 let ascending = matches!(self.order, SortOrder::Ascending);
                 let iter = number_field.sort_grouped(ascending);
                 // Wrap already-collected Vec<DocumentId> in DocBatch::Owned
-                Ok(Box::new(iter.map(|(k, doc_ids)| {
-                    (k, DocBatch::Owned(doc_ids))
-                })))
+                Ok(Box::new(
+                    iter.map(|(k, doc_ids)| (k, DocBatch::Owned(doc_ids))),
+                ))
             }
             FieldType::Bool => {
-                let bool_field = self
-                    .bool_fields
-                    .get(&field_id)
-                    .ok_or_else(|| {
-                        ReadError::Generic(anyhow::anyhow!(
-                            "Field {} is not a bool field",
-                            self.field_name
-                        ))
-                    })?;
+                let bool_field = self.bool_fields.get(&field_id).ok_or_else(|| {
+                    ReadError::Generic(anyhow::anyhow!(
+                        "Field {} is not a bool field",
+                        self.field_name
+                    ))
+                })?;
 
                 // Compute on demand: collect doc IDs into owned Vecs
-                let false_docs: Vec<DocumentId> =
-                    bool_field.filter_docs(false).into_iter().map(DocumentId).collect();
-                let true_docs: Vec<DocumentId> =
-                    bool_field.filter_docs(true).into_iter().map(DocumentId).collect();
+                let false_docs: Vec<DocumentId> = bool_field
+                    .filter_docs(false)
+                    .into_iter()
+                    .map(DocumentId)
+                    .collect();
+                let true_docs: Vec<DocumentId> = bool_field
+                    .filter_docs(true)
+                    .into_iter()
+                    .map(DocumentId)
+                    .collect();
 
                 // Ascending: false (0) first, then true (1)
                 let data = vec![
@@ -286,23 +283,19 @@ impl<'index> IndexSortContext<'index> {
                 Ok(iter)
             }
             FieldType::Date => {
-                let date_field = self
-                    .date_fields
-                    .get(&field_id)
-                    .ok_or_else(|| {
-                        ReadError::Generic(anyhow::anyhow!(
-                            "Field {} is not a date field",
-                            self.field_name
-                        ))
-                    })?;
+                let date_field = self.date_fields.get(&field_id).ok_or_else(|| {
+                    ReadError::Generic(anyhow::anyhow!(
+                        "Field {} is not a date field",
+                        self.field_name
+                    ))
+                })?;
 
                 let ascending = matches!(self.order, SortOrder::Ascending);
                 let grouped = date_field.sort_grouped(ascending);
 
                 Ok(Box::new(grouped.map(|(timestamp, doc_ids)| {
                     let key = i64_to_number(timestamp);
-                    let docs: Vec<DocumentId> =
-                        doc_ids.into_iter().map(DocumentId).collect();
+                    let docs: Vec<DocumentId> = doc_ids.into_iter().map(DocumentId).collect();
                     (key, DocBatch::Owned(docs))
                 })))
             }

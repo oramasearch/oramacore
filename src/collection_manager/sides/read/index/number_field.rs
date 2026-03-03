@@ -165,12 +165,16 @@ impl NumberFieldStorage {
                                 Number::I32(n) => {
                                     i64_storage
                                         .insert(&NumberIndexedValue::Plain(n as i64), doc_id.0)
-                                        .context("Failed to insert i64 during OrderedKeyIndex migration")?;
+                                        .context(
+                                            "Failed to insert i64 during OrderedKeyIndex migration",
+                                        )?;
                                 }
                                 Number::F32(f) => {
                                     f64_storage
                                         .insert(&NumberIndexedValue::Plain(f as f64), doc_id.0)
-                                        .context("Failed to insert f64 during OrderedKeyIndex migration")?;
+                                        .context(
+                                            "Failed to insert f64 during OrderedKeyIndex migration",
+                                        )?;
                                 }
                             }
                         }
@@ -319,20 +323,12 @@ impl NumberFieldStorage {
 
         // Collect from i64 storage (may be empty if the filter has no i64 interpretation)
         let i64_docs = match i64_op {
-            Some(op) => Box::new(self
-                .i64_storage
-                .filter(op)
-                .into_iter()
-                .map(DocumentId)),
+            Some(op) => Box::new(self.i64_storage.filter(op).into_iter().map(DocumentId)),
             None => Box::new(std::iter::empty()) as Box<dyn Iterator<Item = DocumentId>>,
         };
 
         // Collect from f64 storage
-        let f64_docs = self
-            .f64_storage
-            .filter(f64_op)
-            .into_iter()
-            .map(DocumentId);
+        let f64_docs = self.f64_storage.filter(f64_op).into_iter().map(DocumentId);
 
         i64_docs.into_iter().chain(f64_docs)
     }
@@ -346,10 +342,7 @@ impl NumberFieldStorage {
     ///
     /// Each yielded `(Number, Vec<DocumentId>)` pair contains a unique number
     /// value and all doc IDs that share that value.
-    pub fn sort_grouped(
-        &self,
-        ascending: bool,
-    ) -> DualStorageSortMerge {
+    pub fn sort_grouped(&self, ascending: bool) -> DualStorageSortMerge {
         let order = if ascending {
             NumberSortOrder::Ascending
         } else {
@@ -498,11 +491,17 @@ impl Iterator for DualStorageSortMerge {
             (false, false) => None,
             (true, false) => {
                 let (val, doc_ids) = self.i64_iter.next()?;
-                Some((i64_to_number(val), doc_ids.into_iter().map(DocumentId).collect()))
+                Some((
+                    i64_to_number(val),
+                    doc_ids.into_iter().map(DocumentId).collect(),
+                ))
             }
             (false, true) => {
                 let (val, doc_ids) = self.f64_iter.next()?;
-                Some((f64_to_number(val), doc_ids.into_iter().map(DocumentId).collect()))
+                Some((
+                    f64_to_number(val),
+                    doc_ids.into_iter().map(DocumentId).collect(),
+                ))
             }
             (true, true) => {
                 // Compare i64 and f64 values as f64 for ordering
@@ -515,7 +514,8 @@ impl Iterator for DualStorageSortMerge {
                     // Equal: merge both into one batch
                     let (i64_v, i64_docs) = self.i64_iter.next().unwrap();
                     let (_, f64_docs) = self.f64_iter.next().unwrap();
-                    let mut merged: Vec<DocumentId> = i64_docs.into_iter().map(DocumentId).collect();
+                    let mut merged: Vec<DocumentId> =
+                        i64_docs.into_iter().map(DocumentId).collect();
                     merged.extend(f64_docs.into_iter().map(DocumentId));
                     Some((i64_to_number(i64_v), merged))
                 } else {
@@ -528,10 +528,16 @@ impl Iterator for DualStorageSortMerge {
 
                     if take_i64 {
                         let (val, doc_ids) = self.i64_iter.next().unwrap();
-                        Some((i64_to_number(val), doc_ids.into_iter().map(DocumentId).collect()))
+                        Some((
+                            i64_to_number(val),
+                            doc_ids.into_iter().map(DocumentId).collect(),
+                        ))
                     } else {
                         let (val, doc_ids) = self.f64_iter.next().unwrap();
-                        Some((f64_to_number(val), doc_ids.into_iter().map(DocumentId).collect()))
+                        Some((
+                            f64_to_number(val),
+                            doc_ids.into_iter().map(DocumentId).collect(),
+                        ))
                     }
                 }
             }

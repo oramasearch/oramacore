@@ -85,7 +85,11 @@ async fn test_string_field_promotion_from_temp_index() {
 
     // After promotion, fulltext search should reflect the temp index data.
     let result = collection_client
-        .search(json!({ "term": "artificial intelligence" }).try_into().unwrap())
+        .search(
+            json!({ "term": "artificial intelligence" })
+                .try_into()
+                .unwrap(),
+        )
         .await
         .unwrap();
     assert_eq!(
@@ -126,7 +130,11 @@ async fn test_string_field_promotion_from_temp_index() {
         .unwrap();
 
     let result = collection_client
-        .search(json!({ "term": "blockchain technology" }).try_into().unwrap())
+        .search(
+            json!({ "term": "blockchain technology" })
+                .try_into()
+                .unwrap(),
+        )
         .await
         .unwrap();
     assert_eq!(

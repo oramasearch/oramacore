@@ -70,11 +70,10 @@ impl StringFilterFieldStorage {
 
         if old_file.exists() {
             // Migration path: read old bincode format (HashMap<String, HashSet<DocumentId>>)
-            let old_data: StringFilterFieldDump =
-                oramacore_lib::fs::BufferedFile::open(&old_file)
-                    .context("Cannot open old data.bin")?
-                    .read_bincode_data()
-                    .context("Cannot deserialize old data.bin")?;
+            let old_data: StringFilterFieldDump = oramacore_lib::fs::BufferedFile::open(&old_file)
+                .context("Cannot open old data.bin")?
+                .read_bincode_data()
+                .context("Cannot deserialize old data.bin")?;
             let StringFilterFieldDump::V1(old_data) = old_data;
 
             let storage = StringFilterStorage::new(base_path.clone(), Threshold::default())
@@ -82,10 +81,7 @@ impl StringFilterFieldStorage {
 
             for (key, doc_ids) in &old_data.data {
                 for doc_id in doc_ids {
-                    storage.insert(
-                        &StringFilterIndexedValue::Plain(key.clone()),
-                        doc_id.0,
-                    );
+                    storage.insert(&StringFilterIndexedValue::Plain(key.clone()), doc_id.0);
                 }
             }
             storage
@@ -167,11 +163,7 @@ impl StringFilterFieldStorage {
 
     /// Filters documents by string value, returning collected doc IDs.
     pub fn filter_docs(&self, value: &str) -> Vec<DocumentId> {
-        self.storage
-            .filter(value)
-            .iter()
-            .map(DocumentId)
-            .collect()
+        self.storage.filter(value).iter().map(DocumentId).collect()
     }
 
     // =========================================================================
@@ -226,8 +218,8 @@ impl StringFilterFieldStorage {
     pub fn stats(&self) -> StringFilterFieldStorageStats {
         let info = self.storage.info();
         let keys = self.storage.keys();
-        let doc_count = info.total_postings_count.saturating_sub(info.deleted_count)
-            + info.pending_ops;
+        let doc_count =
+            info.total_postings_count.saturating_sub(info.deleted_count) + info.pending_ops;
         StringFilterFieldStorageStats {
             key_count: keys.len(),
             document_count: doc_count,

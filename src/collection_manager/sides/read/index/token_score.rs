@@ -8,8 +8,7 @@ use tracing::debug;
 use crate::{
     ai::llms::{self, LLMService},
     collection_manager::{
-        bm25::BM25Scorer,
-        sides::read::index::committed_field::VectorSearchParams,
+        bm25::BM25Scorer, sides::read::index::committed_field::VectorSearchParams,
     },
     python::embeddings::Intent,
     types::{
@@ -172,11 +171,7 @@ impl<'index> TokenScoreContext<'index> {
                 }
                 field_ids
             }
-            Properties::None | Properties::Star => self
-                .string_fields
-                .keys()
-                .copied()
-                .collect(),
+            Properties::None | Properties::Star => self.string_fields.keys().copied().collect(),
         };
 
         Ok(properties.into_iter().collect())
@@ -272,11 +267,7 @@ impl<'index> TokenScoreContext<'index> {
                         corpus_docs.insert(doc_id);
                         // ntf already includes boost + length normalization + exact_match_boost.
                         // Pass weight=1.0 since the boost is already baked in.
-                        scorer.add_precomputed_field(
-                            DocumentId(doc_id),
-                            ntf,
-                            1.0,
-                        );
+                        scorer.add_precomputed_field(DocumentId(doc_id), ntf, 1.0);
                     }
                 }
             }

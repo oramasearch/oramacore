@@ -1,8 +1,5 @@
 use chrono::{DateTime, Utc};
-use committed_field::{
-    BoolFieldInfo,
-    NumberFieldInfo, StringFilterFieldInfo, VectorFieldInfo,
-};
+use committed_field::{BoolFieldInfo, NumberFieldInfo, StringFilterFieldInfo, VectorFieldInfo};
 use path_to_index_id_map::PathToIndexId;
 use serde::{Deserialize, Serialize};
 use tracing::{debug, error, info, trace, warn};
@@ -11,20 +8,13 @@ use crate::{
     collection_manager::sides::{
         read::{
             context::ReadSideContext,
-            index::{
-                committed_field::{
-                    DateFieldInfo, GeoPointFieldInfo, StringFieldInfo,
-                },
-            },
+            index::committed_field::{DateFieldInfo, GeoPointFieldInfo, StringFieldInfo},
         },
         write::index::EnumStrategy,
         Offset,
     },
     lock::{OramaAsyncLock, OramaAsyncLockReadGuard},
-    metrics::{
-        commit::INDEX_COMMIT_CALCULATION_TIME,
-        IndexCollectionCommitLabels,
-    },
+    metrics::{commit::INDEX_COMMIT_CALCULATION_TIME, IndexCollectionCommitLabels},
     python::embeddings::Model,
     types::{
         CollectionId, DocumentId, FulltextMode, IndexId, Limit, Properties, ScoreMode,
@@ -266,8 +256,7 @@ impl Index {
             filter_fields.insert(info.field_path.clone(), (field_id, FieldType::Bool));
 
             debug!("BoolFieldStorage::try_load for field_id {:?}", field_id);
-            let field = BoolFieldStorage::try_load(info)
-                .context("Cannot load bool field")?;
+            let field = BoolFieldStorage::try_load(info).context("Cannot load bool field")?;
             debug!("DONE");
             bool_fields.insert(field_id, field);
         }
@@ -279,8 +268,7 @@ impl Index {
             filter_fields.insert(info.field_path.clone(), (field_id, FieldType::Number));
 
             debug!("NumberFieldStorage::try_load for field_id {:?}", field_id);
-            let field = NumberFieldStorage::try_load(info)
-                .context("Cannot load number field")?;
+            let field = NumberFieldStorage::try_load(info).context("Cannot load number field")?;
             debug!("DONE");
             number_fields.insert(field_id, field);
         }
@@ -292,8 +280,7 @@ impl Index {
             filter_fields.insert(info.field_path.clone(), (field_id, FieldType::Date));
 
             debug!("DateFieldStorage::try_load for field_id {:?}", field_id);
-            let field = DateFieldStorage::try_load(info)
-                .context("Cannot load date field")?;
+            let field = DateFieldStorage::try_load(info).context("Cannot load date field")?;
             debug!("DONE");
             date_fields.insert(field_id, field);
         }
@@ -304,8 +291,8 @@ impl Index {
             filter_fields.insert(info.field_path.clone(), (field_id, FieldType::GeoPoint));
 
             debug!("GeoPointFieldStorage::try_load for field_id {:?}", field_id);
-            let field = GeoPointFieldStorage::try_load(info)
-                .context("Cannot load geopoint field")?;
+            let field =
+                GeoPointFieldStorage::try_load(info).context("Cannot load geopoint field")?;
             debug!("DONE");
             geopoint_fields.insert(field_id, field);
         }
@@ -326,8 +313,7 @@ impl Index {
             score_fields.insert(info.field_path.clone(), (field_id, FieldType::String));
 
             debug!("StringFieldStorage::try_load for field_id {:?}", field_id);
-            let field = StringFieldStorage::try_load(info)
-                .context("Cannot load string field")?;
+            let field = StringFieldStorage::try_load(info).context("Cannot load string field")?;
             debug!("DONE");
             string_fields.insert(field_id, field);
         }
@@ -337,9 +323,12 @@ impl Index {
         for (field_id, info) in dump.vector_field_ids {
             score_fields.insert(info.field_path.clone(), (field_id, FieldType::Vector));
 
-            debug!("EmbeddingFieldStorage::try_load for field_id {:?}", field_id);
-            let field = EmbeddingFieldStorage::try_load(info)
-                .context("Cannot load embedding field")?;
+            debug!(
+                "EmbeddingFieldStorage::try_load for field_id {:?}",
+                field_id
+            );
+            let field =
+                EmbeddingFieldStorage::try_load(info).context("Cannot load embedding field")?;
             debug!("DONE");
             embedding_fields.insert(field_id, field);
         }
@@ -548,57 +537,64 @@ impl Index {
         let committed_fields = self.committed_fields.read("commit").await;
 
         // Compact bool fields directly (they manage their own persistence)
-        for (_, bool_field) in &self.bool_fields {
+        for bool_field in self.bool_fields.values() {
             if bool_field.has_pending_ops() {
-                bool_field.compact(offset.0 as u64)
+                bool_field
+                    .compact(offset.0)
                     .context("Cannot compact bool field")?;
             }
         }
 
         // Compact geopoint fields directly (they manage their own persistence)
-        for (_, geopoint_field) in &self.geopoint_fields {
+        for geopoint_field in self.geopoint_fields.values() {
             if geopoint_field.has_pending_ops() {
-                geopoint_field.compact(offset.0 as u64)
+                geopoint_field
+                    .compact(offset.0)
                     .context("Cannot compact geopoint field")?;
             }
         }
 
         // Compact string_filter fields directly (they manage their own persistence)
-        for (_, string_filter_field) in &self.string_filter_fields {
+        for string_filter_field in self.string_filter_fields.values() {
             if string_filter_field.has_pending_ops() {
-                string_filter_field.compact(offset.0 as u64)
+                string_filter_field
+                    .compact(offset.0)
                     .context("Cannot compact string_filter field")?;
             }
         }
 
         // Compact date fields directly (they manage their own persistence via I64Storage)
-        for (_, date_field) in &self.date_fields {
+        for date_field in self.date_fields.values() {
             if date_field.has_pending_ops() {
-                date_field.compact(offset.0 as u64)
+                date_field
+                    .compact(offset.0)
                     .context("Cannot compact date field")?;
             }
         }
 
         // Compact number fields directly (they manage their own persistence via dual I64/F64 storages)
-        for (_, number_field) in &self.number_fields {
+        for number_field in self.number_fields.values() {
             if number_field.has_pending_ops() {
-                number_field.compact(offset.0 as u64)
+                number_field
+                    .compact(offset.0)
                     .context("Cannot compact number field")?;
             }
         }
 
         // Compact embedding fields directly (they manage their own persistence via EmbeddingStorage)
-        for (_, embedding_field) in &self.embedding_fields {
+        for embedding_field in self.embedding_fields.values() {
             if embedding_field.has_pending_ops() {
-                embedding_field.compact(offset.0 as u64)
+                embedding_field
+                    .compact(offset.0)
                     .context("Cannot compact embedding field")?;
             }
         }
 
         // Compact string fields directly (they manage their own persistence via StringStorage)
-        for (_, string_field) in &self.string_fields {
+        for string_field in self.string_fields.values() {
             if string_field.has_pending_ops() {
-                string_field.compact(offset.0 as u64)
+                string_field
+                    .compact(offset.0)
                     .context("Cannot compact string field")?;
             }
         }
@@ -894,11 +890,15 @@ impl Index {
             if old_path.exists() {
                 let options = fs_extra::dir::CopyOptions::new().overwrite(true);
                 if let Some(parent) = new_path.parent() {
-                    oramacore_lib::fs::create_if_not_exists(parent.to_path_buf())
+                    oramacore_lib::fs::create_if_not_exists(parent)
                         .context("Cannot create bool field parent directory")?;
                 }
-                fs_extra::copy_items(&[&old_path], new_path.parent().expect("bool path must have parent"), &options)
-                    .context("Cannot copy bool field directory during promotion")?;
+                fs_extra::copy_items(
+                    &[&old_path],
+                    new_path.parent().expect("bool path must have parent"),
+                    &options,
+                )
+                .context("Cannot copy bool field directory during promotion")?;
             }
 
             // Recreate BoolFieldStorage at the new path
@@ -928,11 +928,15 @@ impl Index {
             if old_path.exists() {
                 let options = fs_extra::dir::CopyOptions::new().overwrite(true);
                 if let Some(parent) = new_path.parent() {
-                    oramacore_lib::fs::create_if_not_exists(parent.to_path_buf())
+                    oramacore_lib::fs::create_if_not_exists(parent)
                         .context("Cannot create geopoint field parent directory")?;
                 }
-                fs_extra::copy_items(&[&old_path], new_path.parent().expect("geopoint path must have parent"), &options)
-                    .context("Cannot copy geopoint field directory during promotion")?;
+                fs_extra::copy_items(
+                    &[&old_path],
+                    new_path.parent().expect("geopoint path must have parent"),
+                    &options,
+                )
+                .context("Cannot copy geopoint field directory during promotion")?;
             }
 
             let field_path = old_storage.field_path().into();
@@ -952,7 +956,9 @@ impl Index {
             }
 
             let old_path = old_storage.base_path().to_path_buf();
-            let new_path = new_data_dir.join("string_filter").join(field_id.0.to_string());
+            let new_path = new_data_dir
+                .join("string_filter")
+                .join(field_id.0.to_string());
 
             if old_path == new_path {
                 continue;
@@ -961,11 +967,17 @@ impl Index {
             if old_path.exists() {
                 let options = fs_extra::dir::CopyOptions::new().overwrite(true);
                 if let Some(parent) = new_path.parent() {
-                    oramacore_lib::fs::create_if_not_exists(parent.to_path_buf())
+                    oramacore_lib::fs::create_if_not_exists(parent)
                         .context("Cannot create string_filter field parent directory")?;
                 }
-                fs_extra::copy_items(&[&old_path], new_path.parent().expect("string_filter path must have parent"), &options)
-                    .context("Cannot copy string_filter field directory during promotion")?;
+                fs_extra::copy_items(
+                    &[&old_path],
+                    new_path
+                        .parent()
+                        .expect("string_filter path must have parent"),
+                    &options,
+                )
+                .context("Cannot copy string_filter field directory during promotion")?;
             }
 
             let field_path = old_storage.field_path().into();
@@ -994,11 +1006,15 @@ impl Index {
             if old_path.exists() {
                 let options = fs_extra::dir::CopyOptions::new().overwrite(true);
                 if let Some(parent) = new_path.parent() {
-                    oramacore_lib::fs::create_if_not_exists(parent.to_path_buf())
+                    oramacore_lib::fs::create_if_not_exists(parent)
                         .context("Cannot create date field parent directory")?;
                 }
-                fs_extra::copy_items(&[&old_path], new_path.parent().expect("date path must have parent"), &options)
-                    .context("Cannot copy date field directory during promotion")?;
+                fs_extra::copy_items(
+                    &[&old_path],
+                    new_path.parent().expect("date path must have parent"),
+                    &options,
+                )
+                .context("Cannot copy date field directory during promotion")?;
             }
 
             let field_path = old_storage.field_path().into();
@@ -1027,11 +1043,15 @@ impl Index {
             if old_path.exists() {
                 let options = fs_extra::dir::CopyOptions::new().overwrite(true);
                 if let Some(parent) = new_path.parent() {
-                    oramacore_lib::fs::create_if_not_exists(parent.to_path_buf())
+                    oramacore_lib::fs::create_if_not_exists(parent)
                         .context("Cannot create number field parent directory")?;
                 }
-                fs_extra::copy_items(&[&old_path], new_path.parent().expect("number path must have parent"), &options)
-                    .context("Cannot copy number field directory during promotion")?;
+                fs_extra::copy_items(
+                    &[&old_path],
+                    new_path.parent().expect("number path must have parent"),
+                    &options,
+                )
+                .context("Cannot copy number field directory during promotion")?;
             }
 
             let field_path = old_storage.field_path().into();
@@ -1060,11 +1080,15 @@ impl Index {
             if old_path.exists() {
                 let options = fs_extra::dir::CopyOptions::new().overwrite(true);
                 if let Some(parent) = new_path.parent() {
-                    oramacore_lib::fs::create_if_not_exists(parent.to_path_buf())
+                    oramacore_lib::fs::create_if_not_exists(parent)
                         .context("Cannot create embedding field parent directory")?;
                 }
-                fs_extra::copy_items(&[&old_path], new_path.parent().expect("embedding path must have parent"), &options)
-                    .context("Cannot copy embedding field directory during promotion")?;
+                fs_extra::copy_items(
+                    &[&old_path],
+                    new_path.parent().expect("embedding path must have parent"),
+                    &options,
+                )
+                .context("Cannot copy embedding field directory during promotion")?;
             }
 
             let field_path = old_storage.field_path().into();
@@ -1078,7 +1102,10 @@ impl Index {
         let old_bool_dir = old_data_dir.join("bool");
         if old_bool_dir.exists() {
             if let Err(e) = std::fs::remove_dir_all(&old_bool_dir) {
-                warn!("Failed to remove old bool directory {:?}: {}", old_bool_dir, e);
+                warn!(
+                    "Failed to remove old bool directory {:?}: {}",
+                    old_bool_dir, e
+                );
             }
         }
 
@@ -1086,7 +1113,10 @@ impl Index {
         let old_geopoint_dir = old_data_dir.join("geopoint");
         if old_geopoint_dir.exists() {
             if let Err(e) = std::fs::remove_dir_all(&old_geopoint_dir) {
-                warn!("Failed to remove old geopoint directory {:?}: {}", old_geopoint_dir, e);
+                warn!(
+                    "Failed to remove old geopoint directory {:?}: {}",
+                    old_geopoint_dir, e
+                );
             }
         }
 
@@ -1094,7 +1124,10 @@ impl Index {
         let old_string_filter_dir = old_data_dir.join("string_filter");
         if old_string_filter_dir.exists() {
             if let Err(e) = std::fs::remove_dir_all(&old_string_filter_dir) {
-                warn!("Failed to remove old string_filter directory {:?}: {}", old_string_filter_dir, e);
+                warn!(
+                    "Failed to remove old string_filter directory {:?}: {}",
+                    old_string_filter_dir, e
+                );
             }
         }
 
@@ -1102,7 +1135,10 @@ impl Index {
         let old_date_dir = old_data_dir.join("date");
         if old_date_dir.exists() {
             if let Err(e) = std::fs::remove_dir_all(&old_date_dir) {
-                warn!("Failed to remove old date directory {:?}: {}", old_date_dir, e);
+                warn!(
+                    "Failed to remove old date directory {:?}: {}",
+                    old_date_dir, e
+                );
             }
         }
 
@@ -1110,7 +1146,10 @@ impl Index {
         let old_number_dir = old_data_dir.join("number");
         if old_number_dir.exists() {
             if let Err(e) = std::fs::remove_dir_all(&old_number_dir) {
-                warn!("Failed to remove old number directory {:?}: {}", old_number_dir, e);
+                warn!(
+                    "Failed to remove old number directory {:?}: {}",
+                    old_number_dir, e
+                );
             }
         }
 
@@ -1134,11 +1173,15 @@ impl Index {
             if old_path.exists() {
                 let options = fs_extra::dir::CopyOptions::new().overwrite(true);
                 if let Some(parent) = new_path.parent() {
-                    oramacore_lib::fs::create_if_not_exists(parent.to_path_buf())
+                    oramacore_lib::fs::create_if_not_exists(parent)
                         .context("Cannot create string field parent directory")?;
                 }
-                fs_extra::copy_items(&[&old_path], new_path.parent().expect("string path must have parent"), &options)
-                    .context("Cannot copy string field directory during promotion")?;
+                fs_extra::copy_items(
+                    &[&old_path],
+                    new_path.parent().expect("string path must have parent"),
+                    &options,
+                )
+                .context("Cannot copy string field directory during promotion")?;
             }
 
             let field_path = old_storage.field_path().into();
@@ -1151,7 +1194,10 @@ impl Index {
         let old_embedding_dir = old_data_dir.join("embedding");
         if old_embedding_dir.exists() {
             if let Err(e) = std::fs::remove_dir_all(&old_embedding_dir) {
-                warn!("Failed to remove old embedding directory {:?}: {}", old_embedding_dir, e);
+                warn!(
+                    "Failed to remove old embedding directory {:?}: {}",
+                    old_embedding_dir, e
+                );
             }
         }
 
@@ -1159,7 +1205,10 @@ impl Index {
         let old_string_dir = old_data_dir.join("string");
         if old_string_dir.exists() {
             if let Err(e) = std::fs::remove_dir_all(&old_string_dir) {
-                warn!("Failed to remove old string directory {:?}: {}", old_string_dir, e);
+                warn!(
+                    "Failed to remove old string directory {:?}: {}",
+                    old_string_dir, e
+                );
             }
         }
 
@@ -1198,7 +1247,8 @@ impl Index {
                         );
                         // Create BoolFieldStorage with a stable path under the index data dir.
                         // data_dir is always known from construction time.
-                        let bool_base_path = self.data_dir.join("bool").join(field_id.0.to_string());
+                        let bool_base_path =
+                            self.data_dir.join("bool").join(field_id.0.to_string());
                         let storage = BoolFieldStorage::new(field_path, bool_base_path)
                             .context("Failed to create BoolFieldStorage")?;
                         self.bool_fields.insert(field_id, storage);
@@ -1210,7 +1260,8 @@ impl Index {
                             FieldType::Number,
                         );
                         // Create NumberFieldStorage with a stable path under the index data dir.
-                        let number_base_path = self.data_dir.join("number").join(field_id.0.to_string());
+                        let number_base_path =
+                            self.data_dir.join("number").join(field_id.0.to_string());
                         let storage = NumberFieldStorage::new(field_path, number_base_path)
                             .context("Failed to create NumberFieldStorage")?;
                         self.number_fields.insert(field_id, storage);
@@ -1222,9 +1273,13 @@ impl Index {
                             FieldType::StringFilter,
                         );
                         // Create StringFilterFieldStorage with a stable path under the index data dir.
-                        let string_filter_base_path = self.data_dir.join("string_filter").join(field_id.0.to_string());
-                        let storage = StringFilterFieldStorage::new(field_path, string_filter_base_path)
-                            .context("Failed to create StringFilterFieldStorage")?;
+                        let string_filter_base_path = self
+                            .data_dir
+                            .join("string_filter")
+                            .join(field_id.0.to_string());
+                        let storage =
+                            StringFilterFieldStorage::new(field_path, string_filter_base_path)
+                                .context("Failed to create StringFilterFieldStorage")?;
                         self.string_filter_fields.insert(field_id, storage);
                     }
                     IndexWriteOperationFieldType::Date => {
@@ -1234,7 +1289,8 @@ impl Index {
                             FieldType::Date,
                         );
                         // Create DateFieldStorage with a stable path under the index data dir.
-                        let date_base_path = self.data_dir.join("date").join(field_id.0.to_string());
+                        let date_base_path =
+                            self.data_dir.join("date").join(field_id.0.to_string());
                         let storage = DateFieldStorage::new(field_path, date_base_path)
                             .context("Failed to create DateFieldStorage")?;
                         self.date_fields.insert(field_id, storage);
@@ -1245,7 +1301,8 @@ impl Index {
                             field_id,
                             FieldType::GeoPoint,
                         );
-                        let geopoint_path = self.data_dir.join("geopoint").join(field_id.0.to_string());
+                        let geopoint_path =
+                            self.data_dir.join("geopoint").join(field_id.0.to_string());
                         let storage = GeoPointFieldStorage::new(field_path, geopoint_path)
                             .context("Failed to create GeoPointFieldStorage")?;
                         self.geopoint_fields.insert(field_id, storage);
@@ -1256,7 +1313,8 @@ impl Index {
                             field_id,
                             FieldType::String,
                         );
-                        let string_base_path = self.data_dir.join("string").join(field_id.0.to_string());
+                        let string_base_path =
+                            self.data_dir.join("string").join(field_id.0.to_string());
                         let storage = StringFieldStorage::new(field_path, string_base_path)
                             .context("Failed to create StringFieldStorage")?;
                         self.string_fields.insert(field_id, storage);
@@ -1267,7 +1325,8 @@ impl Index {
                             field_id,
                             FieldType::Vector,
                         );
-                        let embedding_path = self.data_dir.join("embedding").join(field_id.0.to_string());
+                        let embedding_path =
+                            self.data_dir.join("embedding").join(field_id.0.to_string());
                         let storage = EmbeddingFieldStorage::new(field_path, embedding_path, model)
                             .context("Failed to create EmbeddingFieldStorage")?;
                         self.embedding_fields.insert(field_id, storage);
@@ -1346,7 +1405,10 @@ impl Index {
                         IndexedValue::FilterDate2(field_id, ref date_indexed_value) => {
                             if let Some(field) = self.date_fields.get(&field_id) {
                                 if let Err(e) = field.insert_indexed(doc_id, date_indexed_value) {
-                                    error!("Cannot insert indexed date for field {:?}: {}", field_id, e);
+                                    error!(
+                                        "Cannot insert indexed date for field {:?}: {}",
+                                        field_id, e
+                                    );
                                 }
                             } else {
                                 error!("Cannot find date field {:?}", field_id);
@@ -1355,7 +1417,10 @@ impl Index {
                         IndexedValue::FilterGeoPoint(field_id, geopoint) => {
                             if let Some(field) = self.geopoint_fields.get(&field_id) {
                                 if let Err(e) = field.insert(doc_id, geopoint) {
-                                    error!("Cannot insert geopoint for field {:?}: {}", field_id, e);
+                                    error!(
+                                        "Cannot insert geopoint for field {:?}: {}",
+                                        field_id, e
+                                    );
                                 }
                             } else {
                                 error!("Cannot find geopoint field {:?}", field_id);
@@ -1459,7 +1524,10 @@ impl Index {
                         IndexedValue::FilterDate2(field_id, ref date_indexed_value) => {
                             if let Some(field) = self.date_fields.get(&field_id) {
                                 if let Err(e) = field.insert_indexed(doc_id, date_indexed_value) {
-                                    error!("Cannot insert indexed date for field {:?}: {}", field_id, e);
+                                    error!(
+                                        "Cannot insert indexed date for field {:?}: {}",
+                                        field_id, e
+                                    );
                                 }
                             } else {
                                 error!("Cannot find date field {:?}", field_id);
@@ -1468,7 +1536,10 @@ impl Index {
                         IndexedValue::FilterGeoPoint(field_id, geopoint) => {
                             if let Some(field) = self.geopoint_fields.get(&field_id) {
                                 if let Err(e) = field.insert(doc_id, geopoint) {
-                                    error!("Cannot insert geopoint for field {:?}: {}", field_id, e);
+                                    error!(
+                                        "Cannot insert geopoint for field {:?}: {}",
+                                        field_id, e
+                                    );
                                 }
                             } else {
                                 error!("Cannot find geopoint field {:?}", field_id);
@@ -1514,49 +1585,49 @@ impl Index {
 
                 // Delete from bool fields directly (they manage their own deletion)
                 for doc_id in &doc_ids {
-                    for (_, bool_field) in &self.bool_fields {
+                    for bool_field in self.bool_fields.values() {
                         bool_field.delete(*doc_id);
                     }
                 }
 
                 // Delete from geopoint fields directly (they manage their own deletion)
                 for doc_id in &doc_ids {
-                    for (_, geopoint_field) in &self.geopoint_fields {
+                    for geopoint_field in self.geopoint_fields.values() {
                         geopoint_field.delete(*doc_id);
                     }
                 }
 
                 // Delete from string_filter fields directly (they manage their own deletion)
                 for doc_id in &doc_ids {
-                    for (_, string_filter_field) in &self.string_filter_fields {
+                    for string_filter_field in self.string_filter_fields.values() {
                         string_filter_field.delete(*doc_id);
                     }
                 }
 
                 // Delete from date fields directly (they manage their own deletion via I64Storage)
                 for doc_id in &doc_ids {
-                    for (_, date_field) in &self.date_fields {
+                    for date_field in self.date_fields.values() {
                         date_field.delete(*doc_id);
                     }
                 }
 
                 // Delete from number fields directly (they manage their own deletion via dual I64/F64 storages)
                 for doc_id in &doc_ids {
-                    for (_, number_field) in &self.number_fields {
+                    for number_field in self.number_fields.values() {
                         number_field.delete(*doc_id);
                     }
                 }
 
                 // Delete from embedding fields directly (they manage their own deletion via EmbeddingStorage)
                 for doc_id in &doc_ids {
-                    for (_, embedding_field) in &self.embedding_fields {
+                    for embedding_field in self.embedding_fields.values() {
                         embedding_field.delete(*doc_id);
                     }
                 }
 
                 // Delete from string fields directly (they manage their own deletion via StringStorage)
                 for doc_id in &doc_ids {
-                    for (_, string_field) in &self.string_fields {
+                    for string_field in self.string_fields.values() {
                         string_field.delete(*doc_id);
                     }
                 }
@@ -1596,10 +1667,7 @@ impl Index {
     // Since we only have one embedding model for all indexes in a collection,
     // we can get the first index model and return it early.
     pub fn get_model(&self) -> Option<Model> {
-        self.embedding_fields
-            .values()
-            .next()
-            .map(|f| f.model())
+        self.embedding_fields.values().next().map(|f| f.model())
     }
 
     pub async fn stats(&self, is_temp: bool) -> Result<IndexStats> {
@@ -1769,4 +1837,3 @@ impl oramacore_lib::filters::DocId for DocumentId {
         self.0
     }
 }
-
