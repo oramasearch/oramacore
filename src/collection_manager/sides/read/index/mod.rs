@@ -6,7 +6,6 @@ use committed_field::{
 use path_to_index_id_map::PathToIndexId;
 use serde::{Deserialize, Serialize};
 use tracing::{debug, error, info, trace, warn};
-use uncommitted_field::*;
 
 use crate::{
     collection_manager::sides::{
@@ -14,11 +13,7 @@ use crate::{
             context::ReadSideContext,
             index::{
                 committed_field::{
-                    CommittedStringField,
                     DateFieldInfo, GeoPointFieldInfo, StringFieldInfo,
-                },
-                merge::{
-                    merge_field, CommittedField, CommittedFieldMetadata, Field, UncommittedField,
                 },
             },
         },
@@ -27,8 +22,8 @@ use crate::{
     },
     lock::{OramaAsyncLock, OramaAsyncLockReadGuard},
     metrics::{
-        commit::{FIELD_INDEX_COMMIT_CALCULATION_TIME, INDEX_COMMIT_CALCULATION_TIME},
-        FieldIndexCollectionCommitLabels, IndexCollectionCommitLabels,
+        commit::INDEX_COMMIT_CALCULATION_TIME,
+        IndexCollectionCommitLabels,
     },
     python::embeddings::Model,
     types::{
@@ -44,6 +39,7 @@ use self::date_field::DateFieldStorage;
 use self::embedding_field::EmbeddingFieldStorage;
 use self::geopoint_field::GeoPointFieldStorage;
 use self::number_field::NumberFieldStorage;
+use self::string_field::StringFieldStorage;
 use self::string_filter_field::StringFilterFieldStorage;
 use super::collection::{IndexFieldStats, IndexFieldStatsType};
 use super::OffloadFieldConfig;
@@ -59,6 +55,7 @@ mod merge;
 pub mod number_field;
 mod path_to_index_id_map;
 mod sort;
+pub mod string_field;
 pub mod string_filter_field;
 pub mod token_score;
 mod uncommitted_field;
@@ -70,18 +67,16 @@ use crate::{
     types::FieldId,
 };
 use anyhow::{Context, Result};
-pub use committed_field::CommittedStringFieldStats;
 pub use group::GroupValue;
 pub use sort::{DocBatch, DocBatchIntoIter, DocBatchIter, IndexSortContext, SortedDocIdsIter};
 use std::{
     collections::{HashMap, HashSet},
-    path::{Path, PathBuf},
+    path::PathBuf,
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc,
     },
 };
-pub use uncommitted_field::UncommittedStringFieldStats;
 
 #[derive(Debug, Clone, Copy)]
 pub enum DeletionReason {
@@ -93,12 +88,12 @@ pub enum DeletionReason {
 
 #[derive(Default)]
 pub struct UncommittedFields {
-    pub string_fields: HashMap<FieldId, UncommittedStringField>,
+    // No more string_fields here -- they are managed by StringFieldStorage on Index directly.
 }
 
 #[derive(Default)]
 pub struct CommittedFields {
-    pub string_fields: HashMap<FieldId, CommittedStringField>,
+    // No more string_fields here -- they are managed by StringFieldStorage on Index directly.
 }
 
 pub struct IndexSearchStore<'index> {
@@ -110,6 +105,7 @@ pub struct IndexSearchStore<'index> {
     pub date_fields: &'index HashMap<FieldId, DateFieldStorage>,
     pub geopoint_fields: &'index HashMap<FieldId, GeoPointFieldStorage>,
     pub string_filter_fields: &'index HashMap<FieldId, StringFilterFieldStorage>,
+    pub string_fields: &'index HashMap<FieldId, StringFieldStorage>,
     pub embedding_fields: &'index HashMap<FieldId, EmbeddingFieldStorage>,
     pub path_to_field_id_map: &'index PathToIndexId,
     pub uncommitted_deleted_documents: &'index HashSet<DocumentId>,
@@ -167,6 +163,11 @@ pub struct Index {
     // instead of being split across uncommitted/committed field maps.
     embedding_fields: HashMap<FieldId, EmbeddingFieldStorage>,
 
+    // String (fulltext/BM25) fields are managed directly by StringFieldStorage
+    // (backed by oramacore_fields StringStorage) instead of being split across
+    // uncommitted/committed field maps.
+    string_fields: HashMap<FieldId, StringFieldStorage>,
+
     uncommitted_fields: OramaAsyncLock<UncommittedFields>,
     committed_fields: OramaAsyncLock<CommittedFields>,
 
@@ -216,6 +217,7 @@ impl Index {
             geopoint_fields: HashMap::new(),
             string_filter_fields: HashMap::new(),
             embedding_fields: HashMap::new(),
+            string_fields: HashMap::new(),
 
             committed_fields: OramaAsyncLock::new("committed_fields", Default::default()),
             uncommitted_fields: OramaAsyncLock::new("uncommitted_fields", Default::default()),
@@ -256,8 +258,8 @@ impl Index {
         let mut filter_fields: HashMap<Box<[String]>, (FieldId, FieldType)> = Default::default();
         let mut score_fields: HashMap<Box<[String]>, (FieldId, FieldType)> = Default::default();
 
-        let mut uncommitted_fields = UncommittedFields::default();
-        let mut committed_fields = CommittedFields::default();
+        let uncommitted_fields = UncommittedFields::default();
+        let committed_fields = CommittedFields::default();
         let mut bool_fields = HashMap::with_capacity(dump.bool_field_ids.len());
         debug!("Loading bool fields");
         for (field_id, info) in dump.bool_field_ids {
@@ -319,16 +321,15 @@ impl Index {
         }
 
         debug!("Loading string_field_ids");
+        let mut string_fields = HashMap::with_capacity(dump.string_field_ids.len());
         for (field_id, info) in dump.string_field_ids {
             score_fields.insert(info.field_path.clone(), (field_id, FieldType::String));
 
-            uncommitted_fields.string_fields.insert(
-                field_id,
-                UncommittedStringField::empty(info.field_path.clone()),
-            );
-            let field = CommittedStringField::try_load(info, offload_config)
+            debug!("StringFieldStorage::try_load for field_id {:?}", field_id);
+            let field = StringFieldStorage::try_load(info)
                 .context("Cannot load string field")?;
-            committed_fields.string_fields.insert(field_id, field);
+            debug!("DONE");
+            string_fields.insert(field_id, field);
         }
 
         debug!("Loading vector_field_ids");
@@ -388,6 +389,7 @@ impl Index {
             geopoint_fields,
             string_filter_fields,
             embedding_fields,
+            string_fields,
 
             committed_fields: OramaAsyncLock::new("committed_fields", committed_fields),
             uncommitted_fields: OramaAsyncLock::new("uncommitted_fields", uncommitted_fields),
@@ -424,6 +426,7 @@ impl Index {
             date_fields: &self.date_fields,
             geopoint_fields: &self.geopoint_fields,
             string_filter_fields: &self.string_filter_fields,
+            string_fields: &self.string_fields,
             embedding_fields: &self.embedding_fields,
             path_to_field_id_map: &self.path_to_index_id_map,
             uncommitted_deleted_documents: &self.uncommitted_deleted_documents,
@@ -433,17 +436,11 @@ impl Index {
     }
 
     pub async fn get_all_document_ids(&self) -> Result<Vec<DocumentId>> {
-        let (committed_fields, uncommitted_fields) = tokio::join!(
-            self.committed_fields.read("get_all_document_ids"),
-            self.uncommitted_fields.read("get_all_document_ids"),
-        );
-
         let context = token_score::TokenScoreContext::new(
             self.id,
             self.document_count,
-            &uncommitted_fields,
-            &committed_fields,
             &self.embedding_fields,
+            &self.string_fields,
             &self.text_parser,
             &self.context,
             &self.path_to_index_id_map,
@@ -523,10 +520,10 @@ impl Index {
                 .embedding_fields
                 .values()
                 .any(|field| field.has_pending_ops())
-            || uncommitted_fields
+            || self
                 .string_fields
-                .iter()
-                .any(|(_, field)| !field.is_empty())
+                .values()
+                .any(|field| field.has_pending_ops())
             || !self.uncommitted_deleted_documents.is_empty();
         if !something_to_commit && !is_promoted && !is_new {
             // Nothing to commit
@@ -598,45 +595,17 @@ impl Index {
             }
         }
 
-        let merged_strings = merge_type(
-            &data_dir_with_offset,
-            &uncommitted_fields.string_fields,
-            &committed_fields.string_fields,
-            &self.uncommitted_deleted_documents,
-            is_promoted,
-            &self.offload_config,
-            FieldIndexCollectionCommitLabels {
-                collection: collection_id.as_str().to_string(),
-                index: self.id.as_str().to_string(),
-                side: "read",
-                field_type: "string",
-            },
-        )
-        .context("Cannot merge string fields")?;
+        // Compact string fields directly (they manage their own persistence via StringStorage)
+        for (_, string_field) in &self.string_fields {
+            if string_field.has_pending_ops() {
+                string_field.compact(offset.0 as u64)
+                    .context("Cannot compact string field")?;
+            }
+        }
 
-        // Once all changed in merged_* maps are collected,
-        // we can proceed to replace the committed fields with the merged ones
-        // and clear the uncommitted fields
-        // NB: the following drop + write lock lines are not safe:
-        // we calculate the "merged" fields in a read lock, which guarantees
-        // that the fields are not changed while we are reading them.
-        // But we are dropping the read lock and then acquiring a write lock
-        // which is not safe because tokio can switch to another task changing
-        // the fields while we are dropping the read lock.
+        // Drop read locks acquired earlier (no more merge cycle needed for string fields)
         drop(uncommitted_fields);
         drop(committed_fields);
-        // Here something bad can happen inside here
-        // see: https://github.com/tokio-rs/tokio/issues/7282
-        let mut uncommitted_fields = self.uncommitted_fields.write("commit").await;
-        let mut committed_fields = self.committed_fields.write("commit").await;
-
-        overwrite_committed(
-            self.id,
-            offset,
-            merged_strings,
-            &mut committed_fields.string_fields,
-            &mut uncommitted_fields.string_fields,
-        );
 
         // Merge and commit OMC values
         // Get write lock to merge uncommitted_omc into committed_omc
@@ -697,7 +666,7 @@ impl Index {
                 .iter()
                 .map(|(k, v)| (*k, v.metadata()))
                 .collect(),
-            string_field_ids: committed_fields
+            string_field_ids: self
                 .string_fields
                 .iter()
                 .map(|(k, v)| (*k, v.metadata()))
@@ -715,9 +684,6 @@ impl Index {
             // OMC is now stored in dedicated omc.bin file; set to None for new data
             ocm: None,
         });
-
-        drop(uncommitted_fields);
-        drop(committed_fields);
 
         self.try_unload_fields().await;
 
@@ -739,20 +705,6 @@ impl Index {
     }
 
     pub async fn clean_up(&self, index_data_dir: PathBuf) -> Result<()> {
-        let committed_fields = self.committed_fields.read("clean_up").await;
-
-        fn add<FM: CommittedFieldMetadata, CF: CommittedField<FieldMetadata = FM>>(
-            set: &mut HashSet<PathBuf>,
-            fields: &HashMap<FieldId, CF>,
-        ) {
-            set.extend(
-                fields
-                    .values()
-                    .map(CF::metadata)
-                    .map(|m| m.data_dir().clone()),
-            );
-        }
-
         let mut field_data_dirs: HashSet<PathBuf> = HashSet::new();
         // Bool fields are managed separately by BoolFieldStorage
         field_data_dirs.extend(
@@ -790,7 +742,12 @@ impl Index {
                 .values()
                 .map(|f| f.base_path().to_path_buf()),
         );
-        add(&mut field_data_dirs, &committed_fields.string_fields);
+        // String fields are managed separately by StringFieldStorage
+        field_data_dirs.extend(
+            self.string_fields
+                .values()
+                .map(|f| f.base_path().to_path_buf()),
+        );
 
         trace!("Field data dirs to keep: {:?}", field_data_dirs);
 
@@ -869,16 +826,17 @@ impl Index {
             embedding_field.cleanup();
         }
 
+        // Clean up old string field versions (they manage their own persistence via StringStorage)
+        for string_field in self.string_fields.values() {
+            string_field.cleanup();
+        }
+
         Ok(())
     }
 
     async fn try_unload_fields(&self) {
-        let lock = self.committed_fields.read("try_unload_fields").await;
-        for string_field in lock.string_fields.values() {
-            string_field.unload_if_not_used();
-        }
+        // StringStorage uses mmap-based segments, no manual unloading needed.
         // EmbeddingStorage uses mmap-based segments, no manual unloading needed.
-        drop(lock);
     }
 
     #[inline]
@@ -1156,11 +1114,52 @@ impl Index {
             }
         }
 
+        // Relocate string fields from temp_indexes/ path to the permanent indexes/ path.
+        for (field_id, old_storage) in self.string_fields.iter_mut() {
+            if old_storage.has_pending_ops() {
+                let version = old_storage.current_version_number() + 1;
+                old_storage
+                    .compact(version)
+                    .context("Cannot compact string field before promotion")?;
+                old_storage.cleanup();
+            }
+
+            let old_path = old_storage.base_path().to_path_buf();
+            let new_path = new_data_dir.join("string").join(field_id.0.to_string());
+
+            if old_path == new_path {
+                continue;
+            }
+
+            if old_path.exists() {
+                let options = fs_extra::dir::CopyOptions::new().overwrite(true);
+                if let Some(parent) = new_path.parent() {
+                    oramacore_lib::fs::create_if_not_exists(parent.to_path_buf())
+                        .context("Cannot create string field parent directory")?;
+                }
+                fs_extra::copy_items(&[&old_path], new_path.parent().expect("string path must have parent"), &options)
+                    .context("Cannot copy string field directory during promotion")?;
+            }
+
+            let field_path = old_storage.field_path().into();
+            let new_storage = StringFieldStorage::new(field_path, new_path)
+                .context("Cannot create StringFieldStorage at new path after promotion")?;
+            *old_storage = new_storage;
+        }
+
         // Clean up old embedding directory if it exists and is different
         let old_embedding_dir = old_data_dir.join("embedding");
         if old_embedding_dir.exists() {
             if let Err(e) = std::fs::remove_dir_all(&old_embedding_dir) {
                 warn!("Failed to remove old embedding directory {:?}: {}", old_embedding_dir, e);
+            }
+        }
+
+        // Clean up old string directory if it exists and is different
+        let old_string_dir = old_data_dir.join("string");
+        if old_string_dir.exists() {
+            if let Err(e) = std::fs::remove_dir_all(&old_string_dir) {
+                warn!("Failed to remove old string directory {:?}: {}", old_string_dir, e);
             }
         }
 
@@ -1183,7 +1182,6 @@ impl Index {
 
     pub fn update(&mut self, op: IndexWriteOperation) -> Result<()> {
         self.updated_at = Utc::now();
-        let uncommitted_fields = self.uncommitted_fields.get_mut();
         match op {
             IndexWriteOperation::CreateField2 {
                 field_id,
@@ -1258,9 +1256,10 @@ impl Index {
                             field_id,
                             FieldType::String,
                         );
-                        uncommitted_fields
-                            .string_fields
-                            .insert(field_id, UncommittedStringField::empty(field_path));
+                        let string_base_path = self.data_dir.join("string").join(field_id.0.to_string());
+                        let storage = StringFieldStorage::new(field_path, string_base_path)
+                            .context("Failed to create StringFieldStorage")?;
+                        self.string_fields.insert(field_id, storage);
                     }
                     IndexWriteOperationFieldType::Embedding(model) => {
                         self.path_to_index_id_map.insert_score_field(
@@ -1322,11 +1321,17 @@ impl Index {
                             }
                         }
                         IndexedValue::ScoreString(field_id, len, values) => {
-                            if let Some(field) = uncommitted_fields.string_fields.get_mut(&field_id)
-                            {
-                                field.insert(doc_id, len, values);
+                            if let Some(field) = self.string_fields.get(&field_id) {
+                                field.insert_legacy(doc_id, len, values);
                             } else {
-                                error!("Cannot find field {:?} in uncommitted fields", field_id);
+                                error!("Cannot find string field {:?}", field_id);
+                            }
+                        }
+                        IndexedValue::ScoreString2(field_id, indexed_value) => {
+                            if let Some(field) = self.string_fields.get(&field_id) {
+                                field.insert(doc_id, indexed_value);
+                            } else {
+                                error!("Cannot find string field {:?}", field_id);
                             }
                         }
                         IndexedValue::FilterDate(field_id, timestamp) => {
@@ -1429,11 +1434,17 @@ impl Index {
                             }
                         }
                         IndexedValue::ScoreString(field_id, len, values) => {
-                            if let Some(field) = uncommitted_fields.string_fields.get_mut(&field_id)
-                            {
-                                field.insert(doc_id, len, values);
+                            if let Some(field) = self.string_fields.get(&field_id) {
+                                field.insert_legacy(doc_id, len, values);
                             } else {
-                                error!("Cannot find field {:?} in uncommitted fields", field_id);
+                                error!("Cannot find string field {:?}", field_id);
+                            }
+                        }
+                        IndexedValue::ScoreString2(field_id, indexed_value) => {
+                            if let Some(field) = self.string_fields.get(&field_id) {
+                                field.insert(doc_id, indexed_value);
+                            } else {
+                                error!("Cannot find string field {:?}", field_id);
                             }
                         }
                         IndexedValue::FilterDate(field_id, timestamp) => {
@@ -1543,6 +1554,13 @@ impl Index {
                     }
                 }
 
+                // Delete from string fields directly (they manage their own deletion via StringStorage)
+                for doc_id in &doc_ids {
+                    for (_, string_field) in &self.string_fields {
+                        string_field.delete(*doc_id);
+                    }
+                }
+
                 self.uncommitted_deleted_documents.extend(doc_ids);
                 self.document_count = self.document_count.saturating_sub(len);
             }
@@ -1586,15 +1604,6 @@ impl Index {
 
     pub async fn stats(&self, is_temp: bool) -> Result<IndexStats> {
         let mut fields_stats: Vec<IndexFieldStats> = Vec::new();
-
-        let uncommitted_fields = self.uncommitted_fields.read("stats").await;
-        let committed_fields = self.committed_fields.read("stats").await;
-
-        fn extrapolate_stats<S: Into<IndexFieldStatsType>, F: Field<FieldStats = S>>(
-            fields: &HashMap<FieldId, F>,
-        ) -> impl Iterator<Item = IndexFieldStats> + '_ {
-            fields.iter().map(|(k, v)| (k, v).into())
-        }
 
         // Bool fields (managed by BoolFieldStorage, not split across uncommitted/committed)
         for (field_id, bool_field) in &self.bool_fields {
@@ -1646,11 +1655,14 @@ impl Index {
             });
         }
 
-        // Uncommitted
-        fields_stats.extend(extrapolate_stats(&uncommitted_fields.string_fields));
-
-        // Committed
-        fields_stats.extend(extrapolate_stats(&committed_fields.string_fields));
+        // String fields (managed by StringFieldStorage, not split across uncommitted/committed)
+        for (field_id, string_field) in &self.string_fields {
+            fields_stats.push(IndexFieldStats {
+                field_id: *field_id,
+                field_path: string_field.field_path().join("."),
+                stats: IndexFieldStatsType::StringFieldStorage(string_field.stats()),
+            });
+        }
 
         // Embedding fields (managed by EmbeddingFieldStorage, not split across uncommitted/committed)
         for (field_id, embedding_field) in &self.embedding_fields {
@@ -1758,111 +1770,3 @@ impl oramacore_lib::filters::DocId for DocumentId {
     }
 }
 
-impl<S: Into<IndexFieldStatsType>, F: Field<FieldStats = S>> From<(&FieldId, &F)>
-    for IndexFieldStats
-{
-    fn from((k, v): (&FieldId, &F)) -> Self {
-        let stats = v.stats();
-        let field_path = v.field_path().join(".");
-        IndexFieldStats {
-            field_id: *k,
-            field_path,
-            stats: stats.into(),
-        }
-    }
-}
-
-enum MergeResult<T> {
-    Changed(T),
-    Unchanged,
-}
-
-fn merge_type<
-    UF: UncommittedField,
-    CFM: CommittedFieldMetadata,
-    CF: CommittedField<Uncommitted = UF, FieldMetadata = CFM>,
->(
-    data_dir_with_offset: &Path,
-    uncommitted_fields: &HashMap<FieldId, UF>,
-    committed_fields: &HashMap<FieldId, CF>,
-    uncommitted_deleted_documents: &HashSet<DocumentId>,
-    is_promoted: bool,
-    offload_config: &OffloadFieldConfig,
-    telemetry_labels: FieldIndexCollectionCommitLabels,
-) -> Result<HashMap<FieldId, MergeResult<CF>>> {
-    let m = FIELD_INDEX_COMMIT_CALCULATION_TIME.create(telemetry_labels);
-
-    let mut merged_fields = HashMap::new();
-    let field_ids: HashSet<_> = uncommitted_fields
-        .keys()
-        .chain(committed_fields.keys())
-        .copied()
-        .collect();
-    for field_id in field_ids {
-        let data_dir = data_dir_with_offset.join(field_id.0.to_string());
-        let uncommitted = uncommitted_fields.get(&field_id);
-        let committed = committed_fields.get(&field_id);
-        if let Some(merged_field) = merge_field(
-            uncommitted,
-            committed,
-            data_dir,
-            uncommitted_deleted_documents,
-            is_promoted,
-            offload_config,
-        )
-        .context("Cannot merge field")?
-        {
-            merged_fields.insert(field_id, MergeResult::Changed(merged_field));
-        } else {
-            merged_fields.insert(field_id, MergeResult::Unchanged);
-        }
-    }
-
-    drop(m);
-
-    Ok(merged_fields)
-}
-
-fn overwrite_committed<
-    UF: UncommittedField,
-    CFM: CommittedFieldMetadata,
-    CF: CommittedField<Uncommitted = UF, FieldMetadata = CFM>,
->(
-    #[cfg_attr(not(debug_assertions), allow(unused_variables))] index_id: IndexId,
-    #[cfg_attr(not(debug_assertions), allow(unused_variables))] offset: Offset,
-    merged_bools_result: HashMap<FieldId, MergeResult<CF>>,
-    committed_fields: &mut HashMap<FieldId, CF>,
-    uncommitted_fields: &mut HashMap<FieldId, UF>,
-) {
-    for (field_id, merged) in merged_bools_result {
-        match merged {
-            MergeResult::Changed(merged) => {
-                #[cfg(debug_assertions)]
-                {
-                    let metadata = merged.metadata();
-                    let data_dir = metadata.data_dir();
-                    let mut components = data_dir.components().rev();
-                    let offset_str = components.nth(1).unwrap();
-                    assert_eq!(
-                        offset_str.as_os_str().to_str().unwrap(),
-                        &format!("offset-{}", offset.0),
-                        "Field data dir offset mismatch after commit"
-                    );
-                    // Check if promoting to runtime index was done correctly
-                    let index_id_on_fs = components.next().unwrap();
-                    assert_eq!(
-                        index_id_on_fs.as_os_str().to_str().unwrap(),
-                        index_id.as_str(),
-                        "Field index id mismatch after commit"
-                    );
-                    assert!(std::fs::exists(data_dir).unwrap());
-                }
-                committed_fields.insert(field_id, merged);
-            }
-            MergeResult::Unchanged => {}
-        }
-        if let Some(uncommitted) = uncommitted_fields.get_mut(&field_id) {
-            uncommitted.clear();
-        }
-    }
-}

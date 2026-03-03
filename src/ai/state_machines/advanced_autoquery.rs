@@ -2078,15 +2078,11 @@ enum FieldStatType {
         document_count: usize,
         keys: Option<Vec<String>>,
     },
-    #[serde(rename = "uncommitted_string")]
-    UncommittedString {
-        key_count: usize,
-        global_info: GlobalInfo,
-    },
-    #[serde(rename = "committed_string")]
-    CommittedString {
-        key_count: usize,
-        global_info: GlobalInfo,
+    #[serde(rename = "string")]
+    String {
+        #[allow(dead_code)]
+        unique_terms_count: usize,
+        total_documents: u64,
     },
     #[serde(rename = "embedding")]
     Embedding {
@@ -2106,9 +2102,9 @@ impl FieldStatType {
             } => false_count + true_count,
             Number { count, .. } => *count,
             StringFilter { document_count, .. } => *document_count,
-            UncommittedString { global_info, .. } | CommittedString { global_info, .. } => {
-                global_info.total_documents
-            }
+            String {
+                total_documents, ..
+            } => *total_documents as usize,
             Embedding { embedding_count, .. } => *embedding_count,
         }
     }
@@ -2119,7 +2115,7 @@ impl FieldStatType {
             Bool { .. } => "boolean",
             Number { .. } => "number",
             StringFilter { .. } => "string_filter",
-            UncommittedString { .. } | CommittedString { .. } => "string",
+            String { .. } => "string",
             Embedding { .. } => "vector",
         }
     }
@@ -2127,7 +2123,7 @@ impl FieldStatType {
     fn is_unfilterable_string(&self) -> bool {
         matches!(
             self,
-            FieldStatType::UncommittedString { .. } | FieldStatType::CommittedString { .. }
+            FieldStatType::String { .. }
         )
     }
 
@@ -2137,12 +2133,6 @@ impl FieldStatType {
             _ => None,
         }
     }
-}
-
-#[derive(Debug, Default, Clone, Serialize, Deserialize)]
-struct GlobalInfo {
-    total_documents: usize,
-    total_document_length: usize,
 }
 
 #[derive(Deserialize, Debug)]

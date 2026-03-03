@@ -87,66 +87,24 @@ async fn test_offload_string_field() {
     assert_eq!(search_result.count, 1);
     assert_eq!(search_result.hits.len(), 1);
 
-    // Check field stats after search - field should be loaded and have activity
+    // Check field stats after search - field should exist and have activity
     let stats = collection_client.reader_stats().await.unwrap();
-    let IndexFieldStatsType::CommittedString(string_field_stats) =
-        get_field_stats(&stats, index_client.index_id, "text", "committed_string")
+    let IndexFieldStatsType::StringFieldStorage(string_field_stats) =
+        get_field_stats(&stats, index_client.index_id, "text", "string")
             .expect("Field stats should exist after commit")
     else {
-        panic!("Expected committed string field stats");
+        panic!("Expected string field stats");
     };
     assert!(
-        string_field_stats
-            .loaded
-            .load(std::sync::atomic::Ordering::Acquire),
-        "Field should be loaded after commit and search"
-    );
-    assert!(
-        string_field_stats.key_count > 0,
+        string_field_stats.unique_terms_count > 0,
         "Field should contain indexed terms"
     );
 
-    // Wait for automatic field unloading using wait_for pattern
-    // This continuously commits and checks until the field is unloaded
-    let collection_id = collection_client.collection_id;
-    let write_api_key = collection_client.write_api_key;
-    let read_api_key = collection_client.read_api_key.clone();
-    wait_for(&test_context, |test_context| {
-        let index_id = index_client.index_id;
-        let read_api_key = read_api_key.clone();
-        async move {
-            // Trigger commit to check for unloading
-            test_context.commit_all().await?;
+    // StringStorage uses mmap-based segments and does not need manual unloading.
+    // Simply verify that search still works after commit.
+    test_context.commit_all().await.unwrap();
 
-            // Get the collection client and check if field was unloaded
-            let collection_client = test_context.get_test_collection_client(
-                collection_id,
-                write_api_key,
-                read_api_key,
-            )?;
-            let stats = collection_client.reader_stats().await?;
-            let IndexFieldStatsType::CommittedString(string_field_stats) =
-                get_field_stats(&stats, index_id, "text", "committed_string")
-                    .ok_or_else(|| anyhow::anyhow!("Field stats should exist after commit"))?
-            else {
-                return Err(anyhow::anyhow!("Expected committed string field stats"));
-            };
-
-            if string_field_stats
-                .loaded
-                .load(std::sync::atomic::Ordering::Acquire)
-            {
-                return Err(anyhow::anyhow!("Field still loaded, waiting for unload"));
-            }
-
-            Ok(())
-        }
-        .boxed()
-    })
-    .await
-    .expect("Field should be unloaded after timeout");
-
-    // Perform search - this should trigger automatic reloading of the field
+    // Perform search - should still work after commit
     let search_result = collection_client
         .search(
             json!({
@@ -165,22 +123,20 @@ async fn test_offload_string_field() {
         format!("{}:{}", index_client.index_id, "2")
     );
 
-    println!("Search after reload successful\n\n\n\n\n\n {search_result:#?}");
+    println!("Search after commit successful\n\n\n\n\n\n {search_result:#?}");
 
-    // Check field stats after search - field should be loaded again
+    // Check field stats still exist
     let stats = collection_client.reader_stats().await.unwrap();
-    let IndexFieldStatsType::CommittedString(string_field_stats) =
-        get_field_stats(&stats, index_client.index_id, "text", "committed_string")
+    let IndexFieldStatsType::StringFieldStorage(string_field_stats) =
+        get_field_stats(&stats, index_client.index_id, "text", "string")
             .expect("Field stats should exist after commit")
     else {
-        panic!("Expected committed string field stats");
+        panic!("Expected string field stats");
     };
-    println!("Field stats after reload: stats={string_field_stats:#?}",);
+    println!("Field stats after commit: stats={string_field_stats:#?}",);
     assert!(
-        string_field_stats
-            .loaded
-            .load(std::sync::atomic::Ordering::Acquire),
-        "Field should be loaded again after search"
+        string_field_stats.total_documents > 0,
+        "Field should still have documents"
     );
 
     // Verify field still works correctly with different search
@@ -225,8 +181,8 @@ fn get_field_stats<'s>(
             }
 
             match t {
-                "committed_string" => {
-                    matches!(f.stats, IndexFieldStatsType::CommittedString(_))
+                "string" => {
+                    matches!(f.stats, IndexFieldStatsType::StringFieldStorage(_))
                 }
                 "embedding" => {
                     matches!(f.stats, IndexFieldStatsType::EmbeddingFieldStorage(_))

@@ -187,6 +187,19 @@ impl<K: Eq + Hash + Debug + Clone> BM25Scorer<K> {
         }
     }
 
+    /// Add a pre-computed normalized TF contribution for the current term.
+    ///
+    /// Use this when the normalized TF has already been computed externally
+    /// (e.g., by `oramacore_fields::string::StringStorage::collect_contributions()`).
+    /// The `normalized_tf` value should already include field boost, length normalization,
+    /// and any exact match boost.
+    pub fn add_precomputed_field(&mut self, key: K, normalized_tf: f32, weight: f32) {
+        match self {
+            Self::Plain(scorer) => scorer.add_field(key, normalized_tf, weight),
+            Self::WithThreshold(scorer) => scorer.add_field(key, normalized_tf, weight),
+        }
+    }
+
     /// Finalize the current term and compute BM25F scores
     pub fn finalize_term(
         &mut self,

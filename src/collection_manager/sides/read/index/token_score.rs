@@ -1,6 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use anyhow::{bail, Context as _, Result};
+use oramacore_fields::string::{Bm25Params, SearchParams};
 use oramacore_lib::filters::FilterResult;
 use tracing::debug;
 
@@ -8,7 +9,7 @@ use crate::{
     ai::llms::{self, LLMService},
     collection_manager::{
         bm25::BM25Scorer,
-        sides::read::index::committed_field::{StringSearchParams, VectorSearchParams},
+        sides::read::index::committed_field::VectorSearchParams,
     },
     python::embeddings::Intent,
     types::{
@@ -18,8 +19,10 @@ use crate::{
 };
 
 use super::{
-    embedding_field::EmbeddingFieldStorage, merge::Field, path_to_index_id_map::PathToIndexId,
-    CommittedFields, FieldType, ReadSideContext, TextParser, UncommittedFields,
+    embedding_field::EmbeddingFieldStorage,
+    path_to_index_id_map::PathToIndexId,
+    string_field::{DocIdSetFilter, StringFieldStorage},
+    FieldType, ReadSideContext, TextParser,
 };
 
 /// Parameters required for token score calculation.
@@ -47,9 +50,8 @@ pub struct TokenScoreParams<'search> {
 pub struct TokenScoreContext<'index> {
     index_id: IndexId,
     document_count: u64,
-    uncommitted_fields: &'index UncommittedFields,
-    committed_fields: &'index CommittedFields,
     embedding_fields: &'index HashMap<FieldId, EmbeddingFieldStorage>,
+    string_fields: &'index HashMap<FieldId, StringFieldStorage>,
     text_parser: &'index TextParser,
     context: &'index ReadSideContext,
     path_to_field_id_map: &'index PathToIndexId,
@@ -65,9 +67,8 @@ impl<'index> TokenScoreContext<'index> {
     pub fn new(
         index_id: IndexId,
         document_count: u64,
-        uncommitted_fields: &'index UncommittedFields,
-        committed_fields: &'index CommittedFields,
         embedding_fields: &'index HashMap<FieldId, EmbeddingFieldStorage>,
+        string_fields: &'index HashMap<FieldId, StringFieldStorage>,
         text_parser: &'index TextParser,
         context: &'index ReadSideContext,
         path_to_field_id_map: &'index PathToIndexId,
@@ -75,9 +76,8 @@ impl<'index> TokenScoreContext<'index> {
         Self {
             index_id,
             document_count,
-            uncommitted_fields,
-            committed_fields,
             embedding_fields,
+            string_fields,
             text_parser,
             context,
             path_to_field_id_map,
@@ -156,7 +156,7 @@ impl<'index> TokenScoreContext<'index> {
     ///
     /// Handles three cases:
     /// - Specified: Uses the provided field names (validates they exist and are strings)
-    /// - None/Star: Uses all string fields from uncommitted and committed collections
+    /// - None/Star: Uses all string fields from the string_fields map
     fn calculate_string_properties(&self, properties: &Properties) -> Result<Vec<FieldId>> {
         let properties: HashSet<_> = match properties {
             Properties::Specified(properties) => {
@@ -173,10 +173,8 @@ impl<'index> TokenScoreContext<'index> {
                 field_ids
             }
             Properties::None | Properties::Star => self
-                .uncommitted_fields
                 .string_fields
                 .keys()
-                .chain(self.committed_fields.string_fields.keys())
                 .copied()
                 .collect(),
         };
@@ -184,11 +182,12 @@ impl<'index> TokenScoreContext<'index> {
         Ok(properties.into_iter().collect())
     }
 
-    /// Performs full-text search using BM25 scoring algorithm.
+    /// Performs full-text search using BM25F scoring via `collect_contributions()`.
     ///
-    /// This method tokenizes the search term, searches across all specified properties,
-    /// and computes BM25 scores for matching documents. It handles both uncommitted
-    /// and committed field data.
+    /// For each field, calls `collect_contributions()` which returns raw per-token
+    /// normalized TF values (already including field boost, length normalization,
+    /// and exact_match_boost). These are fed into the BM25Scorer which computes
+    /// cross-field IDF saturation.
     fn search_full_text(
         &self,
         term: &str,
@@ -226,99 +225,65 @@ impl<'index> TokenScoreContext<'index> {
         // Use the collection's total document count for canonical BM25F
         let total_documents = self.document_count as f32;
 
-        let mut field_global_info: HashMap<FieldId, _> = HashMap::new();
-        let mut corpus_dfs: HashMap<String, usize> = HashMap::new();
+        // Build a filter adapter if we have filtered doc IDs
+        let filter_adapter = filtered_doc_ids.map(DocIdSetFilter::new);
 
-        // Single pass to compute both global info and corpus document frequencies
-        for token in &tokens {
-            let mut total_corpus_docs = HashSet::new();
-
-            for field_id in &properties {
-                let Some(field) = self.uncommitted_fields.string_fields.get(field_id) else {
-                    continue;
-                };
-                let committed = self.committed_fields.string_fields.get(field_id);
-
-                // Compute global info only once per field
-                if !field_global_info.contains_key(field_id) {
-                    let global_info = if let Some(committed) = committed {
-                        committed.stats().global_info.clone() + field.global_info()
-                    } else {
-                        field.global_info()
-                    };
-                    field_global_info.insert(*field_id, global_info);
-                }
-
-                // Collect unique document IDs for this term across all fields for corpus DF calculation
-                let mut corpus_scorer = BM25Scorer::plain();
-                let single_token_slice = std::slice::from_ref(token);
-                let corpus_context = StringSearchParams {
-                    tokens: single_token_slice,
-                    exact_match: exact,
-                    boost: 1.0,
-                    field_id: *field_id,
-                    global_info: field_global_info[field_id].clone(),
-                    filtered_doc_ids,
-                    tolerance,
-                };
-
-                field
-                    .search(&corpus_context, &mut corpus_scorer)
-                    .context("Cannot perform corpus search")?;
-                if let Some(committed_field) = committed {
-                    committed_field
-                        .search(&corpus_context, &mut corpus_scorer)
-                        .context("Cannot perform corpus search")?;
-                }
-
-                // Add documents found in this field to the corpus count
-                total_corpus_docs.extend(corpus_scorer.get_scores().keys().cloned());
-            }
-
-            corpus_dfs.insert(token.clone(), total_corpus_docs.len().max(1));
+        // Collect contributions from all fields at once.
+        // Each call returns per-token normalized TF values that already include
+        // field boost, length normalization, and exact_match_boost.
+        let mut field_contributions = Vec::new();
+        for field_id in &properties {
+            let Some(string_field) = self.string_fields.get(field_id) else {
+                continue;
+            };
+            let field_boost = boost.get(field_id).copied().unwrap_or(1.0);
+            let search_params = SearchParams {
+                tokens: &tokens,
+                exact_match: exact,
+                boost: field_boost,
+                bm25_params: Bm25Params::default(),
+                tolerance: if exact { Some(0) } else { tolerance },
+                phrase_boost: None,
+            };
+            let contributions = match &filter_adapter {
+                Some(adapter) => string_field
+                    .collect_contributions_with_filter(&search_params, adapter)
+                    .context("Cannot collect string field contributions with filter")?,
+                None => string_field
+                    .collect_contributions(&search_params)
+                    .context("Cannot collect string field contributions")?,
+            };
+            field_contributions.push((*field_id, contributions));
         }
 
-        // Now perform the actual scoring with pre-computed corpus frequencies
-        for (term_index, token) in tokens.iter().enumerate() {
+        // Process token by token for cross-field BM25F scoring.
+        // For each token, aggregate per_doc_ntf across fields, compute corpus-level
+        // document frequency, and finalize with IDF saturation.
+        for (term_index, _token) in tokens.iter().enumerate() {
             scorer.reset_term();
-            let corpus_df = corpus_dfs[token];
 
-            // Then, add field contributions for this term with filtering applied
-            for field_id in &properties {
-                let Some(field) = self.uncommitted_fields.string_fields.get(field_id) else {
-                    continue;
-                };
-                let committed = self.committed_fields.string_fields.get(field_id);
+            // Collect all unique document IDs across all fields for this token
+            // to compute corpus-level document frequency.
+            let mut corpus_docs: HashSet<u64> = HashSet::new();
 
-                let global_info = field_global_info[field_id].clone();
-
-                let boost = boost.get(field_id).copied().unwrap_or(1.0);
-
-                // Reuse the same token slice to avoid allocation
-                let single_token_slice = std::slice::from_ref(token);
-
-                let context = StringSearchParams {
-                    tokens: single_token_slice,
-                    exact_match: exact,
-                    boost,
-                    field_id: *field_id,
-                    global_info,
-                    filtered_doc_ids,
-                    tolerance,
-                };
-
-                // Search this field for this specific term (with filters applied)
-                field
-                    .search(&context, &mut scorer)
-                    .context("Cannot perform search")?;
-
-                if let Some(committed_field) = committed {
-                    committed_field
-                        .search(&context, &mut scorer)
-                        .context("Cannot perform search")?;
+            for (_field_id, contributions) in &field_contributions {
+                if let Some(tc) = contributions.token_contributions.get(term_index) {
+                    for &(doc_id, ntf) in &tc.per_doc_ntf {
+                        corpus_docs.insert(doc_id);
+                        // ntf already includes boost + length normalization + exact_match_boost.
+                        // Pass weight=1.0 since the boost is already baked in.
+                        scorer.add_precomputed_field(
+                            DocumentId(doc_id),
+                            ntf,
+                            1.0,
+                        );
+                    }
                 }
             }
 
+            let corpus_df = corpus_docs.len().max(1);
+
+            // Finalize with corpus-level IDF
             match &scorer {
                 BM25Scorer::Plain(_) => {
                     scorer.finalize_term_plain(
@@ -496,7 +461,6 @@ impl<'index> TokenScoreContext<'index> {
     /// # Arguments
     ///
     /// * `params` - The token score parameters (mode, properties, boost, limit)
-    /// * `search_document_context` - Context containing filtered/deleted document information
     /// * `results` - Mutable map to populate with document IDs and their scores
     ///
     /// # Returns

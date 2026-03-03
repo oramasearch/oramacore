@@ -141,12 +141,6 @@ struct CollectionPropertiesWrapper {
 
 // ===== Statistics Types =====
 
-#[derive(Debug, Default, Clone, Serialize, Deserialize)]
-pub struct GlobalInfo {
-    pub total_documents: usize,
-    pub total_document_length: usize,
-}
-
 /// Unified representation of field statistics
 #[derive(Deserialize, Debug)]
 #[serde(tag = "type")]
@@ -168,17 +162,11 @@ enum FieldStatType {
         document_count: usize,
         keys: Option<Vec<String>>,
     },
-    #[serde(rename = "uncommitted_string")]
-    UncommittedString {
+    #[serde(rename = "string")]
+    String {
         #[allow(dead_code)]
-        key_count: usize,
-        global_info: GlobalInfo,
-    },
-    #[serde(rename = "committed_string")]
-    CommittedString {
-        #[allow(dead_code)]
-        key_count: usize,
-        global_info: GlobalInfo,
+        unique_terms_count: usize,
+        total_documents: u64,
     },
     #[serde(rename = "embedding")]
     Embedding {
@@ -199,9 +187,9 @@ impl FieldStatType {
             } => false_count + true_count,
             Number { count, .. } => *count,
             StringFilter { document_count, .. } => *document_count,
-            UncommittedString { global_info, .. } | CommittedString { global_info, .. } => {
-                global_info.total_documents
-            }
+            String {
+                total_documents, ..
+            } => *total_documents as usize,
             Embedding { embedding_count, .. } => *embedding_count,
         }
     }
@@ -213,7 +201,7 @@ impl FieldStatType {
             Bool { .. } => "boolean",
             Number { .. } => "number",
             StringFilter { .. } => "string_filter",
-            UncommittedString { .. } | CommittedString { .. } => "string",
+            String { .. } => "string",
             Embedding { .. } => "vector",
         }
     }
@@ -222,7 +210,7 @@ impl FieldStatType {
     fn is_unfilterable_string(&self) -> bool {
         matches!(
             self,
-            FieldStatType::UncommittedString { .. } | FieldStatType::CommittedString { .. }
+            FieldStatType::String { .. }
         )
     }
 

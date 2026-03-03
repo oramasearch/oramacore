@@ -11,7 +11,7 @@ use crate::{
         global_info::GlobalInfo,
         sides::{
             read::index::{
-                committed_field::StringSearchParams,
+                committed_field::string::StringSearchParams,
                 merge::{Field, UncommittedField},
             },
             InsertStringTerms, TermStringField,

@@ -30,7 +30,6 @@ use crate::{
         read::{
             analytics::SearchAnalyticEventOrigin,
             collection_document_storage::CollectionDocumentStorage, context::ReadSideContext,
-            CommittedStringFieldStats,
             ReadError,
         },
         write::index::EnumStrategy,
@@ -47,7 +46,6 @@ use super::{
     index::{Index, IndexStats},
     CollectionCommitConfig,
     DeletionReason, OffloadFieldConfig, ReadSide,
-    UncommittedStringFieldStats,
 };
 use oramacore_lib::values::ValuesReader;
 
@@ -1287,8 +1285,7 @@ impl CollectionReader {
                 index_stats.fields_stats.retain(|stat| {
                     !matches!(
                         &stat.stats,
-                        IndexFieldStatsType::CommittedString(_)
-                            | IndexFieldStatsType::UncommittedString(_)
+                        IndexFieldStatsType::StringFieldStorage(_)
                             | IndexFieldStatsType::EmbeddingFieldStorage(_)
                     )
                 });
@@ -1492,10 +1489,8 @@ pub enum IndexFieldStatsType {
     #[serde(rename = "string_filter")]
     StringFilterFieldStorage(super::index::string_filter_field::StringFilterFieldStorageStats),
 
-    #[serde(rename = "uncommitted_string")]
-    UncommittedString(UncommittedStringFieldStats),
-    #[serde(rename = "committed_string")]
-    CommittedString(CommittedStringFieldStats),
+    #[serde(rename = "string")]
+    StringFieldStorage(super::index::string_field::StringFieldStorageStats),
 
     #[serde(rename = "embedding")]
     EmbeddingFieldStorage(super::index::embedding_field::EmbeddingFieldStorageStats),

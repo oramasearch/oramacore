@@ -330,9 +330,8 @@ async fn search_on_indexes(
         let token_score_context = TokenScoreContext::new(
             index.id(),
             search_store.document_count,
-            &search_store.uncommitted_fields,
-            &search_store.committed_fields,
             search_store.embedding_fields,
+            search_store.string_fields,
             search_store.text_parser,
             search_store.read_side_context,
             search_store.path_to_field_id_map,
@@ -388,9 +387,8 @@ async fn search_on_indexes(
                     let token_score_context = TokenScoreContext::new(
                         index.id(),
                         search_store.document_count,
-                        &search_store.uncommitted_fields,
-                        &search_store.committed_fields,
                         search_store.embedding_fields,
+                        search_store.string_fields,
                         search_store.text_parser,
                         search_store.read_side_context,
                         search_store.path_to_field_id_map,

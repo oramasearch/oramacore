@@ -1,5 +1,5 @@
 use std::{
-    collections::{hash_map::Entry, HashMap},
+    collections::HashMap,
     fmt::Debug,
     sync::Arc,
 };
@@ -13,21 +13,27 @@ use tokio::sync::mpsc::Sender;
 use crate::{
     ai::automatic_embeddings_selector::{AutomaticEmbeddingsSelector, ChosenProperties},
     collection_manager::sides::{
-        Term, TermStringField, read::number_field::NumberFieldIndexedValue, write::{WriteSideContext, embedding::MultiEmbeddingCalculationRequest, index}
+        Term, TermStringField, read::number_field::NumberFieldIndexedValue, write::{WriteSideContext, embedding::MultiEmbeddingCalculationRequest}
     },
     lock::OramaAsyncLock,
     python::embeddings::Model,
-    types::{CollectionId, DocumentId, FieldId, IndexId, Number, OramaDate, SerializableNumber},
+    types::{CollectionId, DocumentId, FieldId, IndexId, OramaDate, SerializableNumber},
 };
 
-use oramacore_fields::{bool::{BoolIndexer, IndexedValue as BoolIndexedValue}, number::NumberIndexer};
+use oramacore_fields::bool::{BoolIndexer, IndexedValue as BoolIndexedValue};
 use oramacore_fields::geopoint::{GeoPointIndexer, IndexedValue as GeoPointIndexedValue};
-use oramacore_fields::number::IndexedValue as NumberIndexedValue;
+use oramacore_fields::number::{IndexedValue as NumberIndexedValue, NumberIndexer};
+use oramacore_fields::string::{
+    IndexedValue as StringIndexedValue, StringIndexer as FieldsStringIndexer,
+    Tokenizer as FieldsTokenizer,
+};
 use oramacore_fields::string_filter::{
     IndexedValue as StringFilterIndexedValue, StringIndexer,
 };
 use oramacore_lib::nlp::{
-    TextParser, chunker::{Chunker, ChunkerConfig}, locales::Locale, stop_words::el
+    TextParser,
+    chunker::{Chunker, ChunkerConfig},
+    locales::Locale,
 };
 
 use super::{get_value, EmbeddingStringCalculation};
@@ -700,11 +706,21 @@ impl IndexScoreField {
     }
 }
 
+/// Bridge between the main crate's `TextParser` and the `oramacore_fields` `Tokenizer` trait.
+struct TextParserTokenizer(Arc<TextParser>);
+
+impl FieldsTokenizer for TextParserTokenizer {
+    fn tokenize_and_stem(&self, input: &str) -> Vec<(String, Option<String>)> {
+        self.0.tokenize_and_stem(input)
+    }
+}
+
 pub struct StringScoreField {
     field_id: FieldId,
     field_path: Box<[String]>,
     is_array: bool,
     parser: Arc<TextParser>,
+    indexer: FieldsStringIndexer<TextParserTokenizer>,
 }
 impl StringScoreField {
     pub fn new(
@@ -713,88 +729,21 @@ impl StringScoreField {
         is_array: bool,
         parser: Arc<TextParser>,
     ) -> Self {
+        let indexer = FieldsStringIndexer::new(is_array, TextParserTokenizer(parser.clone()));
         Self {
             field_id,
             field_path,
             is_array,
             parser,
+            indexer,
         }
     }
 
     pub async fn index_value(&self, value: &Value) -> Result<Vec<IndexedValue>> {
-        let data = match value {
-            Value::String(s) => self.parser.tokenize_and_stem(s),
-            Value::Array(arr) => {
-                let all_string_field = arr.iter().filter_map(|v| {
-                    if let Value::String(s) = v {
-                        Some(s)
-                    } else {
-                        None
-                    }
-                });
-
-                let mut data = Vec::new();
-                for value in all_string_field {
-                    data.extend(self.parser.tokenize_and_stem(value));
-                }
-                data
-            }
-            _ => return Ok(vec![]),
+        let Some(indexed) = self.indexer.index_json(value) else {
+            return Ok(vec![]);
         };
-
-        let field_length = data.len().min(u16::MAX as usize - 1) as u16;
-        let mut terms: HashMap<Term, TermStringField> = Default::default();
-        for (position, (original, stemmeds)) in data.into_iter().enumerate() {
-            // This `for` loop wants to build the `terms` hashmap
-            // it is a `HashMap<String, (u32, HashMap<(DocumentId, FieldId), Posting>)>`
-            // that means we:
-            // term as string -> (term count, HashMap<(DocumentId, FieldId), Posting>)
-            // Here we don't want to store Posting into PostingListStorage,
-            // that is business of the IndexReader.
-            // Instead, here we want to extrapolate data from the document.
-            // The real storage leaves in the IndexReader.
-            // `original` & `stemmeds` appears in the `terms` hashmap with the "same value"
-            // ie: the position of the origin and stemmed term are the same.
-
-            let original = Term(original);
-            match terms.entry(original) {
-                Entry::Occupied(mut entry) => {
-                    let p: &mut TermStringField = entry.get_mut();
-
-                    p.exact_positions.push(position);
-                }
-                Entry::Vacant(entry) => {
-                    let p = TermStringField {
-                        positions: vec![],
-                        exact_positions: vec![position],
-                    };
-                    entry.insert(p);
-                }
-            };
-
-            if let Some(stemmed) = stemmeds {
-                let stemmed = Term(stemmed);
-                match terms.entry(stemmed) {
-                    Entry::Occupied(mut entry) => {
-                        let p: &mut TermStringField = entry.get_mut();
-                        p.positions.push(position);
-                    }
-                    Entry::Vacant(entry) => {
-                        let p = TermStringField {
-                            exact_positions: vec![],
-                            positions: vec![position],
-                        };
-                        entry.insert(p);
-                    }
-                };
-            }
-        }
-
-        Ok(vec![IndexedValue::ScoreString(
-            self.field_id,
-            field_length,
-            terms,
-        )])
+        Ok(vec![IndexedValue::ScoreString2(self.field_id, indexed)])
     }
 }
 
@@ -1093,6 +1042,9 @@ pub enum IndexedValue {
     /// New variant that carries a `NumberFieldIndexedValue` (either I64 or F64),
     /// supporting the dual-storage number field.
     FilterNumber2(FieldId, NumberFieldIndexedValue),
+    /// New variant that carries an `oramacore_fields::string::IndexedValue` directly,
+    /// bypassing the old manual tokenization path.
+    ScoreString2(FieldId, StringIndexedValue),
 }
 
 fn join_vec_strings(v: &[&String]) -> String {
@@ -1130,12 +1082,17 @@ mod tests {
         let parsed = string_field.index_value(&value).await.unwrap();
 
         assert_eq!(parsed.len(), 1);
-        let IndexedValue::ScoreString(_, _, indexed) = &parsed[0] else {
-            panic!("Expected ScoreString variant");
+        let IndexedValue::ScoreString2(field_id, indexed) = &parsed[0] else {
+            panic!("Expected ScoreString2 variant");
         };
-        assert_eq!(indexed.len(), 3);
-        assert!(indexed.contains_key(&Term("first".to_string())));
-        assert!(indexed.contains_key(&Term("second".to_string())));
-        assert!(indexed.contains_key(&Term("third".to_string())));
+        assert_eq!(*field_id, FieldId(1));
+
+        // Verify indexed value via serde: terms should contain "first", "second", "third"
+        let serialized = serde_json::to_value(indexed).expect("should serialize");
+        let terms = serialized["terms"].as_object().expect("terms should be object");
+        assert_eq!(terms.len(), 3);
+        assert!(terms.contains_key("first"));
+        assert!(terms.contains_key("second"));
+        assert!(terms.contains_key("third"));
     }
 }

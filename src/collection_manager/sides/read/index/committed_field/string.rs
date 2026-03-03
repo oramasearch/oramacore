@@ -23,7 +23,7 @@ use crate::{
                     create_counter, should_offload, update_invocation_counter, Cow,
                 },
                 merge::{CommittedField, CommittedFieldMetadata, Field},
-                uncommitted_field::UncommittedStringField,
+                uncommitted_field::string::UncommittedStringField,
             },
             OffloadFieldConfig,
         },
@@ -791,6 +791,58 @@ impl PostingIdStorage {
     }
 }
 
+/// Reads old FST-format string field data and returns (doc_id, IndexedValue) pairs
+/// for migration into the new StringStorage format.
+///
+/// The old format stores:
+/// - FST: term -> posting_list_id
+/// - PostingIdStorage: posting_list_id -> Vec<(DocumentId, (exact_positions, stemmed_positions))>
+/// - DocumentLengthsPerDocument: DocumentId -> field_length
+///
+/// We group terms by document, build an IndexedValue per doc, and return them.
+pub fn load_old_fst_data(
+    data_dir: &Path,
+) -> Result<Vec<(u64, oramacore_fields::string::IndexedValue)>> {
+    use oramacore_fields::string::{IndexedValue as StringIndexedValue, TermData};
+
+    let index = FSTIndex::load(data_dir.join(FST_INDEX_FILE_NAME))?;
+    let posting_storage = PostingIdStorage::load(data_dir.join(POSTING_ID_INDEX_FILE_NAME))?;
+    let document_lengths =
+        DocumentLengthsPerDocument::load(data_dir.join(DOCUMENT_LENGTHS_PER_DOCUMENT_FILE_NAME))?;
+
+    // Collect per-document term data: doc_id -> HashMap<term_string, TermData>
+    let mut per_doc: HashMap<u64, HashMap<String, TermData>> = HashMap::new();
+
+    for (term_bytes, posting_list_id) in index.iter() {
+        let term_string = String::from_utf8_lossy(&term_bytes).to_string();
+
+        let Some(postings) = posting_storage.get_posting(&posting_list_id) else {
+            continue;
+        };
+
+        for (doc_id, (exact_positions, stemmed_positions)) in postings {
+            let doc_terms = per_doc.entry(doc_id.0).or_default();
+            let term_data = TermData::new(
+                exact_positions.iter().map(|p| *p as u32).collect(),
+                stemmed_positions.iter().map(|p| *p as u32).collect(),
+            );
+            // If the same term appears multiple times for the same doc (shouldn't happen normally),
+            // we just overwrite since the FST maps term -> single posting_list_id
+            doc_terms.insert(term_string.clone(), term_data);
+        }
+    }
+
+    // Build IndexedValue for each document
+    let mut result = Vec::with_capacity(per_doc.len());
+    for (doc_id, terms) in per_doc {
+        let field_length = document_lengths.get_length(&DocumentId(doc_id)) as u16;
+        let indexed_value = StringIndexedValue::new(field_length, terms);
+        result.push((doc_id, indexed_value));
+    }
+
+    Ok(result)
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct StringFieldInfo {
     pub field_path: Box<[String]>,
@@ -814,7 +866,7 @@ impl CommittedFieldMetadata for StringFieldInfo {
 mod tests {
     use crate::{
         collection_manager::sides::{
-            read::index::uncommitted_field::UncommittedStringField, Term, TermStringField,
+            read::index::uncommitted_field::string::UncommittedStringField, Term, TermStringField,
         },
         tests::utils::{generate_new_path, init_log},
     };
