@@ -30,8 +30,7 @@ use crate::{
         read::{
             analytics::SearchAnalyticEventOrigin,
             collection_document_storage::CollectionDocumentStorage, context::ReadSideContext,
-            CommittedDateFieldStats, CommittedGeoPointFieldStats, CommittedStringFieldStats,
-            ReadError, UncommittedDateFieldStats, UncommittedGeoPointFieldStats,
+            ReadError,
         },
         write::index::EnumStrategy,
         CollectionWriteOperation, Offset, ReplaceIndexReason,
@@ -39,16 +38,13 @@ use crate::{
     lock::{OramaAsyncLock, OramaAsyncLockReadGuard, OramaAsyncLockWriteGuard, OramaSyncLock},
     types::{
         ApiKey, CollectionId, CollectionStatsRequest, Document, DocumentId, FieldId, IndexId,
-        InteractionMessage, Number, OramaDate, RawJSONDocument, ReadApiKey, Role,
+        InteractionMessage, OramaDate, RawJSONDocument, ReadApiKey, Role,
     },
 };
 
 use super::{
     index::{Index, IndexStats},
-    CollectionCommitConfig, CommittedBoolFieldStats, CommittedNumberFieldStats,
-    CommittedStringFilterFieldStats, CommittedVectorFieldStats, DeletionReason, OffloadFieldConfig,
-    ReadSide, UncommittedBoolFieldStats, UncommittedNumberFieldStats, UncommittedStringFieldStats,
-    UncommittedStringFilterFieldStats, UncommittedVectorFieldStats,
+    CollectionCommitConfig, DeletionReason, ReadSide,
 };
 use oramacore_lib::values::ValuesReader;
 
@@ -128,7 +124,6 @@ pub struct CollectionReader {
     read_api_key: OramaAsyncLock<ApiKey>,
     write_api_key: Option<ApiKey>,
     context: ReadSideContext,
-    offload_config: OffloadFieldConfig,
     commit_config: CollectionCommitConfig,
 
     indexes: OramaAsyncLock<Vec<Index>>,
@@ -163,6 +158,7 @@ pub struct CollectionReader {
 }
 
 impl CollectionReader {
+    #[allow(clippy::too_many_arguments)]
     pub async fn empty(
         data_dir: PathBuf,
         collection_id: CollectionId,
@@ -172,7 +168,6 @@ impl CollectionReader {
         read_api_key: ApiKey,
         write_api_key: Option<ApiKey>,
         context: ReadSideContext,
-        offload_config: OffloadFieldConfig,
         commit_config: CollectionCommitConfig,
     ) -> Result<Self> {
         let document_storage = CollectionDocumentStorage::new(
@@ -200,7 +195,6 @@ impl CollectionReader {
             write_api_key,
 
             context,
-            offload_config,
             commit_config,
 
             indexes: OramaAsyncLock::new("collection_indexes", Default::default()),
@@ -243,7 +237,6 @@ impl CollectionReader {
     pub async fn try_load(
         context: ReadSideContext,
         data_dir: PathBuf,
-        offload_config: OffloadFieldConfig,
         commit_config: CollectionCommitConfig,
         global_offset: Offset,
     ) -> Result<Self> {
@@ -303,7 +296,6 @@ impl CollectionReader {
                 index_id,
                 data_dir.join("indexes").join(index_id.as_str()),
                 context.clone(),
-                offload_config,
             )?;
             indexes.push(index);
             debug!("Index {:?} loaded", index_id);
@@ -316,7 +308,6 @@ impl CollectionReader {
                 index_id,
                 data_dir.join("temp_indexes").join(index_id.as_str()),
                 context.clone(),
-                offload_config,
             )?;
             temp_indexes.push(index);
             debug!("Temp index {:?} loaded", index_id);
@@ -365,7 +356,6 @@ impl CollectionReader {
             write_api_key: dump.write_api_key,
 
             context,
-            offload_config,
             commit_config,
 
             indexes: OramaAsyncLock::new("collection_indexes", indexes),
@@ -908,8 +898,8 @@ impl CollectionReader {
                     index_id,
                     self.context.nlp_service.get(locale),
                     self.context.clone(),
-                    self.offload_config,
                     EnumStrategy::default(),
+                    self.data_dir.join("indexes").join(index_id.as_str()),
                 );
                 let contains = get_index_in_vector(&indexes_lock, index_id).is_some();
                 if contains {
@@ -930,8 +920,8 @@ impl CollectionReader {
                     index_id,
                     self.context.nlp_service.get(locale),
                     self.context.clone(),
-                    self.offload_config,
                     enum_strategy,
+                    self.data_dir.join("indexes").join(index_id.as_str()),
                 );
                 let contains = get_index_in_vector(&indexes_lock, index_id).is_some();
                 if contains {
@@ -948,8 +938,8 @@ impl CollectionReader {
                     index_id,
                     self.context.nlp_service.get(locale),
                     self.context.clone(),
-                    self.offload_config,
                     EnumStrategy::default(),
+                    self.data_dir.join("temp_indexes").join(index_id.as_str()),
                 );
                 let contains = get_index_in_vector(&temp_indexes_lock, index_id).is_some();
                 if contains {
@@ -970,8 +960,8 @@ impl CollectionReader {
                     index_id,
                     self.context.nlp_service.get(locale),
                     self.context.clone(),
-                    self.offload_config,
                     enum_strategy,
+                    self.data_dir.join("temp_indexes").join(index_id.as_str()),
                 );
                 let contains = get_index_in_vector(&temp_indexes_lock, index_id).is_some();
                 if contains {
@@ -1054,8 +1044,14 @@ impl CollectionReader {
                     // This should not happen, since we already checked that the index exists
                     .remove(temp_i);
 
-                // Replace the temp index id with the new one
-                new_index.promote_to_runtime_index(runtime_index_id);
+                // Replace the temp index id with the new one.
+                // Pass the permanent data_dir so bool fields can be relocated
+                // from temp_indexes/ to indexes/.
+                let new_data_dir = self
+                    .data_dir
+                    .join("indexes")
+                    .join(runtime_index_id.as_str());
+                new_index.promote_to_runtime_index(runtime_index_id, new_data_dir)?;
                 runtime_index_lock.push(new_index);
 
                 drop(temp_index_lock);
@@ -1196,7 +1192,7 @@ impl CollectionReader {
 
             // This should only happen on the first iteration
             if embedding_model.is_none() {
-                if let Some(model) = i.get_model().await {
+                if let Some(model) = i.get_model() {
                     let serializable_model = model.to_string();
                     embedding_model = Some(serializable_model.to_string());
                 }
@@ -1281,10 +1277,8 @@ impl CollectionReader {
                 index_stats.fields_stats.retain(|stat| {
                     !matches!(
                         &stat.stats,
-                        IndexFieldStatsType::CommittedString(_)
-                            | IndexFieldStatsType::UncommittedString(_)
-                            | IndexFieldStatsType::CommittedVector(_)
-                            | IndexFieldStatsType::UncommittedVector(_)
+                        IndexFieldStatsType::StringFieldStorage(_)
+                            | IndexFieldStatsType::EmbeddingFieldStorage(_)
                     )
                 });
                 index_stats
@@ -1298,203 +1292,59 @@ impl CollectionReader {
 
             for field in stat.fields_stats.iter() {
                 match &field.stats {
-                    IndexFieldStatsType::CommittedBoolean(CommittedBoolFieldStats {
-                        false_count,
-                        true_count,
-                    }) => {
+                    IndexFieldStatsType::BoolFieldStorage(stats) => {
                         final_stats.insert(
                             field.field_id,
                             FilterableField::Bool(FilterableFieldBool {
                                 field_path: field.field_path.clone(),
                                 field_type: "boolean".to_string(),
-                                count_true: *true_count,
-                                count_false: *false_count,
-                                count: *true_count + *false_count,
+                                count_true: stats.true_count,
+                                count_false: stats.false_count,
+                                count: stats.true_count + stats.false_count,
                             }),
                         );
                     }
-                    IndexFieldStatsType::UncommittedBoolean(UncommittedBoolFieldStats {
-                        false_count,
-                        true_count,
-                    }) => {
-                        if *false_count > 0 || *true_count > 0 {
-                            if let Some(FilterableField::Bool(bool_stats)) =
-                                final_stats.get(&field.field_id)
-                            {
-                                final_stats.insert(
-                                    field.field_id,
-                                    FilterableField::Bool(FilterableFieldBool {
-                                        field_path: field.field_path.clone(),
-                                        field_type: "boolean".to_string(),
-                                        count_true: bool_stats.count_true + *true_count,
-                                        count_false: bool_stats.count_false + *false_count,
-                                        count: bool_stats.count + *true_count + *false_count,
-                                    }),
-                                );
-                            }
-                        }
-                    }
-                    IndexFieldStatsType::CommittedGeoPoint(CommittedGeoPointFieldStats {
-                        count,
-                    }) => {
+                    IndexFieldStatsType::GeoPointFieldStorage(stats) => {
                         final_stats.insert(
                             field.field_id,
                             FilterableField::GeoPoint(FilterableFieldGeoPoint {
                                 field_path: field.field_path.clone(),
                                 field_type: "geopoint".to_string(),
-                                count: *count,
+                                count: stats.count,
                             }),
                         );
                     }
-                    IndexFieldStatsType::UncommittedGeoPoint(UncommittedGeoPointFieldStats {
-                        count,
-                    }) => {
-                        if *count > 0 {
-                            if let Some(FilterableField::GeoPoint(geo_stats)) =
-                                final_stats.get(&field.field_id)
-                            {
-                                final_stats.insert(
-                                    field.field_id,
-                                    FilterableField::GeoPoint(FilterableFieldGeoPoint {
-                                        field_path: field.field_path.clone(),
-                                        field_type: "geopoint".to_string(),
-                                        count: geo_stats.count + *count,
-                                    }),
-                                );
-                            }
-                        }
-                    }
-                    IndexFieldStatsType::CommittedDate(CommittedDateFieldStats {
-                        min,
-                        max,
-                        ..
-                    }) => {
+                    IndexFieldStatsType::DateFieldStorage(_) => {
                         final_stats.insert(
                             field.field_id,
                             FilterableField::Date(FilterableFieldDate {
                                 field_path: field.field_path.clone(),
                                 field_type: "date".to_string(),
-                                min: min.clone(),
-                                max: max.clone(),
+                                min: None,
+                                max: None,
                             }),
                         );
                     }
-                    IndexFieldStatsType::UncommittedDate(UncommittedDateFieldStats {
-                        min,
-                        max,
-                        ..
-                    }) => {
-                        if let Some(FilterableField::Date(date_stats)) =
-                            final_stats.get(&field.field_id)
-                        {
-                            let new_min = match (date_stats.min.clone(), min) {
-                                (Some(existing_min), Some(new_min)) => {
-                                    Some(OramaDate::try_from_i64(existing_min.as_i64().min(new_min.as_i64())).expect("Unable to conver i64 back to date format. This is a bug. Please report at https://github.com/oramasearch/oramacore"))
-                                }
-                                (Some(existing_min), None) => Some(existing_min),
-                                (None, Some(new_min)) => Some(new_min.clone()),
-                                (None, None) => None,
-                            };
-                            let new_max = match (date_stats.max.clone(), max) {
-                                (Some(existing_max), Some(new_max)) => {
-                                    Some(OramaDate::try_from_i64(existing_max.as_i64().max(new_max.as_i64())).expect("Unable to conver i64 back to date format. This is a bug. Please report at https://github.com/oramasearch/oramacore"))
-                                }
-                                (Some(existing_max), None) => Some(existing_max),
-                                (None, Some(new_max)) => Some(new_max.clone()),
-                                (None, None) => None,
-                            };
-                            final_stats.insert(
-                                field.field_id,
-                                FilterableField::Date(FilterableFieldDate {
-                                    field_path: field.field_path.clone(),
-                                    field_type: "date".to_string(),
-                                    min: new_min,
-                                    max: new_max,
-                                }),
-                            );
-                        }
-                    }
-                    IndexFieldStatsType::CommittedNumber(CommittedNumberFieldStats {
-                        min,
-                        max,
-                        ..
-                    }) => {
+                    IndexFieldStatsType::NumberFieldStorage(ref stats) => {
                         final_stats.insert(
                             field.field_id,
                             FilterableField::Number(FilterableFieldNumber {
                                 field_path: field.field_path.clone(),
                                 field_type: "number".to_string(),
-                                min: match min {
-                                    Number::I32(i) => *i as f64,
-                                    Number::F32(f) => *f as f64,
-                                },
-                                max: match max {
-                                    Number::I32(i) => *i as f64,
-                                    Number::F32(f) => *f as f64,
-                                },
+                                min: stats.min.map(|n| n.as_f32() as f64).unwrap_or_default(),
+                                max: stats.max.map(|n| n.as_f32() as f64).unwrap_or_default(),
                             }),
                         );
                     }
-                    IndexFieldStatsType::UncommittedNumber(UncommittedNumberFieldStats {
-                        min,
-                        max,
-                        ..
-                    }) => {
-                        if let Some(FilterableField::Number(number_stats)) =
-                            final_stats.get(&field.field_id)
-                        {
-                            let min_as_f64 = match min {
-                                Number::I32(i) => *i as f64,
-                                Number::F32(f) => *f as f64,
-                            };
-                            let max_as_f64 = match max {
-                                Number::I32(i) => *i as f64,
-                                Number::F32(f) => *f as f64,
-                            };
-
-                            let new_min = min_as_f64.min(number_stats.min);
-                            let new_max = max_as_f64.max(number_stats.max);
-
-                            final_stats.insert(
-                                field.field_id,
-                                FilterableField::Number(FilterableFieldNumber {
-                                    field_path: field.field_path.clone(),
-                                    field_type: "number".to_string(),
-                                    min: new_min,
-                                    max: new_max,
-                                }),
-                            );
-                        }
-                    }
-                    IndexFieldStatsType::CommittedStringFilter(
-                        CommittedStringFilterFieldStats { key_count, .. },
-                    ) => {
+                    IndexFieldStatsType::StringFilterFieldStorage(ref stats) => {
                         final_stats.insert(
                             field.field_id,
                             FilterableField::String(FilterableFieldString {
                                 field_path: field.field_path.clone(),
                                 field_type: "enum".to_string(),
-                                count: *key_count,
+                                count: stats.key_count,
                             }),
                         );
-                    }
-                    IndexFieldStatsType::UncommittedStringFilter(
-                        UncommittedStringFilterFieldStats { key_count, .. },
-                    ) => {
-                        if *key_count > 0 {
-                            if let Some(FilterableField::String(string_stats)) =
-                                final_stats.get(&field.field_id)
-                            {
-                                final_stats.insert(
-                                    field.field_id,
-                                    FilterableField::String(FilterableFieldString {
-                                        field_path: field.field_path.clone(),
-                                        field_type: "enum".to_string(),
-                                        count: string_stats.count + *key_count,
-                                    }),
-                                );
-                            }
-                        }
                     }
                     _ => {}
                 }
@@ -1616,40 +1466,26 @@ use derive_more::From;
 #[derive(Serialize, Debug, From)]
 #[serde(tag = "type")]
 pub enum IndexFieldStatsType {
-    #[serde(rename = "uncommitted_bool")]
-    UncommittedBoolean(UncommittedBoolFieldStats),
-    #[serde(rename = "committed_bool")]
-    CommittedBoolean(CommittedBoolFieldStats),
+    #[serde(rename = "bool")]
+    BoolFieldStorage(super::index::bool_field::BoolFieldStorageStats),
 
-    #[serde(rename = "uncommitted_number")]
-    UncommittedNumber(UncommittedNumberFieldStats),
-    #[serde(rename = "committed_number")]
-    CommittedNumber(CommittedNumberFieldStats),
+    #[serde(rename = "geopoint")]
+    GeoPointFieldStorage(super::index::geopoint_field::GeoPointFieldStorageStats),
 
-    #[serde(rename = "uncommitted_date")]
-    UncommittedDate(UncommittedDateFieldStats),
-    #[serde(rename = "committed_date")]
-    CommittedDate(CommittedDateFieldStats),
+    #[serde(rename = "number")]
+    NumberFieldStorage(super::index::number_field::NumberFieldStorageStats),
 
-    #[serde(rename = "uncommitted_geopoint")]
-    UncommittedGeoPoint(UncommittedGeoPointFieldStats),
-    #[serde(rename = "committed_geopoint")]
-    CommittedGeoPoint(CommittedGeoPointFieldStats),
+    #[serde(rename = "date")]
+    DateFieldStorage(super::index::date_field::DateFieldStorageStats),
 
-    #[serde(rename = "uncommitted_string_filter")]
-    UncommittedStringFilter(UncommittedStringFilterFieldStats),
-    #[serde(rename = "committed_string_filter")]
-    CommittedStringFilter(CommittedStringFilterFieldStats),
+    #[serde(rename = "string_filter")]
+    StringFilterFieldStorage(super::index::string_filter_field::StringFilterFieldStorageStats),
 
-    #[serde(rename = "uncommitted_string")]
-    UncommittedString(UncommittedStringFieldStats),
-    #[serde(rename = "committed_string")]
-    CommittedString(CommittedStringFieldStats),
+    #[serde(rename = "string")]
+    StringFieldStorage(super::index::string_field::StringFieldStorageStats),
 
-    #[serde(rename = "uncommitted_vector")]
-    UncommittedVector(UncommittedVectorFieldStats),
-    #[serde(rename = "committed_vector")]
-    CommittedVector(CommittedVectorFieldStats),
+    #[serde(rename = "embedding")]
+    EmbeddingFieldStorage(super::index::embedding_field::EmbeddingFieldStorageStats),
 }
 
 #[derive(Serialize, Debug)]

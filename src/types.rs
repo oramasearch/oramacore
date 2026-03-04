@@ -1869,6 +1869,15 @@ pub enum Number {
     F32(f32),
 }
 
+impl Number {
+    pub fn as_f32(&self) -> f32 {
+        match self {
+            Number::I32(value) => *value as f32,
+            Number::F32(value) => *value,
+        }
+    }
+}
+
 impl std::fmt::Display for Number {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {

@@ -11,15 +11,11 @@ use futures::{future::BoxFuture, FutureExt};
 use tokio::time::sleep;
 
 use anyhow::Context;
-use duration_string::DurationString;
 use oramacore::{
     ai::{AIServiceConfig, AIServiceLLMConfig},
     build_orama,
     collection_manager::sides::{
-        read::{
-            CollectionCommitConfig, IndexesConfig, OffloadFieldConfig, ReadSide, ReadSideConfig,
-            SearchRequest,
-        },
+        read::{CollectionCommitConfig, IndexesConfig, ReadSide, ReadSideConfig, SearchRequest},
         write::{CollectionsWriterConfig, TempIndexCleanupConfig, WriteSide, WriteSideConfig},
         InputSideChannelType, OutputSideChannelType,
     },
@@ -89,11 +85,6 @@ pub fn create_minimal_config() -> OramacoreConfig {
                 insert_batch_commit_size: 1_000,
                 commit_interval: Duration::from_secs(300),
                 notifier: None,
-                offload_field: OffloadFieldConfig {
-                    unload_window: DurationString::from_string("5m".to_string()).unwrap(),
-                    slot_count_exp: 6, // Smaller for benchmarks
-                    slot_size_exp: 3,
-                },
                 force_commit: 4,
                 collection_commit: CollectionCommitConfig::default(),
             },

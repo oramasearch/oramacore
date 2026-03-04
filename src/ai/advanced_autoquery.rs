@@ -141,82 +141,38 @@ struct CollectionPropertiesWrapper {
 
 // ===== Statistics Types =====
 
-#[derive(Debug, Default, Clone, Serialize, Deserialize)]
-pub struct GlobalInfo {
-    pub total_documents: usize,
-    pub total_document_length: usize,
-}
-
 /// Unified representation of field statistics
 #[derive(Deserialize, Debug)]
 #[serde(tag = "type")]
 enum FieldStatType {
-    #[serde(rename = "uncommitted_bool")]
-    UncommittedBoolean {
+    #[serde(rename = "bool")]
+    Bool {
         false_count: usize,
         true_count: usize,
     },
-    #[serde(rename = "committed_bool")]
-    CommittedBoolean {
-        false_count: usize,
-        true_count: usize,
-    },
-    #[serde(rename = "uncommitted_number")]
-    UncommittedNumber {
-        #[serde(default)]
-        _min: Option<f64>,
-        #[serde(default)]
-        _max: Option<f64>,
+    #[serde(rename = "number")]
+    Number {
         #[serde(default)]
         count: usize,
     },
-    #[serde(rename = "committed_number")]
-    CommittedNumber {
-        #[serde(default)]
-        _min: Option<f64>,
-        #[serde(default)]
-        _max: Option<f64>,
-        #[serde(default)]
-        document_count: usize,
-    },
-    #[serde(rename = "uncommitted_string_filter")]
-    UncommittedStringFilter {
+    #[serde(rename = "string_filter")]
+    StringFilter {
         #[allow(dead_code)]
         key_count: usize,
         document_count: usize,
         keys: Option<Vec<String>>,
     },
-    #[serde(rename = "committed_string_filter")]
-    CommittedStringFilter {
+    #[serde(rename = "string")]
+    String {
         #[allow(dead_code)]
-        key_count: usize,
-        document_count: usize,
-        keys: Option<Vec<String>>,
+        unique_terms_count: usize,
+        total_documents: u64,
     },
-    #[serde(rename = "uncommitted_string")]
-    UncommittedString {
-        #[allow(dead_code)]
-        key_count: usize,
-        global_info: GlobalInfo,
-    },
-    #[serde(rename = "committed_string")]
-    CommittedString {
-        #[allow(dead_code)]
-        key_count: usize,
-        global_info: GlobalInfo,
-    },
-    #[serde(rename = "uncommitted_vector")]
-    UncommittedVector {
-        document_count: usize,
-        #[allow(dead_code)]
-        vector_count: usize,
-    },
-    #[serde(rename = "committed_vector")]
-    CommittedVector {
+    #[serde(rename = "embedding")]
+    Embedding {
         #[allow(dead_code)]
         dimensions: usize,
-        #[allow(dead_code)]
-        vector_count: usize,
+        embedding_count: usize,
     },
 }
 
@@ -225,23 +181,18 @@ impl FieldStatType {
     fn document_count(&self) -> usize {
         use FieldStatType::*;
         match self {
-            UncommittedBoolean {
-                false_count,
-                true_count,
-            }
-            | CommittedBoolean {
+            Bool {
                 false_count,
                 true_count,
             } => false_count + true_count,
-            UncommittedNumber { count, .. } => *count,
-            CommittedNumber { document_count, .. } => *document_count,
-            UncommittedStringFilter { document_count, .. }
-            | CommittedStringFilter { document_count, .. } => *document_count,
-            UncommittedString { global_info, .. } | CommittedString { global_info, .. } => {
-                global_info.total_documents
-            }
-            UncommittedVector { document_count, .. } => *document_count,
-            CommittedVector { .. } => 1,
+            Number { count, .. } => *count,
+            StringFilter { document_count, .. } => *document_count,
+            String {
+                total_documents, ..
+            } => *total_documents as usize,
+            Embedding {
+                embedding_count, ..
+            } => *embedding_count,
         }
     }
 
@@ -249,27 +200,23 @@ impl FieldStatType {
     fn field_type_name(&self) -> &'static str {
         use FieldStatType::*;
         match self {
-            UncommittedBoolean { .. } | CommittedBoolean { .. } => "boolean",
-            UncommittedNumber { .. } | CommittedNumber { .. } => "number",
-            UncommittedStringFilter { .. } | CommittedStringFilter { .. } => "string_filter",
-            UncommittedString { .. } | CommittedString { .. } => "string",
-            UncommittedVector { .. } | CommittedVector { .. } => "vector",
+            Bool { .. } => "boolean",
+            Number { .. } => "number",
+            StringFilter { .. } => "string_filter",
+            String { .. } => "string",
+            Embedding { .. } => "vector",
         }
     }
 
     /// Checks if this is an unfilterable string field
     fn is_unfilterable_string(&self) -> bool {
-        matches!(
-            self,
-            FieldStatType::UncommittedString { .. } | FieldStatType::CommittedString { .. }
-        )
+        matches!(self, FieldStatType::String { .. })
     }
 
     /// Extracts keys if this is a string filter field
     fn extract_keys(&self) -> Option<&[String]> {
         match self {
-            FieldStatType::CommittedStringFilter { keys: Some(k), .. }
-            | FieldStatType::UncommittedStringFilter { keys: Some(k), .. } => Some(k),
+            FieldStatType::StringFilter { keys: Some(k), .. } => Some(k),
             _ => None,
         }
     }

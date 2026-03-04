@@ -85,7 +85,6 @@ impl CollectionsReader {
             let collection = CollectionReader::try_load(
                 context.clone(),
                 collection_dir.clone(),
-                indexes_config.offload_field,
                 indexes_config.collection_commit,
                 global_offset,
             )
@@ -246,7 +245,6 @@ impl CollectionsReader {
             read_api_key,
             write_api_key,
             self.context.clone(),
-            self.indexes_config.offload_field,
             self.indexes_config.collection_commit,
         )
         .await?;
