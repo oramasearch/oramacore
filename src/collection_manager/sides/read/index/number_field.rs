@@ -566,9 +566,15 @@ fn number_filter_to_i64_filter_op(filter: &NumberFilter) -> Option<FilterOp<i64>
         }
         NumberFilter::GreaterThan(Number::I32(n)) => Some(FilterOp::Gt(*n as i64)),
         NumberFilter::GreaterThan(Number::F32(f)) => {
-            // i64 values > f must be >= ceil(f)
-            let ceil = (*f as f64).ceil() as i64;
-            Some(FilterOp::Gte(ceil))
+            let f64_val = *f as f64;
+            let ceil = f64_val.ceil() as i64;
+            // When the float is an exact integer (e.g. 5.0), ceil(5.0)=5,
+            // so we must use Gt to exclude the boundary.
+            if (ceil as f64 - f64_val).abs() < f64::EPSILON {
+                Some(FilterOp::Gt(ceil))
+            } else {
+                Some(FilterOp::Gte(ceil))
+            }
         }
         NumberFilter::GreaterThanOrEqual(Number::I32(n)) => Some(FilterOp::Gte(*n as i64)),
         NumberFilter::GreaterThanOrEqual(Number::F32(f)) => {
@@ -577,9 +583,15 @@ fn number_filter_to_i64_filter_op(filter: &NumberFilter) -> Option<FilterOp<i64>
         }
         NumberFilter::LessThan(Number::I32(n)) => Some(FilterOp::Lt(*n as i64)),
         NumberFilter::LessThan(Number::F32(f)) => {
-            // i64 values < f must be <= floor(f)
-            let floor = (*f as f64).floor() as i64;
-            Some(FilterOp::Lte(floor))
+            let f64_val = *f as f64;
+            let floor = f64_val.floor() as i64;
+            // When the float is an exact integer (e.g. 5.0), floor(5.0)=5,
+            // so we must use Lt to exclude the boundary.
+            if (floor as f64 - f64_val).abs() < f64::EPSILON {
+                Some(FilterOp::Lt(floor))
+            } else {
+                Some(FilterOp::Lte(floor))
+            }
         }
         NumberFilter::LessThanOrEqual(Number::I32(n)) => Some(FilterOp::Lte(*n as i64)),
         NumberFilter::LessThanOrEqual(Number::F32(f)) => {
