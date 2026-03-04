@@ -3,361 +3,16 @@ use std::collections::HashMap;
 use anyhow::{bail, Result};
 use tracing::{info, warn};
 
-use crate::{
-    collection_manager::sides::read::index::committed_field::{
-        CommittedBoolField, CommittedNumberField, CommittedStringFilterField,
-    },
-    collection_manager::sides::read::index::uncommitted_field::{
-        UncommittedBoolField, UncommittedNumberField, UncommittedStringFilterField,
-    },
-    types::{
-        BoolFacetDefinition, DocumentId, FacetDefinition, FacetResult, FieldId,
-        NumberFacetDefinition, NumberFilter, StringFacetDefinition,
-    },
+use crate::types::{DocumentId, FacetDefinition, FacetResult, FieldId};
+
+use super::{
+    bool_field::BoolFieldStorage, number_field::NumberFieldStorage,
+    path_to_index_id_map::PathToIndexId, string_filter_field::StringFilterFieldStorage, FieldType,
 };
-
-use super::{path_to_index_id_map::PathToIndexId, CommittedFields, FieldType, UncommittedFields};
-
-// =============================================================================
-// Facetable trait with associated type
-// =============================================================================
-
-/// Trait for fields that support faceting operations.
-///
-/// This trait provides a uniform interface for calculating facets across
-/// different field types (Bool, Number, StringFilter). Each implementation
-/// specifies its own `FacetParam` type, enabling compile-time type safety.
-///
-/// # Type Parameters
-///
-/// - `FacetParam`: The type of facet definition this field accepts
-///   (e.g., `BoolFacetDefinition`, `NumberFacetDefinition`, `StringFacetDefinition`)
-///
-/// # Design
-///
-/// The trait uses an associated type `FacetParam` to establish the relationship
-/// between field types and their facet definition types. This allows the compiler
-/// to enforce type safety and eliminates the need for runtime type matching.
-///
-/// Unlike the Filterable trait which returns document IDs, Facetable returns
-/// the facet counts directly as a HashMap<String, usize> mapping facet values
-/// to their counts.
-pub trait Facetable {
-    /// The type of facet definition this field accepts.
-    ///
-    /// Examples:
-    /// - `BoolFacetDefinition` for Bool fields
-    /// - `NumberFacetDefinition` for Number fields
-    /// - `StringFacetDefinition` for StringFilter fields
-    type FacetParam;
-
-    /// Calculates facet counts based on the given facet definition.
-    ///
-    /// Returns a map from facet value labels to counts of matching documents.
-    /// Only documents present in `token_scores` are counted.
-    ///
-    /// # Arguments
-    ///
-    /// * `facet_param` - The facet definition specifying what to count
-    /// * `token_scores` - Map of document IDs to their scores; only these docs are counted
-    ///
-    /// # Returns
-    ///
-    /// A `Result` containing a HashMap mapping facet value labels (e.g., "true", "1-10")
-    /// to counts, or an error if the faceting operation fails.
-    fn calculate_facet(
-        &self,
-        facet_param: &Self::FacetParam,
-        token_scores: &HashMap<DocumentId, f32>,
-    ) -> Result<HashMap<String, usize>>;
-}
-
-// =============================================================================
-// TryFromFacetDefinition trait
-// =============================================================================
-
-/// Trait for converting from the generic FacetDefinition enum to specific facet param types.
-///
-/// This trait enables type-safe conversion from the FacetDefinition enum variants to the
-/// specific types expected by field implementations of the Facetable trait.
-trait TryFromFacetDefinition {
-    type Error;
-
-    fn try_from_facet_definition(facet: &FacetDefinition) -> Result<&Self, Self::Error>
-    where
-        Self: Sized;
-}
-
-impl TryFromFacetDefinition for BoolFacetDefinition {
-    type Error = anyhow::Error;
-
-    fn try_from_facet_definition(facet: &FacetDefinition) -> Result<&Self, Self::Error> {
-        if let FacetDefinition::Bool(bool_facet) = facet {
-            Ok(bool_facet)
-        } else {
-            Err(anyhow::anyhow!(
-                "Failed to convert facet definition to bool facet"
-            ))
-        }
-    }
-}
-
-impl TryFromFacetDefinition for NumberFacetDefinition {
-    type Error = anyhow::Error;
-
-    fn try_from_facet_definition(facet: &FacetDefinition) -> Result<&Self, Self::Error> {
-        if let FacetDefinition::Number(number_facet) = facet {
-            Ok(number_facet)
-        } else {
-            Err(anyhow::anyhow!(
-                "Failed to convert facet definition to number facet"
-            ))
-        }
-    }
-}
-
-impl TryFromFacetDefinition for StringFacetDefinition {
-    type Error = anyhow::Error;
-
-    fn try_from_facet_definition(facet: &FacetDefinition) -> Result<&Self, Self::Error> {
-        if let FacetDefinition::String(string_facet) = facet {
-            Ok(string_facet)
-        } else {
-            Err(anyhow::anyhow!(
-                "Failed to convert facet definition to string facet"
-            ))
-        }
-    }
-}
-
-// =============================================================================
-// Facetable implementations for Number fields
-// =============================================================================
-
-impl Facetable for UncommittedNumberField {
-    type FacetParam = NumberFacetDefinition;
-
-    fn calculate_facet(
-        &self,
-        facet_param: &Self::FacetParam,
-        token_scores: &HashMap<DocumentId, f32>,
-    ) -> Result<HashMap<String, usize>> {
-        let mut result = HashMap::new();
-
-        for range in &facet_param.ranges {
-            let filter = NumberFilter::Between((range.from, range.to));
-            let count = self
-                .filter(&filter)
-                .filter(|doc_id| token_scores.contains_key(doc_id))
-                .count();
-
-            let label = format!("{}-{}", range.from, range.to);
-            result.insert(label, count);
-        }
-
-        Ok(result)
-    }
-}
-
-impl Facetable for CommittedNumberField {
-    type FacetParam = NumberFacetDefinition;
-
-    fn calculate_facet(
-        &self,
-        facet_param: &Self::FacetParam,
-        token_scores: &HashMap<DocumentId, f32>,
-    ) -> Result<HashMap<String, usize>> {
-        let mut result = HashMap::new();
-
-        for range in &facet_param.ranges {
-            let filter = NumberFilter::Between((range.from, range.to));
-            let count = self
-                .filter(&filter)?
-                .filter(|doc_id| token_scores.contains_key(doc_id))
-                .count();
-
-            let label = format!("{}-{}", range.from, range.to);
-            result.insert(label, count);
-        }
-
-        Ok(result)
-    }
-}
-
-// =============================================================================
-// Facetable implementations for Bool fields
-// =============================================================================
-
-impl Facetable for UncommittedBoolField {
-    type FacetParam = BoolFacetDefinition;
-
-    fn calculate_facet(
-        &self,
-        facet_param: &Self::FacetParam,
-        token_scores: &HashMap<DocumentId, f32>,
-    ) -> Result<HashMap<String, usize>> {
-        let mut result = HashMap::new();
-
-        if facet_param.r#true {
-            let count = self
-                .filter(true)
-                .filter(|doc_id| token_scores.contains_key(doc_id))
-                .count();
-            result.insert("true".to_string(), count);
-        }
-
-        if facet_param.r#false {
-            let count = self
-                .filter(false)
-                .filter(|doc_id| token_scores.contains_key(doc_id))
-                .count();
-            result.insert("false".to_string(), count);
-        }
-
-        Ok(result)
-    }
-}
-
-impl Facetable for CommittedBoolField {
-    type FacetParam = BoolFacetDefinition;
-
-    fn calculate_facet(
-        &self,
-        facet_param: &Self::FacetParam,
-        token_scores: &HashMap<DocumentId, f32>,
-    ) -> Result<HashMap<String, usize>> {
-        let mut result = HashMap::new();
-
-        if facet_param.r#true {
-            let count = self
-                .filter(true)?
-                .filter(|doc_id| token_scores.contains_key(doc_id))
-                .count();
-            result.insert("true".to_string(), count);
-        }
-
-        if facet_param.r#false {
-            let count = self
-                .filter(false)?
-                .filter(|doc_id| token_scores.contains_key(doc_id))
-                .count();
-            result.insert("false".to_string(), count);
-        }
-
-        Ok(result)
-    }
-}
-
-// =============================================================================
-// Facetable implementations for StringFilter fields
-// =============================================================================
-
-impl Facetable for UncommittedStringFilterField {
-    type FacetParam = StringFacetDefinition;
-
-    fn calculate_facet(
-        &self,
-        _facet_param: &Self::FacetParam,
-        token_scores: &HashMap<DocumentId, f32>,
-    ) -> Result<HashMap<String, usize>> {
-        let mut result = HashMap::new();
-
-        // Discover all unique string values and count matching documents
-        for value in self.get_string_values() {
-            let count = self
-                .filter(value)
-                .filter(|doc_id| token_scores.contains_key(doc_id))
-                .count();
-            result.insert(value.to_string(), count);
-        }
-
-        Ok(result)
-    }
-}
-
-impl Facetable for CommittedStringFilterField {
-    type FacetParam = StringFacetDefinition;
-
-    fn calculate_facet(
-        &self,
-        _facet_param: &Self::FacetParam,
-        token_scores: &HashMap<DocumentId, f32>,
-    ) -> Result<HashMap<String, usize>> {
-        let mut result = HashMap::new();
-
-        // Discover all unique string values and count matching documents
-        for value in self.get_string_values() {
-            let count = self
-                .filter(value)
-                .filter(|doc_id| token_scores.contains_key(doc_id))
-                .count();
-            result.insert(value.to_string(), count);
-        }
-
-        Ok(result)
-    }
-}
 
 // =============================================================================
 // Helper functions
 // =============================================================================
-
-/// Calculates facet counts for a single field, combining uncommitted and committed results.
-///
-/// This generic function handles facet calculation for any field type that implements
-/// the Facetable trait. It:
-/// 1. Converts the generic FacetDefinition to the specific FacetParam type
-/// 2. Calculates facets from the uncommitted field data
-/// 3. Optionally calculates facets from the committed field data
-/// 4. Combines results by summing counts for each facet value
-///
-/// # Type Parameters
-/// * `UF` - Uncommitted field type implementing Facetable
-/// * `CF` - Committed field type implementing Facetable with same FacetParam
-/// * `FP` - Facet parameter type that can be converted from FacetDefinition
-///
-/// # Arguments
-/// * `uncommitted_field` - The in-memory uncommitted field
-/// * `committed_field` - Optional persisted committed field
-/// * `facet_param` - The facet definition (generic FacetDefinition enum)
-/// * `token_scores` - Map of matching document IDs to scores
-///
-/// # Returns
-/// A HashMap mapping facet value labels to their counts
-fn calculate_facet_on_field<UF, CF, FP>(
-    uncommitted_field: Option<&UF>,
-    committed_field: Option<&CF>,
-    facet_param: &FacetDefinition,
-    token_scores: &HashMap<DocumentId, f32>,
-) -> Result<HashMap<String, usize>>
-where
-    UF: Facetable<FacetParam = FP>,
-    CF: Facetable<FacetParam = FP>,
-    FP: TryFromFacetDefinition,
-{
-    let facet_param: &FP = FP::try_from_facet_definition(facet_param)
-        .map_err(|_| anyhow::anyhow!("Failed to convert facet definition to expected type"))?;
-
-    let mut result = HashMap::new();
-
-    // Process uncommitted field
-    if let Some(uncommitted_field) = uncommitted_field {
-        let uncommitted_facets = uncommitted_field.calculate_facet(facet_param, token_scores)?;
-        for (label, count) in uncommitted_facets {
-            *result.entry(label).or_default() += count;
-        }
-    }
-
-    // Process committed field
-    if let Some(committed_field) = committed_field {
-        let committed_facets = committed_field.calculate_facet(facet_param, token_scores)?;
-        for (label, count) in committed_facets {
-            *result.entry(label).or_default() += count;
-        }
-    }
-
-    Ok(result)
-}
 
 /// Routes facet operations to the appropriate field type.
 ///
@@ -380,30 +35,46 @@ where
 fn calculate_facet_for_field(
     field_id: FieldId,
     field_type: FieldType,
-    uncommitted_fields: &UncommittedFields,
-    committed_fields: &CommittedFields,
+    bool_fields: &HashMap<FieldId, BoolFieldStorage>,
+    number_fields: &HashMap<FieldId, NumberFieldStorage>,
+    string_filter_fields: &HashMap<FieldId, StringFilterFieldStorage>,
     facet_definition: &FacetDefinition,
     token_scores: &HashMap<DocumentId, f32>,
 ) -> Result<HashMap<String, usize>> {
     match field_type {
-        FieldType::Number => calculate_facet_on_field(
-            uncommitted_fields.number_fields.get(&field_id),
-            committed_fields.number_fields.get(&field_id),
-            facet_definition,
-            token_scores,
-        ),
-        FieldType::Bool => calculate_facet_on_field(
-            uncommitted_fields.bool_fields.get(&field_id),
-            committed_fields.bool_fields.get(&field_id),
-            facet_definition,
-            token_scores,
-        ),
-        FieldType::StringFilter => calculate_facet_on_field(
-            uncommitted_fields.string_filter_fields.get(&field_id),
-            committed_fields.string_filter_fields.get(&field_id),
-            facet_definition,
-            token_scores,
-        ),
+        FieldType::Number => {
+            let number_field = number_fields
+                .get(&field_id)
+                .ok_or_else(|| anyhow::anyhow!("Cannot find number field {field_id:?}"))?;
+
+            let FacetDefinition::Number(facet_param) = facet_definition else {
+                bail!("Expected Number facet definition for Number field");
+            };
+
+            number_field.calculate_facet(facet_param, token_scores)
+        }
+        FieldType::Bool => {
+            let bool_field = bool_fields
+                .get(&field_id)
+                .ok_or_else(|| anyhow::anyhow!("Cannot find bool field {field_id:?}"))?;
+
+            let FacetDefinition::Bool(facet_param) = facet_definition else {
+                bail!("Expected Bool facet definition for Bool field");
+            };
+
+            Ok(bool_field.calculate_facet(facet_param, token_scores))
+        }
+        FieldType::StringFilter => {
+            let string_filter_field = string_filter_fields
+                .get(&field_id)
+                .ok_or_else(|| anyhow::anyhow!("Cannot find string_filter field {field_id:?}"))?;
+
+            let FacetDefinition::String(facet_param) = facet_definition else {
+                bail!("Expected String facet definition for StringFilter field");
+            };
+
+            Ok(string_filter_field.calculate_facet(facet_param, token_scores))
+        }
         _ => {
             bail!("Cannot calculate facet on field type {field_type:?}: unsupported for faceting");
         }
@@ -433,8 +104,9 @@ pub struct FacetParams<'search> {
 /// FacetContext constructor, maintaining proper encapsulation.
 pub struct FacetContext<'index> {
     path_to_index_id_map: &'index PathToIndexId,
-    uncommitted_fields: &'index UncommittedFields,
-    committed_fields: &'index CommittedFields,
+    bool_fields: &'index HashMap<FieldId, BoolFieldStorage>,
+    number_fields: &'index HashMap<FieldId, NumberFieldStorage>,
+    string_filter_fields: &'index HashMap<FieldId, StringFilterFieldStorage>,
 }
 
 impl<'index> FacetContext<'index> {
@@ -445,13 +117,15 @@ impl<'index> FacetContext<'index> {
     /// is responsible for gathering the data and passing it in.
     pub fn new(
         path_to_index_id_map: &'index PathToIndexId,
-        uncommitted_fields: &'index UncommittedFields,
-        committed_fields: &'index CommittedFields,
+        bool_fields: &'index HashMap<FieldId, BoolFieldStorage>,
+        number_fields: &'index HashMap<FieldId, NumberFieldStorage>,
+        string_filter_fields: &'index HashMap<FieldId, StringFilterFieldStorage>,
     ) -> Self {
         Self {
             path_to_index_id_map,
-            uncommitted_fields,
-            committed_fields,
+            bool_fields,
+            number_fields,
+            string_filter_fields,
         }
     }
 
@@ -506,8 +180,9 @@ impl<'index> FacetContext<'index> {
             let facet_values = calculate_facet_for_field(
                 field_id,
                 field_type,
-                self.uncommitted_fields,
-                self.committed_fields,
+                self.bool_fields,
+                self.number_fields,
+                self.string_filter_fields,
                 facet_definition,
                 params.token_scores,
             )?;

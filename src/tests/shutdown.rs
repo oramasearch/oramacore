@@ -44,14 +44,14 @@ async fn test_writer_graceful_shutdown() {
             let mut index = stats.indexes_stats.remove(0);
             // It is always the first field because we order them by field_id
             let embedding_field = index.fields_stats.remove(0);
-            let IndexFieldStatsType::UncommittedVector(stats) = embedding_field.stats else {
-                bail!("Expected UncommittedVector stats");
+            let IndexFieldStatsType::EmbeddingFieldStorage(stats) = embedding_field.stats else {
+                bail!("Expected EmbeddingFieldStorage stats");
             };
 
-            if stats.document_count == 2 {
+            if stats.vector_count == 2 {
                 return Ok(());
             }
-            bail!("Expected 2 documents, got {}", stats.document_count)
+            bail!("Expected 2 embeddings, got {}", stats.vector_count)
         }
         .boxed()
     })

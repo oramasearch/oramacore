@@ -317,8 +317,11 @@ async fn search_on_indexes(
         let filter_context = FilterContext::new(
             search_store.document_count,
             search_store.path_to_field_id_map,
-            &search_store.uncommitted_fields,
-            &search_store.committed_fields,
+            search_store.bool_fields,
+            search_store.number_fields,
+            search_store.date_fields,
+            search_store.geopoint_fields,
+            search_store.string_filter_fields,
             search_store.uncommitted_deleted_documents,
         );
         let filtered_document_ids = filter_context.execute_filter(score_params.where_filter)?;
@@ -327,8 +330,8 @@ async fn search_on_indexes(
         let token_score_context = TokenScoreContext::new(
             index.id(),
             search_store.document_count,
-            &search_store.uncommitted_fields,
-            &search_store.committed_fields,
+            search_store.embedding_fields,
+            search_store.string_fields,
             search_store.text_parser,
             search_store.read_side_context,
             search_store.path_to_field_id_map,
@@ -384,8 +387,8 @@ async fn search_on_indexes(
                     let token_score_context = TokenScoreContext::new(
                         index.id(),
                         search_store.document_count,
-                        &search_store.uncommitted_fields,
-                        &search_store.committed_fields,
+                        search_store.embedding_fields,
+                        search_store.string_fields,
                         search_store.text_parser,
                         search_store.read_side_context,
                         search_store.path_to_field_id_map,
@@ -407,8 +410,9 @@ async fn search_on_indexes(
             trace!("Calculating facets for index {}", index.id());
             let facet_context = FacetContext::new(
                 search_store.path_to_field_id_map,
-                &search_store.uncommitted_fields,
-                &search_store.committed_fields,
+                search_store.bool_fields,
+                search_store.number_fields,
+                search_store.string_filter_fields,
             );
 
             facet_context.execute(
@@ -423,8 +427,9 @@ async fn search_on_indexes(
         if let Some(group_by) = &score_params.group_by {
             let group_context = GroupContext::new(
                 search_store.path_to_field_id_map,
-                &search_store.uncommitted_fields,
-                &search_store.committed_fields,
+                search_store.bool_fields,
+                search_store.number_fields,
+                search_store.string_filter_fields,
             );
 
             group_context.execute(

@@ -10,7 +10,6 @@ mod search;
 pub mod sort;
 
 use axum::extract::State;
-use duration_string::DurationString;
 use futures::Stream;
 pub use index::*;
 use oramacore_lib::hook_storage::{HookReaderError, HookType};
@@ -88,13 +87,6 @@ pub struct ReadSideConfig {
     pub secrets_manager: Option<Vec<SecretsProviderConfig>>,
 }
 
-#[derive(Debug, Deserialize, Clone, Copy)]
-pub struct OffloadFieldConfig {
-    pub unload_window: DurationString,
-    pub slot_count_exp: u8,
-    pub slot_size_exp: u8,
-}
-
 /// Configuration for per-collection commit thresholds
 #[derive(Debug, Deserialize, Clone, Copy)]
 pub struct CollectionCommitConfig {
@@ -126,8 +118,6 @@ pub struct IndexesConfig {
     #[serde(default = "default_force_commit")]
     pub force_commit: u32,
     pub notifier: Option<NotifierConfig>,
-    #[serde(default = "default_offload_field")]
-    pub offload_field: OffloadFieldConfig,
     #[serde(default = "default_collection_commit")]
     pub collection_commit: CollectionCommitConfig,
 }
@@ -1012,14 +1002,6 @@ impl ReadSide {
 
 fn default_insert_batch_commit_size() -> u64 {
     300
-}
-
-fn default_offload_field() -> OffloadFieldConfig {
-    OffloadFieldConfig {
-        unload_window: Duration::from_secs(30 * 60).into(),
-        slot_count_exp: 8,
-        slot_size_exp: 4,
-    }
 }
 
 fn default_force_commit() -> u32 {

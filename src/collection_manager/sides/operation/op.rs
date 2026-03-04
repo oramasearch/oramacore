@@ -28,26 +28,6 @@ pub struct TermStringField {
 
 pub type InsertStringTerms = HashMap<Term, TermStringField>;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum DocumentFieldIndexOperation {
-    IndexString {
-        field_length: u16,
-        terms: InsertStringTerms,
-    },
-    IndexEmbedding {
-        value: Vec<f32>,
-    },
-    IndexStringFilter {
-        value: String,
-    },
-    IndexNumber {
-        value: NumberWrapper,
-    },
-    IndexBoolean {
-        value: bool,
-    },
-}
-
 #[derive(Debug, Clone)]
 pub struct NumberWrapper(pub Number);
 impl Serialize for NumberWrapper {
@@ -264,25 +244,6 @@ pub enum CollectionWriteOperation {
     Shelf(ShelfOperation<DocumentId>),
     DocumentStorage(DocumentStorageWriteOperation),
     Value(ValueOperation),
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum TypedFieldWrapper {
-    Text(Locale),
-    Embedding(EmbeddingTypedFieldWrapper),
-    Number,
-    Bool,
-    ArrayText(Locale),
-    ArrayNumber,
-    ArrayBoolean,
-    String,
-    ArrayString,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct EmbeddingTypedFieldWrapper {
-    pub model: Model,
-    pub document_fields: DocumentFieldsWrapper,
 }
 
 #[derive(Debug, Clone)]
@@ -578,6 +539,12 @@ mod tests {
     use serde_json::value::RawValue;
 
     use crate::types::{CollectionId, DocumentId, RawJSONDocument, SerializableNumber};
+    use oramacore_fields::bool::IndexedValue as BoolIndexedValue;
+    use oramacore_fields::geopoint::{
+        GeoPoint as FieldsGeoPoint, IndexedValue as GeoPointIndexedValue,
+    };
+    use oramacore_fields::number::IndexedValue as NumberIndexedValue;
+    use oramacore_fields::string_filter::IndexedValue as StringFilterIndexedValue;
     use oramacore_lib::nlp::locales::Locale;
 
     #[test]
@@ -689,6 +656,130 @@ mod tests {
                         doc_id: DocumentId(2),
                         indexed_values: Vec::from([IndexedValue::FilterBool(field_id, false)]),
                         omc: Some(2.0),
+                    },
+                ),
+            ),
+            // Test FilterBool2 with plain value
+            WriteOperation::Collection(
+                collection_id,
+                CollectionWriteOperation::IndexWriteOperation(
+                    index_id,
+                    IndexWriteOperation::Index {
+                        doc_id: DocumentId(3),
+                        indexed_values: Vec::from([IndexedValue::FilterBool2(
+                            field_id,
+                            BoolIndexedValue::Plain(true),
+                        )]),
+                    },
+                ),
+            ),
+            // Test FilterBool2 with array value
+            WriteOperation::Collection(
+                collection_id,
+                CollectionWriteOperation::IndexWriteOperation(
+                    index_id,
+                    IndexWriteOperation::Index2 {
+                        doc_id: DocumentId(4),
+                        indexed_values: Vec::from([IndexedValue::FilterBool2(
+                            field_id,
+                            BoolIndexedValue::Array(vec![true, false]),
+                        )]),
+                        omc: None,
+                    },
+                ),
+            ),
+            // Test FilterGeoPoint2 with plain value
+            WriteOperation::Collection(
+                collection_id,
+                CollectionWriteOperation::IndexWriteOperation(
+                    index_id,
+                    IndexWriteOperation::Index {
+                        doc_id: DocumentId(5),
+                        indexed_values: Vec::from([IndexedValue::FilterGeoPoint2(
+                            field_id,
+                            GeoPointIndexedValue::Plain(
+                                FieldsGeoPoint::new(41.9028, 12.4964).unwrap(),
+                            ),
+                        )]),
+                    },
+                ),
+            ),
+            // Test FilterGeoPoint2 with array value
+            WriteOperation::Collection(
+                collection_id,
+                CollectionWriteOperation::IndexWriteOperation(
+                    index_id,
+                    IndexWriteOperation::Index2 {
+                        doc_id: DocumentId(6),
+                        indexed_values: Vec::from([IndexedValue::FilterGeoPoint2(
+                            field_id,
+                            GeoPointIndexedValue::Array(vec![
+                                FieldsGeoPoint::new(41.9028, 12.4964).unwrap(),
+                                FieldsGeoPoint::new(48.8566, 2.3522).unwrap(),
+                            ]),
+                        )]),
+                        omc: None,
+                    },
+                ),
+            ),
+            // Test FilterString2 with plain value
+            WriteOperation::Collection(
+                collection_id,
+                CollectionWriteOperation::IndexWriteOperation(
+                    index_id,
+                    IndexWriteOperation::Index {
+                        doc_id: DocumentId(7),
+                        indexed_values: Vec::from([IndexedValue::FilterString2(
+                            field_id,
+                            StringFilterIndexedValue::Plain("red".to_string()),
+                        )]),
+                    },
+                ),
+            ),
+            // Test FilterString2 with array value
+            WriteOperation::Collection(
+                collection_id,
+                CollectionWriteOperation::IndexWriteOperation(
+                    index_id,
+                    IndexWriteOperation::Index2 {
+                        doc_id: DocumentId(8),
+                        indexed_values: Vec::from([IndexedValue::FilterString2(
+                            field_id,
+                            StringFilterIndexedValue::Array(vec![
+                                "blue".to_string(),
+                                "green".to_string(),
+                            ]),
+                        )]),
+                        omc: None,
+                    },
+                ),
+            ),
+            // Test FilterDate2 with plain value
+            WriteOperation::Collection(
+                collection_id,
+                CollectionWriteOperation::IndexWriteOperation(
+                    index_id,
+                    IndexWriteOperation::Index {
+                        doc_id: DocumentId(9),
+                        indexed_values: Vec::from([IndexedValue::FilterDate2(
+                            field_id,
+                            NumberIndexedValue::Plain(1719792000000_i64),
+                        )]),
+                    },
+                ),
+            ),
+            // Test FilterDate2 with array value
+            WriteOperation::Collection(
+                collection_id,
+                CollectionWriteOperation::IndexWriteOperation(
+                    index_id,
+                    IndexWriteOperation::Index2 {
+                        doc_id: DocumentId(10),
+                        indexed_values: Vec::from([IndexedValue::FilterDate2(
+                            field_id,
+                            NumberIndexedValue::Array(vec![1719792000000_i64, 1722470400000_i64]),
+                        )]),
+                        omc: None,
                     },
                 ),
             ),

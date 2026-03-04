@@ -118,25 +118,16 @@ reader_side:
         # The number of the write operation after the read side will commit the changes
         insert_batch_commit_size: 50000000
         # Set interval for commiting the changes to the disk
-        commit_interval: 1m
+        commit_interval: 10m
         # Each Nth commit will be forced, regardless of per-collection thresholds
         force_commit: 4
         # Per-collection commit thresholds
         # Uncomment to customize (these are the defaults)
         collection_commit:
             # Number of operations before collection commits immediately
-            operation_threshold: 300
+            operation_threshold: 3000
             # Time since last commit before collection participates in global commit
-            time_threshold: 5m
-
-        # offload fields if there's no search on that field in the last 30minutes
-        # keeping a window of 2 ^ 4 * 2 ^ 8 seconds = 4096 seconds = ~1 hour
-        offload_field:
-            unload_window: 30m
-            # 2 ^ 8 groups
-            slot_count_exp: 8
-            # group by 2 ^ 4 seconds
-            slot_size_exp: 4
+            time_threshold: 10m
 
     hooks:
         # Domain restrictions for hook HTTP calls (mutually exclusive):

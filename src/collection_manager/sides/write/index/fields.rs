@@ -1,8 +1,4 @@
-use std::{
-    collections::{hash_map::Entry, HashMap},
-    fmt::Debug,
-    sync::Arc,
-};
+use std::{collections::HashMap, fmt::Debug, sync::Arc};
 
 use anyhow::{Context, Result};
 use schemars::JsonSchema;
@@ -13,14 +9,23 @@ use tokio::sync::mpsc::Sender;
 use crate::{
     ai::automatic_embeddings_selector::{AutomaticEmbeddingsSelector, ChosenProperties},
     collection_manager::sides::{
+        read::number_field::NumberFieldIndexedValue,
         write::{embedding::MultiEmbeddingCalculationRequest, WriteSideContext},
         Term, TermStringField,
     },
     lock::OramaAsyncLock,
     python::embeddings::Model,
-    types::{CollectionId, DocumentId, FieldId, IndexId, Number, OramaDate, SerializableNumber},
+    types::{CollectionId, DocumentId, FieldId, IndexId, OramaDate, SerializableNumber},
 };
 
+use oramacore_fields::bool::{BoolIndexer, IndexedValue as BoolIndexedValue};
+use oramacore_fields::geopoint::{GeoPointIndexer, IndexedValue as GeoPointIndexedValue};
+use oramacore_fields::number::{IndexedValue as NumberIndexedValue, NumberIndexer};
+use oramacore_fields::string::{
+    IndexedValue as StringIndexedValue, StringIndexer as FieldsStringIndexer,
+    Tokenizer as FieldsTokenizer,
+};
+use oramacore_fields::string_filter::{IndexedValue as StringFilterIndexedValue, StringIndexer};
 use oramacore_lib::nlp::{
     chunker::{Chunker, ChunkerConfig},
     locales::Locale,
@@ -289,6 +294,8 @@ pub struct NumberFilterField {
     field_id: FieldId,
     field_path: Box<[String]>,
     is_array: bool,
+    indexer_i64: NumberIndexer<i64>,
+    indexer_f64: NumberIndexer<f64>,
 }
 
 impl NumberFilterField {
@@ -297,43 +304,24 @@ impl NumberFilterField {
             field_id,
             field_path,
             is_array,
+            indexer_i64: NumberIndexer::new(is_array),
+            indexer_f64: NumberIndexer::new(is_array),
         }
     }
 
     pub fn index_value(&self, value: &Value) -> Result<Vec<IndexedValue>> {
-        let data: Vec<Number> = match value {
-            Value::Number(n) => {
-                if let Some(i) = n.as_i64() {
-                    vec![Number::I32(i as i32)]
-                } else if let Some(f) = n.as_f64() {
-                    vec![Number::F32(f as f32)]
-                } else {
-                    vec![]
-                }
-            }
-            Value::Array(arr) => arr
-                .iter()
-                .filter_map(|v| {
-                    if let Value::Number(n) = v {
-                        if let Some(i) = n.as_i64() {
-                            Some(Number::I32(i as i32))
-                        } else {
-                            n.as_f64().map(|f| Number::F32(f as f32))
-                        }
-                    } else {
-                        None
-                    }
-                })
-                .collect::<Vec<_>>(),
-            _ => vec![],
-        };
-
-        let data = data
-            .into_iter()
-            .map(|num| IndexedValue::FilterNumber(self.field_id, SerializableNumber(num)))
-            .collect();
-
-        Ok(data)
+        if let Some(indexed) = self.indexer_i64.index_json(value) {
+            return Ok(vec![IndexedValue::FilterNumber2(
+                self.field_id,
+                NumberFieldIndexedValue::I64(indexed),
+            )]);
+        } else if let Some(indexed) = self.indexer_f64.index_json(value) {
+            return Ok(vec![IndexedValue::FilterNumber2(
+                self.field_id,
+                NumberFieldIndexedValue::F64(indexed),
+            )]);
+        }
+        Ok(vec![])
     }
 }
 
@@ -341,6 +329,7 @@ pub struct BoolFilterField {
     field_id: FieldId,
     field_path: Box<[String]>,
     is_array: bool,
+    indexer: BoolIndexer,
 }
 
 impl BoolFilterField {
@@ -349,31 +338,18 @@ impl BoolFilterField {
             field_id,
             field_path,
             is_array,
+            indexer: BoolIndexer::new(is_array),
         }
     }
 
     pub fn index_value(&self, value: &Value) -> Result<Vec<IndexedValue>> {
-        let data: Vec<bool> = match value {
-            Value::Bool(b) => vec![*b],
-            Value::Array(arr) => arr
-                .iter()
-                .filter_map(|v| {
-                    if let Value::Bool(b) = v {
-                        Some(*b)
-                    } else {
-                        None
-                    }
-                })
-                .collect(),
-            _ => vec![],
-        };
-
-        let data = data
-            .into_iter()
-            .map(|b| IndexedValue::FilterBool(self.field_id, b))
-            .collect();
-
-        Ok(data)
+        // Delegate to BoolIndexer which handles both plain and array extraction.
+        // For arrays like [true, false], a single FilterBool2 operation is emitted
+        // instead of multiple FilterBool operations.
+        match self.indexer.index_json(value) {
+            Some(indexed) => Ok(vec![IndexedValue::FilterBool2(self.field_id, indexed)]),
+            None => Ok(vec![]),
+        }
     }
 }
 
@@ -394,6 +370,7 @@ pub struct StringFilterField {
     field_path: Box<[String]>,
     is_array: bool,
     strategy: EnumStrategy,
+    indexer: StringIndexer<Box<dyn Fn(&str) -> bool + Send + Sync>>,
 }
 
 impl StringFilterField {
@@ -403,48 +380,66 @@ impl StringFilterField {
         is_array: bool,
         strategy: EnumStrategy,
     ) -> Self {
+        // Push the filtering logic into the StringIndexer callback.
+        // For StringLength, the indexer rejects strings that are empty or too long.
+        // For Explicit, we accept all strings here and do the enum() extraction in index_value.
+        let filter: Box<dyn Fn(&str) -> bool + Send + Sync> = match strategy {
+            EnumStrategy::StringLength(length) => {
+                Box::new(move |s: &str| !s.is_empty() && s.len() <= length)
+            }
+            EnumStrategy::Explicit => Box::new(|_: &str| true),
+        };
         Self {
             field_id,
             field_path,
             is_array,
             strategy,
+            indexer: StringIndexer::new(is_array, filter),
         }
     }
 
     pub fn index_value(&self, value: &Value) -> Result<Vec<IndexedValue>> {
-        let data: Vec<String> = match value {
-            Value::String(s) => vec![s.clone()],
-            Value::Array(arr) => arr
-                .iter()
-                .filter_map(|v| {
-                    if let Value::String(s) = v {
-                        Some(s.clone())
-                    } else {
-                        None
-                    }
-                })
-                .collect(),
-            _ => vec![],
+        let Some(indexed) = self.indexer.index_json(value) else {
+            return Ok(vec![]);
         };
 
-        let data = match &self.strategy {
-            EnumStrategy::StringLength(length) => data
-                .into_iter()
-                .filter(|s| !s.is_empty() && s.len() <= *length)
-                .map(|s| IndexedValue::FilterString(self.field_id, s))
-                .collect(),
-            EnumStrategy::Explicit => data
-                .into_iter()
-                .filter_map(|s| {
-                    oramacore_lib::casting::enumerative::parse(&s)
-                        .ok()
-                        .flatten()
-                })
-                .map(|s| IndexedValue::FilterString(self.field_id, s))
-                .collect(),
+        // For StringLength, the indexer's filter already applied the length check.
+        // For Explicit, we need to parse and extract values from "enum(...)" syntax.
+        let result = match self.strategy {
+            EnumStrategy::StringLength(_) => Some(indexed),
+            EnumStrategy::Explicit => Self::transform_explicit(indexed),
         };
 
-        Ok(data)
+        match result {
+            Some(value) => Ok(vec![IndexedValue::FilterString2(self.field_id, value)]),
+            None => Ok(vec![]),
+        }
+    }
+
+    /// Transforms indexed values for Explicit enum strategy by extracting
+    /// the inner value from "enum(...)" syntax via `enumerative::parse`.
+    fn transform_explicit(indexed: StringFilterIndexedValue) -> Option<StringFilterIndexedValue> {
+        match indexed {
+            StringFilterIndexedValue::Plain(s) => oramacore_lib::casting::enumerative::parse(&s)
+                .ok()
+                .flatten()
+                .map(StringFilterIndexedValue::Plain),
+            StringFilterIndexedValue::Array(arr) => {
+                let filtered: Vec<String> = arr
+                    .into_iter()
+                    .filter_map(|s| {
+                        oramacore_lib::casting::enumerative::parse(&s)
+                            .ok()
+                            .flatten()
+                    })
+                    .collect();
+                if filtered.is_empty() {
+                    None
+                } else {
+                    Some(StringFilterIndexedValue::Array(filtered))
+                }
+            }
+        }
     }
 }
 
@@ -485,12 +480,21 @@ impl DateFilterField {
             _ => vec![],
         };
 
-        let data = data
-            .into_iter()
-            .map(|t| IndexedValue::FilterDate(self.field_id, t.as_i64()))
-            .collect();
+        if data.is_empty() {
+            return Ok(vec![]);
+        }
 
-        Ok(data)
+        // Emit a single FilterDate2 with either Plain or Array
+        let indexed_value = if self.is_array || data.len() > 1 {
+            NumberIndexedValue::Array(data.iter().map(|d| d.as_i64()).collect())
+        } else {
+            NumberIndexedValue::Plain(data[0].as_i64())
+        };
+
+        Ok(vec![IndexedValue::FilterDate2(
+            self.field_id,
+            indexed_value,
+        )])
     }
 }
 
@@ -498,6 +502,7 @@ pub struct GeoPointFilterField {
     field_id: FieldId,
     field_path: Box<[String]>,
     is_array: bool,
+    indexer: GeoPointIndexer,
 }
 
 impl GeoPointFilterField {
@@ -506,35 +511,18 @@ impl GeoPointFilterField {
             field_id,
             field_path,
             is_array,
+            indexer: GeoPointIndexer::new(is_array),
         }
     }
 
     pub fn index_value(&self, value: &Value) -> Result<Vec<IndexedValue>> {
-        let data: Vec<GeoPoint> = match value {
-            Value::Object(map) => {
-                let lon = map.get("lon");
-                let lat = map.get("lat");
-
-                let output = lon
-                    .zip(lat)
-                    .and_then(|l| l.0.as_number().zip(l.1.as_number()))
-                    .and_then(|d| d.0.as_f64().zip(d.1.as_f64()))
-                    .map(|d| (d.0 as f32, d.1 as f32));
-
-                match output {
-                    Some(d) => vec![GeoPoint { lon: d.0, lat: d.1 }],
-                    _ => vec![],
-                }
-            }
-            _ => vec![],
-        };
-
-        let data = data
-            .into_iter()
-            .map(|t| IndexedValue::FilterGeoPoint(self.field_id, t))
-            .collect();
-
-        Ok(data)
+        // Delegate to GeoPointIndexer which handles both plain and array extraction.
+        // For arrays like [{"lat":1,"lon":2}, {"lat":3,"lon":4}], a single FilterGeoPoint2
+        // operation is emitted instead of multiple FilterGeoPoint operations.
+        match self.indexer.index_json(value) {
+            Some(indexed) => Ok(vec![IndexedValue::FilterGeoPoint2(self.field_id, indexed)]),
+            None => Ok(vec![]),
+        }
     }
 }
 
@@ -709,11 +697,21 @@ impl IndexScoreField {
     }
 }
 
+/// Bridge between the main crate's `TextParser` and the `oramacore_fields` `Tokenizer` trait.
+struct TextParserTokenizer(Arc<TextParser>);
+
+impl FieldsTokenizer for TextParserTokenizer {
+    fn tokenize_and_stem(&self, input: &str) -> Vec<(String, Option<String>)> {
+        self.0.tokenize_and_stem(input)
+    }
+}
+
 pub struct StringScoreField {
     field_id: FieldId,
     field_path: Box<[String]>,
     is_array: bool,
     parser: Arc<TextParser>,
+    indexer: FieldsStringIndexer<TextParserTokenizer>,
 }
 impl StringScoreField {
     pub fn new(
@@ -722,88 +720,21 @@ impl StringScoreField {
         is_array: bool,
         parser: Arc<TextParser>,
     ) -> Self {
+        let indexer = FieldsStringIndexer::new(is_array, TextParserTokenizer(parser.clone()));
         Self {
             field_id,
             field_path,
             is_array,
             parser,
+            indexer,
         }
     }
 
     pub async fn index_value(&self, value: &Value) -> Result<Vec<IndexedValue>> {
-        let data = match value {
-            Value::String(s) => self.parser.tokenize_and_stem(s),
-            Value::Array(arr) => {
-                let all_string_field = arr.iter().filter_map(|v| {
-                    if let Value::String(s) = v {
-                        Some(s)
-                    } else {
-                        None
-                    }
-                });
-
-                let mut data = Vec::new();
-                for value in all_string_field {
-                    data.extend(self.parser.tokenize_and_stem(value));
-                }
-                data
-            }
-            _ => return Ok(vec![]),
+        let Some(indexed) = self.indexer.index_json(value) else {
+            return Ok(vec![]);
         };
-
-        let field_length = data.len().min(u16::MAX as usize - 1) as u16;
-        let mut terms: HashMap<Term, TermStringField> = Default::default();
-        for (position, (original, stemmeds)) in data.into_iter().enumerate() {
-            // This `for` loop wants to build the `terms` hashmap
-            // it is a `HashMap<String, (u32, HashMap<(DocumentId, FieldId), Posting>)>`
-            // that means we:
-            // term as string -> (term count, HashMap<(DocumentId, FieldId), Posting>)
-            // Here we don't want to store Posting into PostingListStorage,
-            // that is business of the IndexReader.
-            // Instead, here we want to extrapolate data from the document.
-            // The real storage leaves in the IndexReader.
-            // `original` & `stemmeds` appears in the `terms` hashmap with the "same value"
-            // ie: the position of the origin and stemmed term are the same.
-
-            let original = Term(original);
-            match terms.entry(original) {
-                Entry::Occupied(mut entry) => {
-                    let p: &mut TermStringField = entry.get_mut();
-
-                    p.exact_positions.push(position);
-                }
-                Entry::Vacant(entry) => {
-                    let p = TermStringField {
-                        positions: vec![],
-                        exact_positions: vec![position],
-                    };
-                    entry.insert(p);
-                }
-            };
-
-            if let Some(stemmed) = stemmeds {
-                let stemmed = Term(stemmed);
-                match terms.entry(stemmed) {
-                    Entry::Occupied(mut entry) => {
-                        let p: &mut TermStringField = entry.get_mut();
-                        p.positions.push(position);
-                    }
-                    Entry::Vacant(entry) => {
-                        let p = TermStringField {
-                            exact_positions: vec![],
-                            positions: vec![position],
-                        };
-                        entry.insert(p);
-                    }
-                };
-            }
-        }
-
-        Ok(vec![IndexedValue::ScoreString(
-            self.field_id,
-            field_length,
-            terms,
-        )])
+        Ok(vec![IndexedValue::ScoreString2(self.field_id, indexed)])
     }
 }
 
@@ -1087,6 +1018,24 @@ pub enum IndexedValue {
     FilterDate(FieldId, i64),
     FilterGeoPoint(FieldId, GeoPoint),
     ScoreString(FieldId, u16, HashMap<Term, TermStringField>),
+    /// New variant that carries an `oramacore_fields::bool::IndexedValue` directly,
+    /// supporting both plain and array bool values in a single operation.
+    FilterBool2(FieldId, BoolIndexedValue),
+    /// New variant that carries an `oramacore_fields::geopoint::IndexedValue` directly,
+    /// supporting both plain and array geopoint values in a single operation.
+    FilterGeoPoint2(FieldId, GeoPointIndexedValue),
+    /// New variant that carries an `oramacore_fields::string_filter::IndexedValue` directly,
+    /// supporting both plain and array string filter values in a single operation.
+    FilterString2(FieldId, StringFilterIndexedValue),
+    /// New variant that carries an `oramacore_fields::number::IndexedValue<i64>` directly,
+    /// supporting both plain and array date values in a single operation.
+    FilterDate2(FieldId, NumberIndexedValue<i64>),
+    /// New variant that carries a `NumberFieldIndexedValue` (either I64 or F64),
+    /// supporting the dual-storage number field.
+    FilterNumber2(FieldId, NumberFieldIndexedValue),
+    /// New variant that carries an `oramacore_fields::string::IndexedValue` directly,
+    /// bypassing the old manual tokenization path.
+    ScoreString2(FieldId, StringIndexedValue),
 }
 
 fn join_vec_strings(v: &[&String]) -> String {
@@ -1124,12 +1073,19 @@ mod tests {
         let parsed = string_field.index_value(&value).await.unwrap();
 
         assert_eq!(parsed.len(), 1);
-        let IndexedValue::ScoreString(_, _, indexed) = &parsed[0] else {
-            panic!("Expected ScoreString variant");
+        let IndexedValue::ScoreString2(field_id, indexed) = &parsed[0] else {
+            panic!("Expected ScoreString2 variant");
         };
-        assert_eq!(indexed.len(), 3);
-        assert!(indexed.contains_key(&Term("first".to_string())));
-        assert!(indexed.contains_key(&Term("second".to_string())));
-        assert!(indexed.contains_key(&Term("third".to_string())));
+        assert_eq!(*field_id, FieldId(1));
+
+        // Verify indexed value via serde: terms should contain "first", "second", "third"
+        let serialized = serde_json::to_value(indexed).expect("should serialize");
+        let terms = serialized["terms"]
+            .as_object()
+            .expect("terms should be object");
+        assert_eq!(terms.len(), 3);
+        assert!(terms.contains_key("first"));
+        assert!(terms.contains_key("second"));
+        assert!(terms.contains_key("third"));
     }
 }

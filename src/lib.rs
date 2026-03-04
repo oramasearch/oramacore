@@ -35,8 +35,6 @@ pub mod web_server;
 
 mod metrics;
 
-mod merger;
-
 pub mod build_info;
 
 pub mod ai;

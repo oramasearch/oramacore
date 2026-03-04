@@ -160,16 +160,17 @@ async fn test_vector_search_should_work_after_commit() {
                 .into_iter()
                 .find(|i| i.id == index_client.index_id)
                 .unwrap();
-            let IndexFieldStatsType::UncommittedVector(stats) = result.fields_stats.remove(0).stats
+            let IndexFieldStatsType::EmbeddingFieldStorage(stats) =
+                result.fields_stats.remove(0).stats
             else {
-                return Err(anyhow::anyhow!("Expected committed vector field stats"));
+                return Err(anyhow::anyhow!("Expected embedding field stats"));
             };
 
             if stats.vector_count > 0 {
                 Ok(())
             } else {
                 Err(anyhow::anyhow!(
-                    "Expected 3 vectors, found {}",
+                    "Expected embeddings, found {}",
                     stats.vector_count
                 ))
             }
@@ -628,9 +629,10 @@ async fn test_document_chunk_long_text_for_embedding_calculation() {
                 .into_iter()
                 .find(|i| i.id == index_client.index_id)
                 .unwrap();
-            let IndexFieldStatsType::UncommittedVector(stats) = result.fields_stats.remove(0).stats
+            let IndexFieldStatsType::EmbeddingFieldStorage(stats) =
+                result.fields_stats.remove(0).stats
             else {
-                panic!("Expected vector field stats")
+                panic!("Expected embedding field stats")
             };
 
             // Even if we insert only one document, we have 5 vectors because the text is chunked
@@ -639,7 +641,7 @@ async fn test_document_chunk_long_text_for_embedding_calculation() {
                 Ok(())
             } else {
                 Err(anyhow::anyhow!(
-                    "Expected 5 vectors, found {}",
+                    "Expected 5 embeddings, found {}",
                     stats.vector_count
                 ))
             }

@@ -182,6 +182,124 @@ async fn test_filter_number() {
     assert_eq!(output.count, 3);
 }
 
+// Regression test: gt: 5.0 and lt: 5.0 with float values on integer-stored data
+// should NOT include the boundary value (5) in results.
+// Bug: ceil(5.0)=5 → Gte(5) when it should be Gt(5). Same for LessThan.
+#[tokio::test(flavor = "multi_thread")]
+async fn test_filter_number_float_boundary_exclusion() {
+    init_log();
+
+    let test_context = TestContext::new().await;
+    let collection_client = test_context.create_collection().await.unwrap();
+    let index_client = collection_client.create_index().await.unwrap();
+
+    // Insert docs with integer number values 0..10
+    let docs = (0..=10)
+        .map(|i| {
+            json!({
+                "id": i.to_string(),
+                "text": "text ".repeat(i + 1),
+                "number": i,
+            })
+        })
+        .collect::<Vec<_>>();
+    index_client
+        .insert_documents(json!(docs).try_into().unwrap())
+        .await
+        .unwrap();
+
+    // gt: 5.0 should exclude 5. Values > 5 are {6,7,8,9,10} = 5 docs.
+    // Note: 5.0 in JSON becomes Number::F32(5.0) since it has a decimal point.
+    let output = collection_client
+        .search(
+            json!({
+                "term": "text",
+                "where": {
+                    "number": {
+                        "gt": 5.0
+                    }
+                }
+            })
+            .try_into()
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        output.count, 5,
+        "gt: 5.0 should exclude boundary (5), expected 5 results (6..10), got {}",
+        output.count
+    );
+
+    // lt: 5.0 should exclude 5. Values < 5 are {0,1,2,3,4} = 5 docs.
+    let output = collection_client
+        .search(
+            json!({
+                "term": "text",
+                "where": {
+                    "number": {
+                        "lt": 5.0
+                    }
+                }
+            })
+            .try_into()
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        output.count, 5,
+        "lt: 5.0 should exclude boundary (5), expected 5 results (0..4), got {}",
+        output.count
+    );
+
+    // Sanity checks: gte: 5.0 SHOULD include 5 → {5,6,7,8,9,10} = 6 docs.
+    let output = collection_client
+        .search(
+            json!({
+                "term": "text",
+                "where": {
+                    "number": {
+                        "gte": 5.0
+                    }
+                }
+            })
+            .try_into()
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        output.count, 6,
+        "gte: 5.0 should include boundary (5), expected 6 results (5..10), got {}",
+        output.count
+    );
+
+    // lte: 5.0 SHOULD include 5 → {0,1,2,3,4,5} = 6 docs.
+    let output = collection_client
+        .search(
+            json!({
+                "term": "text",
+                "where": {
+                    "number": {
+                        "lte": 5.0
+                    }
+                }
+            })
+            .try_into()
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        output.count, 6,
+        "lte: 5.0 should include boundary (5), expected 6 results (0..5), got {}",
+        output.count
+    );
+
+    drop(test_context);
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn test_filter_bool() {
     init_log();

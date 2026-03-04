@@ -137,6 +137,7 @@ impl AnalyticsMetadataFromRequest {
 }
 
 impl SearchAnalyticEventV1 {
+    #[allow(clippy::too_many_arguments)]
     pub fn try_new(
         collection_id: CollectionId,
         search_params: &SearchParams,
