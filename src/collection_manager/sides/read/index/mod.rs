@@ -32,7 +32,6 @@ use self::number_field::NumberFieldStorage;
 use self::string_field::StringFieldStorage;
 use self::string_filter_field::StringFilterFieldStorage;
 use super::collection::{IndexFieldStats, IndexFieldStatsType};
-use super::OffloadFieldConfig;
 pub mod bool_field;
 mod committed_field;
 pub mod date_field;
@@ -41,7 +40,6 @@ pub mod facet;
 pub mod filter;
 pub mod geopoint_field;
 pub mod group;
-mod merge;
 pub mod number_field;
 mod path_to_index_id_map;
 mod sort;
@@ -119,7 +117,6 @@ pub struct Index {
     pub promoted_to_runtime_index: AtomicBool,
 
     context: ReadSideContext,
-    offload_config: OffloadFieldConfig,
 
     // Base data directory for this index. Used to create stable paths
     // for BoolFieldStorage instances created during update().
@@ -181,7 +178,6 @@ impl Index {
         id: IndexId,
         text_parser: Arc<TextParser>,
         context: ReadSideContext,
-        offload_config: OffloadFieldConfig,
         enum_strategy: EnumStrategy,
         data_dir: PathBuf,
     ) -> Self {
@@ -194,7 +190,6 @@ impl Index {
             promoted_to_runtime_index: AtomicBool::new(false),
 
             context,
-            offload_config,
 
             data_dir,
 
@@ -228,7 +223,6 @@ impl Index {
         index_id: IndexId,
         data_dir: PathBuf,
         context: ReadSideContext,
-        offload_config: OffloadFieldConfig,
     ) -> Result<Self> {
         debug!("Reading index info");
         let dump: Dump = BufferedFile::open(data_dir.join("index.json"))
@@ -365,7 +359,6 @@ impl Index {
             aliases: dump.aliases,
 
             context,
-            offload_config,
 
             data_dir,
 

@@ -28,26 +28,6 @@ pub struct TermStringField {
 
 pub type InsertStringTerms = HashMap<Term, TermStringField>;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum DocumentFieldIndexOperation {
-    IndexString {
-        field_length: u16,
-        terms: InsertStringTerms,
-    },
-    IndexEmbedding {
-        value: Vec<f32>,
-    },
-    IndexStringFilter {
-        value: String,
-    },
-    IndexNumber {
-        value: NumberWrapper,
-    },
-    IndexBoolean {
-        value: bool,
-    },
-}
-
 #[derive(Debug, Clone)]
 pub struct NumberWrapper(pub Number);
 impl Serialize for NumberWrapper {
@@ -264,25 +244,6 @@ pub enum CollectionWriteOperation {
     Shelf(ShelfOperation<DocumentId>),
     DocumentStorage(DocumentStorageWriteOperation),
     Value(ValueOperation),
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum TypedFieldWrapper {
-    Text(Locale),
-    Embedding(EmbeddingTypedFieldWrapper),
-    Number,
-    Bool,
-    ArrayText(Locale),
-    ArrayNumber,
-    ArrayBoolean,
-    String,
-    ArrayString,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct EmbeddingTypedFieldWrapper {
-    pub model: Model,
-    pub document_fields: DocumentFieldsWrapper,
 }
 
 #[derive(Debug, Clone)]

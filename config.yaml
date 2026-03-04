@@ -129,15 +129,6 @@ reader_side:
             # Time since last commit before collection participates in global commit
             time_threshold: 10m
 
-        # offload fields if there's no search on that field in the last 30minutes
-        # keeping a window of 2 ^ 4 * 2 ^ 8 seconds = 4096 seconds = ~1 hour
-        offload_field:
-            unload_window: 30m
-            # 2 ^ 8 groups
-            slot_count_exp: 8
-            # group by 2 ^ 4 seconds
-            slot_size_exp: 4
-
     hooks:
         # Domain restrictions for hook HTTP calls (mutually exclusive):
         # 'denied_domains' to blocklist, 'allowed_domains' to allowlist

@@ -29,7 +29,6 @@ mod index_rebuild;
 mod list_documents;
 mod mcp_server;
 mod multi_index;
-mod offload_field;
 mod omc_test;
 mod openai_chat;
 mod pin_rules;

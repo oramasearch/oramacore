@@ -44,7 +44,7 @@ use crate::{
 
 use super::{
     index::{Index, IndexStats},
-    CollectionCommitConfig, DeletionReason, OffloadFieldConfig, ReadSide,
+    CollectionCommitConfig, DeletionReason, ReadSide,
 };
 use oramacore_lib::values::ValuesReader;
 
@@ -124,7 +124,6 @@ pub struct CollectionReader {
     read_api_key: OramaAsyncLock<ApiKey>,
     write_api_key: Option<ApiKey>,
     context: ReadSideContext,
-    offload_config: OffloadFieldConfig,
     commit_config: CollectionCommitConfig,
 
     indexes: OramaAsyncLock<Vec<Index>>,
@@ -159,6 +158,7 @@ pub struct CollectionReader {
 }
 
 impl CollectionReader {
+    #[allow(clippy::too_many_arguments)]
     pub async fn empty(
         data_dir: PathBuf,
         collection_id: CollectionId,
@@ -168,7 +168,6 @@ impl CollectionReader {
         read_api_key: ApiKey,
         write_api_key: Option<ApiKey>,
         context: ReadSideContext,
-        offload_config: OffloadFieldConfig,
         commit_config: CollectionCommitConfig,
     ) -> Result<Self> {
         let document_storage = CollectionDocumentStorage::new(
@@ -196,7 +195,6 @@ impl CollectionReader {
             write_api_key,
 
             context,
-            offload_config,
             commit_config,
 
             indexes: OramaAsyncLock::new("collection_indexes", Default::default()),
@@ -239,7 +237,6 @@ impl CollectionReader {
     pub async fn try_load(
         context: ReadSideContext,
         data_dir: PathBuf,
-        offload_config: OffloadFieldConfig,
         commit_config: CollectionCommitConfig,
         global_offset: Offset,
     ) -> Result<Self> {
@@ -299,7 +296,6 @@ impl CollectionReader {
                 index_id,
                 data_dir.join("indexes").join(index_id.as_str()),
                 context.clone(),
-                offload_config,
             )?;
             indexes.push(index);
             debug!("Index {:?} loaded", index_id);
@@ -312,7 +308,6 @@ impl CollectionReader {
                 index_id,
                 data_dir.join("temp_indexes").join(index_id.as_str()),
                 context.clone(),
-                offload_config,
             )?;
             temp_indexes.push(index);
             debug!("Temp index {:?} loaded", index_id);
@@ -361,7 +356,6 @@ impl CollectionReader {
             write_api_key: dump.write_api_key,
 
             context,
-            offload_config,
             commit_config,
 
             indexes: OramaAsyncLock::new("collection_indexes", indexes),
@@ -904,7 +898,6 @@ impl CollectionReader {
                     index_id,
                     self.context.nlp_service.get(locale),
                     self.context.clone(),
-                    self.offload_config,
                     EnumStrategy::default(),
                     self.data_dir.join("indexes").join(index_id.as_str()),
                 );
@@ -927,7 +920,6 @@ impl CollectionReader {
                     index_id,
                     self.context.nlp_service.get(locale),
                     self.context.clone(),
-                    self.offload_config,
                     enum_strategy,
                     self.data_dir.join("indexes").join(index_id.as_str()),
                 );
@@ -946,7 +938,6 @@ impl CollectionReader {
                     index_id,
                     self.context.nlp_service.get(locale),
                     self.context.clone(),
-                    self.offload_config,
                     EnumStrategy::default(),
                     self.data_dir.join("temp_indexes").join(index_id.as_str()),
                 );
@@ -969,7 +960,6 @@ impl CollectionReader {
                     index_id,
                     self.context.nlp_service.get(locale),
                     self.context.clone(),
-                    self.offload_config,
                     enum_strategy,
                     self.data_dir.join("temp_indexes").join(index_id.as_str()),
                 );

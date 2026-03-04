@@ -91,57 +91,64 @@ impl DateFieldStorage {
                 storage,
             })
         } else {
-            // Check for even older OrderedKeyIndex format
-            let old_ordered_key = base_path.join("data");
-            if old_ordered_key.exists() || base_path.join("index").exists() {
-                // Try to migrate from OrderedKeyIndex format
-                use oramacore_lib::data_structures::ordered_key::OrderedKeyIndex;
+            #[allow(deprecated)]
+            {
+                // Check for even older OrderedKeyIndex format
+                let old_ordered_key = base_path.join("data");
+                if old_ordered_key.exists() || base_path.join("index").exists() {
+                    // Try to migrate from OrderedKeyIndex format
+                    use oramacore_lib::data_structures::ordered_key::OrderedKeyIndex;
 
-                match OrderedKeyIndex::<i64, DocumentId>::load(base_path.clone()) {
-                    Ok(inner) => {
-                        let items = inner
-                            .get_items((true, i64::MIN), (true, i64::MAX))
-                            .context("Cannot get items for date field migration")?;
+                    match OrderedKeyIndex::<i64, DocumentId>::load(base_path.clone()) {
+                        Ok(inner) => {
+                            let items = inner
+                                .get_items((true, i64::MIN), (true, i64::MAX))
+                                .context("Cannot get items for date field migration")?;
 
-                        let storage = I64Storage::new(base_path.clone(), Threshold::default())
-                            .context("Failed to create I64Storage for OrderedKeyIndex migration")?;
+                            let storage = I64Storage::new(base_path.clone(), Threshold::default())
+                                .context(
+                                    "Failed to create I64Storage for OrderedKeyIndex migration",
+                                )?;
 
-                        for item in items {
-                            for doc_id in &item.values {
-                                storage
-                                    .insert(&NumberIndexedValue::Plain(item.key), doc_id.0)
-                                    .context("Failed to insert during OrderedKeyIndex migration")?;
+                            for item in items {
+                                for doc_id in &item.values {
+                                    storage
+                                        .insert(&NumberIndexedValue::Plain(item.key), doc_id.0)
+                                        .context(
+                                            "Failed to insert during OrderedKeyIndex migration",
+                                        )?;
+                                }
                             }
+                            storage.compact(1).context(
+                                "Failed to compact migrated I64Storage from OrderedKeyIndex",
+                            )?;
+                            storage.cleanup();
+
+                            info!("Migrated date field from OrderedKeyIndex to I64Storage");
+
+                            return Ok(Self {
+                                field_path: info.field_path,
+                                base_path,
+                                storage,
+                            });
                         }
-                        storage.compact(1).context(
-                            "Failed to compact migrated I64Storage from OrderedKeyIndex",
-                        )?;
-                        storage.cleanup();
-
-                        info!("Migrated date field from OrderedKeyIndex to I64Storage");
-
-                        return Ok(Self {
-                            field_path: info.field_path,
-                            base_path,
-                            storage,
-                        });
-                    }
-                    Err(e) => {
-                        tracing::warn!(
-                            "Failed to load OrderedKeyIndex for date migration: {e:?}, trying native format"
-                        );
+                        Err(e) => {
+                            tracing::warn!(
+                                "Failed to load OrderedKeyIndex for date migration: {e:?}, trying native format"
+                            );
+                        }
                     }
                 }
-            }
 
-            // New format or already migrated: I64Storage loads its own CURRENT/versions/ structure
-            let storage = I64Storage::new(base_path.clone(), Threshold::default())
-                .context("Failed to load I64Storage for date field")?;
-            Ok(Self {
-                field_path: info.field_path,
-                base_path,
-                storage,
-            })
+                // New format or already migrated: I64Storage loads its own CURRENT/versions/ structure
+                let storage = I64Storage::new(base_path.clone(), Threshold::default())
+                    .context("Failed to load I64Storage for date field")?;
+                Ok(Self {
+                    field_path: info.field_path,
+                    base_path,
+                    storage,
+                })
+            }
         }
     }
 

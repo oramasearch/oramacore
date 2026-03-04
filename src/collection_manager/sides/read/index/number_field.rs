@@ -136,72 +136,75 @@ impl NumberFieldStorage {
             });
         }
 
-        // Migration path 2: old OrderedKeyIndex format
-        let old_ordered_key = base_path.join("data");
-        if old_ordered_key.exists() || base_path.join("index").exists() {
-            use crate::types::SerializableNumber;
-            use oramacore_lib::data_structures::ordered_key::{BoundedValue, OrderedKeyIndex};
+        #[allow(deprecated)]
+        {
+            // Migration path 2: old OrderedKeyIndex format
+            let old_ordered_key = base_path.join("data");
+            if old_ordered_key.exists() || base_path.join("index").exists() {
+                use crate::types::SerializableNumber;
+                use oramacore_lib::data_structures::ordered_key::{BoundedValue, OrderedKeyIndex};
 
-            match OrderedKeyIndex::<SerializableNumber, DocumentId>::load(base_path.clone()) {
-                Ok(inner) => {
-                    let items = inner
-                        .get_items(
-                            (true, SerializableNumber::min_value()),
-                            (true, SerializableNumber::max_value()),
-                        )
-                        .context("Cannot get items for number field migration")?;
+                match OrderedKeyIndex::<SerializableNumber, DocumentId>::load(base_path.clone()) {
+                    Ok(inner) => {
+                        let items = inner
+                            .get_items(
+                                (true, SerializableNumber::min_value()),
+                                (true, SerializableNumber::max_value()),
+                            )
+                            .context("Cannot get items for number field migration")?;
 
-                    let i64_path = base_path.join("i64");
-                    let f64_path = base_path.join("f64");
+                        let i64_path = base_path.join("i64");
+                        let f64_path = base_path.join("f64");
 
-                    let i64_storage = I64Storage::new(i64_path, Threshold::default())
-                        .context("Failed to create I64Storage for OrderedKeyIndex migration")?;
-                    let f64_storage = F64Storage::new(f64_path, Threshold::default())
-                        .context("Failed to create F64Storage for OrderedKeyIndex migration")?;
+                        let i64_storage = I64Storage::new(i64_path, Threshold::default())
+                            .context("Failed to create I64Storage for OrderedKeyIndex migration")?;
+                        let f64_storage = F64Storage::new(f64_path, Threshold::default())
+                            .context("Failed to create F64Storage for OrderedKeyIndex migration")?;
 
-                    for item in items {
-                        for doc_id in &item.values {
-                            match item.key.0 {
-                                Number::I32(n) => {
-                                    i64_storage
-                                        .insert(&NumberIndexedValue::Plain(n as i64), doc_id.0)
-                                        .context(
-                                            "Failed to insert i64 during OrderedKeyIndex migration",
-                                        )?;
-                                }
-                                Number::F32(f) => {
-                                    f64_storage
-                                        .insert(&NumberIndexedValue::Plain(f as f64), doc_id.0)
-                                        .context(
-                                            "Failed to insert f64 during OrderedKeyIndex migration",
-                                        )?;
+                        for item in items {
+                            for doc_id in &item.values {
+                                match item.key.0 {
+                                    Number::I32(n) => {
+                                        i64_storage
+                                            .insert(&NumberIndexedValue::Plain(n as i64), doc_id.0)
+                                            .context(
+                                                "Failed to insert i64 during OrderedKeyIndex migration",
+                                            )?;
+                                    }
+                                    Number::F32(f) => {
+                                        f64_storage
+                                            .insert(&NumberIndexedValue::Plain(f as f64), doc_id.0)
+                                            .context(
+                                                "Failed to insert f64 during OrderedKeyIndex migration",
+                                            )?;
+                                    }
                                 }
                             }
                         }
+
+                        i64_storage
+                            .compact(1)
+                            .context("Failed to compact i64 during OrderedKeyIndex migration")?;
+                        f64_storage
+                            .compact(1)
+                            .context("Failed to compact f64 during OrderedKeyIndex migration")?;
+                        i64_storage.cleanup();
+                        f64_storage.cleanup();
+
+                        info!("Migrated number field from OrderedKeyIndex to dual I64/F64 Storage");
+
+                        return Ok(Self {
+                            field_path: info.field_path,
+                            base_path,
+                            i64_storage,
+                            f64_storage,
+                        });
                     }
-
-                    i64_storage
-                        .compact(1)
-                        .context("Failed to compact i64 during OrderedKeyIndex migration")?;
-                    f64_storage
-                        .compact(1)
-                        .context("Failed to compact f64 during OrderedKeyIndex migration")?;
-                    i64_storage.cleanup();
-                    f64_storage.cleanup();
-
-                    info!("Migrated number field from OrderedKeyIndex to dual I64/F64 Storage");
-
-                    return Ok(Self {
-                        field_path: info.field_path,
-                        base_path,
-                        i64_storage,
-                        f64_storage,
-                    });
-                }
-                Err(e) => {
-                    tracing::warn!(
-                        "Failed to load OrderedKeyIndex for number migration: {e:?}, trying native format"
-                    );
+                    Err(e) => {
+                        tracing::warn!(
+                            "Failed to load OrderedKeyIndex for number migration: {e:?}, trying native format"
+                        );
+                    }
                 }
             }
         }

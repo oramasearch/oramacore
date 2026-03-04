@@ -4,213 +4,13 @@ use anyhow::{bail, Context, Result};
 use oramacore_lib::filters::{FilterResult, PlainFilterResult};
 use tracing::trace;
 
-use crate::types::{DateFilter, DocumentId, FieldId, Filter, GeoSearchFilter, WhereFilter};
+use crate::types::{DocumentId, FieldId, Filter, WhereFilter};
 
 use super::{
     bool_field::BoolFieldStorage, date_field::DateFieldStorage,
     geopoint_field::GeoPointFieldStorage, number_field::NumberFieldStorage,
     path_to_index_id_map::PathToIndexId, string_filter_field::StringFilterFieldStorage, FieldType,
 };
-
-/// Trait for fields that support filtering operations.
-///
-/// This trait provides a uniform interface for filtering documents across
-/// different field types (Bool, Number, Date, StringFilter, GeoPoint) with their
-/// corresponding filter parameter types.
-///
-/// # Type Parameters
-///
-/// - `FilterParam`: The type of filter criteria this field accepts
-///   (e.g., `bool`, `NumberFilter`, `DateFilter`, `String`, `GeoSearchFilter`)
-///
-/// # Design
-///
-/// The trait uses an associated type `FilterParam` to establish the relationship
-/// between field types and their filter parameters. This allows the compiler to
-/// enforce type safety while enabling generic filter operations.
-///
-/// The trait normalizes different filter method signatures across field types:
-/// - Some fields return `Result<impl Iterator>` (Bool, Number, Date)
-/// - Some fields return `impl Iterator` without Result (StringFilter)
-/// - Some fields return `Box<dyn Iterator>` (GeoPoint)
-///
-/// By returning `Result<Box<dyn Iterator>>`, the trait provides a uniform interface.
-pub trait Filterable {
-    /// The type of filter parameter this field accepts.
-    ///
-    /// Examples:
-    /// - `bool` for Bool fields
-    /// - `NumberFilter` for Number fields
-    /// - `DateFilter` for Date fields
-    /// - `String` for StringFilter fields
-    /// - `GeoSearchFilter` for GeoPoint fields
-    type FilterParam;
-
-    /// Filters documents based on the given filter parameter.
-    ///
-    /// Returns an iterator of `DocumentId`s that match the filter criteria.
-    /// The iterator yields documents from this field that satisfy the filter.
-    ///
-    /// # Arguments
-    ///
-    /// * `filter_param` - The filter criteria to apply
-    ///
-    /// # Returns
-    ///
-    /// A `Result` containing a boxed iterator of matching `DocumentId`s, or an error
-    /// if the filtering operation fails (e.g., due to index corruption).
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if:
-    /// - The underlying index data is corrupted
-    /// - I/O errors occur when reading committed data from disk
-    fn filter<'s, 'iter>(
-        &'s self,
-        filter_param: &Self::FilterParam,
-    ) -> Result<Box<dyn Iterator<Item = DocumentId> + 'iter>>
-    where
-        's: 'iter;
-}
-
-/// Trait for converting from the generic Filter enum to specific filter parameter types.
-///
-/// This trait enables type-safe conversion from the Filter enum variants to the
-/// specific types expected by field implementations of Filterable trait.
-trait TryFromFilter {
-    type Error;
-
-    fn try_from_filter(filter: &Filter) -> Result<&Self, Self::Error>
-    where
-        Self: Sized;
-}
-
-impl TryFromFilter for bool {
-    type Error = anyhow::Error;
-
-    fn try_from_filter(filter: &Filter) -> Result<&Self, Self::Error> {
-        if let Filter::Bool(b) = filter {
-            Ok(b)
-        } else {
-            Err(anyhow::anyhow!("Failed to convert filter to bool"))
-        }
-    }
-}
-
-impl TryFromFilter for DateFilter {
-    type Error = anyhow::Error;
-
-    fn try_from_filter(filter: &Filter) -> Result<&Self, Self::Error> {
-        if let Filter::Date(date_filter) = filter {
-            Ok(date_filter)
-        } else {
-            Err(anyhow::anyhow!("Failed to convert filter to date filter"))
-        }
-    }
-}
-
-impl TryFromFilter for String {
-    type Error = anyhow::Error;
-
-    fn try_from_filter(filter: &Filter) -> Result<&Self, Self::Error> {
-        if let Filter::String(string_filter) = filter {
-            Ok(string_filter)
-        } else {
-            Err(anyhow::anyhow!("Failed to convert filter to string"))
-        }
-    }
-}
-
-impl TryFromFilter for GeoSearchFilter {
-    type Error = anyhow::Error;
-
-    fn try_from_filter(filter: &Filter) -> Result<&Self, Self::Error> {
-        if let Filter::GeoPoint(geo_search_filter) = filter {
-            Ok(geo_search_filter)
-        } else {
-            Err(anyhow::anyhow!(
-                "Failed to convert filter to geo search filter"
-            ))
-        }
-    }
-}
-
-/// Filters a single field and combines uncommitted and committed results.
-///
-/// This generic function handles filtering for any field type that implements
-/// the Filterable trait. It:
-/// 1. Converts the generic Filter to the specific FilterParam type
-/// 2. Filters the uncommitted field data
-/// 3. Optionally filters the committed field data
-/// 4. Combines results using OR logic (union of document sets)
-///
-/// # Type Parameters
-/// * `UF` - Uncommitted field type implementing Filterable
-/// * `CF` - Committed field type implementing Filterable
-/// * `FP` - Filter parameter type that can be converted from Filter
-///
-/// # Arguments
-/// * `document_count_estimate` - Total document count for result sizing
-/// * `uncommitted_field` - The in-memory uncommitted field to filter
-/// * `committed_field` - Optional persisted committed field to filter
-/// * `filter_param` - The filter criteria (generic Filter enum)
-///
-/// # Returns
-/// A FilterResult containing the union of matching document IDs from both fields
-fn calculate_filter_on_field<UF, CF, FP>(
-    document_count_estimate: u64,
-    uncommitted_field: &UF,
-    committed_field: Option<&CF>,
-    filter_param: &Filter,
-) -> Result<FilterResult<DocumentId>>
-where
-    UF: Filterable<FilterParam = FP>,
-    CF: Filterable<FilterParam = FP>,
-    FP: TryFromFilter,
-{
-    let filter_param: &FP = match FP::try_from_filter(filter_param) {
-        Ok(p) => p,
-        Err(_) => {
-            // If the conversion fails, return empty set
-            // This handles the following case:
-            // - create a collection
-            // - create an index1
-            // - insert { "a": 10 } in index1
-            // - create an index2
-            // - insert { "a": "string" } in index2
-            // - search with { where: { a: { gt: 5 } } }
-            // In this case we consider only the index1
-            // So, we return an empty set for index2
-            // TODO: return a warning to the user
-            return Ok(FilterResult::Filter(PlainFilterResult::new(
-                document_count_estimate,
-            )));
-        }
-    };
-
-    let uncommitted_docs = uncommitted_field
-        .filter(filter_param)
-        .context("Failed to filter uncommitted field")?;
-
-    let mut filtered = FilterResult::Filter(PlainFilterResult::from_iter(
-        document_count_estimate,
-        uncommitted_docs,
-    ));
-
-    // Combine uncommitted and committed results using OR logic
-    if let Some(committed_field) = committed_field {
-        let committed_docs = committed_field.filter(filter_param)?;
-        filtered = FilterResult::or(
-            filtered,
-            FilterResult::Filter(PlainFilterResult::from_iter(
-                document_count_estimate,
-                committed_docs,
-            )),
-        );
-    }
-
-    Ok(filtered)
-}
 
 /// Routes filter operations to the appropriate field type.
 ///
@@ -230,6 +30,7 @@ where
 /// # Returns
 /// A FilterResult containing matching document IDs, or an error if the field
 /// is not found or has an unsupported type.
+#[allow(clippy::too_many_arguments)]
 fn calculate_filter_for_fields(
     document_count_estimate: u64,
     path_to_index_id_map: &PathToIndexId,
@@ -371,6 +172,7 @@ fn calculate_filter_for_fields(
 /// # Returns
 /// A FilterResult containing document IDs that match the filter criteria.
 /// Returns an empty set if any specified field doesn't exist in the index.
+#[allow(clippy::too_many_arguments)]
 fn calculate_filter(
     document_count_estimate: u64,
     path_to_index_id_map: &PathToIndexId,
@@ -507,6 +309,7 @@ impl<'index> FilterContext<'index> {
     /// This constructor accepts all necessary data as parameters, ensuring
     /// that Index internals are not directly accessed. The caller (Index)
     /// is responsible for gathering the data and passing it in.
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         document_count: u64,
         path_to_index_id_map: &'index PathToIndexId,

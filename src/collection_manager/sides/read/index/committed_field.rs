@@ -10,7 +10,6 @@ mod bool;
 mod date;
 mod geopoint;
 mod number;
-mod offload_utils;
 // Kept public for migration access from string_field.rs (load_old_fst_data)
 pub(crate) mod string;
 mod string_filter;
