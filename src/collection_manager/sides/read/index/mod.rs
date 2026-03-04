@@ -511,8 +511,6 @@ impl Index {
             // Nothing to commit
             debug!("Nothing to commit {:?}", self.id);
 
-            self.try_unload_fields().await;
-
             return Ok(());
         }
 
@@ -674,8 +672,6 @@ impl Index {
             ocm: None,
         });
 
-        self.try_unload_fields().await;
-
         BufferedFile::create_or_overwrite(data_dir.join("index.json"))
             .context("Cannot create index.json")?
             .write_json_data(&dump)
@@ -821,11 +817,6 @@ impl Index {
         }
 
         Ok(())
-    }
-
-    async fn try_unload_fields(&self) {
-        // StringStorage uses mmap-based segments, no manual unloading needed.
-        // EmbeddingStorage uses mmap-based segments, no manual unloading needed.
     }
 
     #[inline]
