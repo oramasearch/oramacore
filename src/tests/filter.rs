@@ -908,3 +908,79 @@ async fn test_enum_strategy() {
 
     drop(new_test_context);
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_long_strings_are_not_indexed_as_string_filter() {
+    init_log();
+
+    let max_length = 10;
+
+    let test_context = TestContext::new().await;
+    let collection_client = test_context.create_collection().await.unwrap();
+    let index_client = collection_client
+        .create_index_with_explicit_type_strategy(crate::types::TypeParsingStrategies {
+            enum_strategy: EnumStrategy::StringLength(max_length),
+        })
+        .await
+        .unwrap();
+
+    let short_value = "short";
+    let long_value = "this string is way too long to be indexed";
+
+    let docs = vec![
+        json!({
+            "id": "1",
+            "text": "hello world",
+            "category": short_value,
+        }),
+        json!({
+            "id": "2",
+            "text": "hello world",
+            "category": long_value,
+        }),
+        json!({
+            "id": "3",
+            "text": "hello world",
+            "category": short_value,
+        }),
+    ];
+    index_client
+        .insert_documents(json!(docs).try_into().unwrap())
+        .await
+        .unwrap();
+
+    // Filtering by the short value should return the 2 documents that have it
+    let output = collection_client
+        .search(
+            json!({
+                "term": "hello",
+                "where": {
+                    "category": short_value,
+                }
+            })
+            .try_into()
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(output.count, 2);
+
+    // Filtering by the long value should return no documents,
+    // because strings exceeding max_length are not indexed as string_filter
+    let output = collection_client
+        .search(
+            json!({
+                "term": "hello",
+                "where": {
+                    "category": long_value,
+                }
+            })
+            .try_into()
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(output.count, 0);
+
+    drop(test_context);
+}

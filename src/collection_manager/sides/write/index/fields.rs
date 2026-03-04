@@ -1,4 +1,4 @@
-use std::{collections::HashMap, fmt::Debug, sync::Arc};
+use std::{collections::HashMap, fmt::Debug, sync::Arc, usize};
 
 use anyhow::{Context, Result};
 use schemars::JsonSchema;
@@ -406,7 +406,13 @@ impl StringFilterField {
         // For StringLength, the indexer's filter already applied the length check.
         // For Explicit, we need to parse and extract values from "enum(...)" syntax.
         let result = match self.strategy {
-            EnumStrategy::StringLength(_) => Some(indexed),
+            EnumStrategy::StringLength(max_length) => {
+                if value.as_str().map(|s| s.len()).unwrap_or(usize::MAX) > max_length {
+                    None
+                } else {
+                    Some(indexed)
+                }
+            }
             EnumStrategy::Explicit => Self::transform_explicit(indexed),
         };
 
