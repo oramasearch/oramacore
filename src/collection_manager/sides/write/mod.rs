@@ -1247,10 +1247,11 @@ impl WriteSide {
         &self,
         write_api_key: WriteApiKey,
         collection_id: CollectionId,
+        index_ids: Option<Vec<IndexId>>,
     ) -> Result<Vec<Document>, WriteError> {
         let collection = self.get_collection(collection_id, write_api_key).await?;
 
-        let document_ids = collection.get_document_ids().await;
+        let document_ids = collection.get_document_ids(index_ids).await;
 
         let document_storage = collection.get_document_storage();
 

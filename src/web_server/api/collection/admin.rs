@@ -108,8 +108,9 @@ async fn list_document_in_collection(
     Json(json): Json<ListDocumentInCollectionRequest>,
 ) -> impl IntoResponse {
     let collection_id = json.id;
+    let index_ids = json.index_ids;
     write_side
-        .list_document(write_api_key, collection_id)
+        .list_document(write_api_key, collection_id, index_ids)
         .await
         .map(Json)
 }

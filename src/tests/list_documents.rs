@@ -32,6 +32,7 @@ async fn test_list_documents() -> Result<()> {
         .list_document(
             collection_client.write_api_key,
             collection_client.collection_id,
+            None,
         )
         .await?;
     info!("Done {:?}", docs);

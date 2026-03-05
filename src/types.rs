@@ -628,6 +628,7 @@ impl ReadApiKey {
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ListDocumentInCollectionRequest {
     pub id: CollectionId,
+    pub index_ids: Option<Vec<IndexId>>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
