@@ -613,10 +613,16 @@ impl CollectionWriter {
         Ok(())
     }
 
-    pub async fn get_document_ids(&self) -> Vec<DocumentId> {
+    pub async fn get_document_ids(&self, index_ids: Option<Vec<IndexId>>) -> Vec<DocumentId> {
         let mut doc_id = vec![];
         let indexes = self.indexes.read("get_document_ids").await;
-        for (_, index) in indexes.iter() {
+        for (id, index) in indexes.iter() {
+            if let Some(ref ids) = index_ids {
+                if !ids.contains(id) {
+                    continue;
+                }
+            }
+
             let index_doc_ids = index.get_document_ids().await;
             doc_id.extend(index_doc_ids);
         }
