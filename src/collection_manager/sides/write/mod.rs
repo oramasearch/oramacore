@@ -270,7 +270,9 @@ impl WriteSide {
                 .await
                 .context("Cannot load collections")?;
 
-        let (stop_done_sender, stop_done_receiver) = tokio::sync::mpsc::channel(1);
+        // Channel capacity must match the number of background tasks (3):
+        // commit loop, temp index cleanup loop, and embedding calculation loop.
+        let (stop_done_sender, stop_done_receiver) = tokio::sync::mpsc::channel(3);
         let (stop_sender, _) = tokio::sync::broadcast::channel(1);
         let commit_loop_receiver = stop_sender.subscribe();
         let temp_index_cleanup_receiver = stop_sender.subscribe();
@@ -347,21 +349,29 @@ impl WriteSide {
 
     pub async fn stop(&self) -> Result<()> {
         info!("Stopping writer side");
-        // Broadcast
+
+        // Force commit all pending data before stopping to avoid data loss
+        info!("Performing forced commit before shutdown");
+        if let Err(e) = self.commit().await {
+            error!(error = ?e, "Cannot commit write side during shutdown");
+            // Continue with shutdown even if commit fails
+        }
+
+        // Broadcast stop signal to all background tasks
         self.stop_sender
             .send(())
             .context("Cannot send stop signal")?;
         let mut stop_done_receiver = self.stop_done_receiver.write("stop").await;
-        // Commit loop
-        stop_done_receiver
-            .recv()
-            .await
-            .context("Cannot send stop signal")?;
-        // embedding calulcation loop
-        stop_done_receiver
-            .recv()
-            .await
-            .context("Cannot send stop signal")?;
+
+        // Wait for all three tasks: commit loop, temp index cleanup loop,
+        // and embedding calculation loop.
+        for _ in 0..3 {
+            stop_done_receiver
+                .recv()
+                .await
+                .context("Cannot receive stop-done signal from background task")?;
+        }
+
         info!("Writer side stopped");
 
         Ok(())
