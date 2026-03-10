@@ -243,7 +243,7 @@ impl ReadSide {
         let training_sets = TrainingSetInterface::new(kv.clone());
         let tools = ToolsRuntime::new(kv.clone(), llm_service.clone());
 
-        let (stop_done_sender, stop_done_receiver) = tokio::sync::mpsc::channel(1);
+        let (stop_done_sender, stop_done_receiver) = tokio::sync::mpsc::channel(2);
         let (stop_sender, _) = tokio::sync::broadcast::channel(1);
         let commit_loop_receiver = stop_sender.subscribe();
         let receive_operation_loop_receiver = stop_sender.subscribe();
@@ -337,11 +337,27 @@ impl ReadSide {
             .context("Cannot send stop signal")?;
         let mut stop_done_receiver = self.stop_done_receiver.write("stop").await;
 
-        // We have three tasks to wait for.
-        stop_done_receiver
-            .recv()
-            .await
-            .context("Cannot send stop signal")?;
+        // Wait for both tasks: commit loop and receive loop.
+        for _ in 0..2 {
+            stop_done_receiver
+                .recv()
+                .await
+                .context("Cannot receive stop-done signal from background task")?;
+        }
+
+        // Write the final offset to read.info to capture any messages
+        // dequeued between the forced commit and the stop signal.
+        let final_offset = **self.live_offset.read("final_stop").await;
+        if let Err(e) =
+            BufferedFile::create_or_overwrite(self.data_dir.join("read.info")).and_then(|f| {
+                f.write_json_data(&ReadInfo::V1(ReadInfoV1 {
+                    offset: final_offset,
+                }))
+            })
+        {
+            error!(error = ?e, "Cannot write final read.info during shutdown");
+        }
+
         info!("Read side stopped");
 
         Ok(())
