@@ -5311,9 +5311,9 @@ dependencies = [
 
 [[package]]
 name = "oramacore_fields"
-version = "0.1.0"
+version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "99b4a50ad74398f86a59792fff542c5025ccd59ded92379596693914738b098c"
+checksum = "6996fca99411920d472ba084d985b94087034b2c302f2cc11b50c634f519cb39"
 dependencies = [
  "anyhow",
  "arc-swap",

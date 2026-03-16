@@ -55,7 +55,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 
 oramacore_lib = "0.4.4"
-oramacore_fields = { version = "0.1.0", features = ["serde"] }
+oramacore_fields = { version = "0.1.2", features = ["serde"] }
 
 # JS
 oxc_parser = "0.47.1"
