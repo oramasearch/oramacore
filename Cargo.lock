@@ -6294,9 +6294,8 @@ checksum = "69cdb34c158ceb288df11e18b4bd39de994f6657d83847bdffdbd7f346754b0f"
 
 [[package]]
 name = "rabbitmq-stream-client"
-version = "0.9.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3e4946c1dc53effb696b640e8154bec89fc0f156d91d9d410dd8f09759c4d03c"
+version = "0.10.0"
+source = "git+https://github.com/rabbitmq/rabbitmq-stream-rust-client.git?branch=fix-credit-zero#b168598473f10bfbc75cb59c6de6c6c0fdffc70b"
 dependencies = [
  "async-trait",
  "bytes",
@@ -6319,9 +6318,8 @@ dependencies = [
 
 [[package]]
 name = "rabbitmq-stream-protocol"
-version = "0.9.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3967b22e168e23345d935b2db448c6b286eac1e21b2159dbdb6b0cab027a79ef"
+version = "0.10.0"
+source = "git+https://github.com/rabbitmq/rabbitmq-stream-rust-client.git?branch=fix-credit-zero#b168598473f10bfbc75cb59c6de6c6c0fdffc70b"
 dependencies = [
  "byteorder",
  "chrono",
