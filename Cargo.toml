@@ -71,7 +71,7 @@ cuid2 = "0.1.4"
 
 redact = { version = "0.1", features = ["serde"] }
 duration-str = "0.12.0"
-rabbitmq-stream-client = { version = "0.9", features = ["serde"] }
+rabbitmq-stream-client = { git = "https://github.com/rabbitmq/rabbitmq-stream-rust-client.git", branch = "fix-credit-zero", features = ["serde"] }
 backoff = { version = "0.4.0", features = ["tokio"] }
 debug_panic = "0.2.1"
 async-openai = "0.28.0"
