@@ -530,7 +530,7 @@ impl ReadSide {
                     .collections
                     .get_collection(collection_id)
                     .await
-                    .ok_or_else(|| anyhow::anyhow!("Collection not found"))?;
+                    .ok_or_else(|| anyhow::anyhow!("Collection {} not found", collection_id))?;
                 // Pass offset to collection - it handles per-collection tracking internally
                 collection.update(offset, collection_operation).await?;
             }
@@ -680,11 +680,11 @@ impl ReadSide {
                 ) {
                     Ok(ev) => {
                         if let Err(e) = analytics_storage.add_event(ev) {
-                            error!(?e, "Failed to add search event to analytics storage");
+                            error!(error = ?e, "Failed to add search event to analytics storage");
                         }
                     }
                     Err(e) => {
-                        error!(?e, "Failed to create search event for analytics. Ignored");
+                        error!(error = ?e, "Failed to create search event for analytics. Ignored");
                     }
                 };
             }
@@ -773,7 +773,7 @@ impl ReadSide {
         &self,
         collection_id: CollectionId,
         read_api_key: &ReadApiKey,
-    ) -> Result<CollectionReadLock, ReadError> {
+    ) -> Result<CollectionReadLock<'_>, ReadError> {
         let collection = self.collections.get_collection(collection_id).await;
         let collection = match collection {
             None => return Err(ReadError::NotFound(collection_id)),
@@ -877,7 +877,7 @@ impl ReadSide {
         match self.local_gpu_manager.is_overloaded() {
             Ok(overloaded) => overloaded,
             Err(e) => {
-                error!(errpr = ?e, "Cannot check if GPU is overloaded. This may be due to GPU malfunction. Forcing inference on remote LLMs for safety.");
+                error!(error = ?e, "Cannot check if GPU is overloaded. This may be due to GPU malfunction. Forcing inference on remote LLMs for safety.");
                 true
             }
         }

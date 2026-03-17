@@ -776,7 +776,7 @@ impl AnswerStateMachine {
                     });
                 }
                 AnswerFlow::Error(error) => {
-                    error!("Answer generation failed: {:?}", error);
+                    error!(error =?error,"Answer generation failed: {:?}", error);
                     self.send_event(AnswerEvent::Error {
                         error: error.to_string(),
                         state: format!("{error:?}"),
@@ -1202,7 +1202,7 @@ impl AnswerStateMachine {
                 Err(e) => {
                     retry_count += 1;
                     if retry_count > self.config.max_retries {
-                        error!(
+                        error!(error =?e,
                             "Operation {} failed after {} retries: {:?}",
                             operation_name, retry_count, e
                         );

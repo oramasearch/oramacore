@@ -1334,7 +1334,7 @@ impl Index {
                         IndexedValue::FilterNumber(field_id, number) => {
                             if let Some(field) = self.number_fields.get(&field_id) {
                                 if let Err(e) = field.insert(doc_id, number.0) {
-                                    error!("Failed to insert number value: {e:?}");
+                                    error!(error =?e, "Failed to insert number value: {e:?}");
                                 }
                             } else {
                                 error!("Cannot find number field {:?}", field_id);
@@ -1343,7 +1343,7 @@ impl Index {
                         IndexedValue::FilterNumber2(field_id, ref number_indexed_value) => {
                             if let Some(field) = self.number_fields.get(&field_id) {
                                 if let Err(e) = field.insert_indexed(doc_id, number_indexed_value) {
-                                    error!("Failed to insert indexed number value: {e:?}");
+                                    error!(error =?e,"Failed to insert indexed number value: {e:?}");
                                 }
                             } else {
                                 error!("Cannot find number field {:?}", field_id);
@@ -1380,7 +1380,7 @@ impl Index {
                         IndexedValue::FilterDate(field_id, timestamp) => {
                             if let Some(field) = self.date_fields.get(&field_id) {
                                 if let Err(e) = field.insert(doc_id, timestamp) {
-                                    error!("Cannot insert date for field {:?}: {}", field_id, e);
+                                    error!(error =?e,"Cannot insert date for field {:?}: {}", field_id, e);
                                 }
                             } else {
                                 error!("Cannot find date field {:?}", field_id);
@@ -1389,7 +1389,7 @@ impl Index {
                         IndexedValue::FilterDate2(field_id, ref date_indexed_value) => {
                             if let Some(field) = self.date_fields.get(&field_id) {
                                 if let Err(e) = field.insert_indexed(doc_id, date_indexed_value) {
-                                    error!(
+                                    error!(error =?e,
                                         "Cannot insert indexed date for field {:?}: {}",
                                         field_id, e
                                     );
@@ -1401,7 +1401,7 @@ impl Index {
                         IndexedValue::FilterGeoPoint(field_id, geopoint) => {
                             if let Some(field) = self.geopoint_fields.get(&field_id) {
                                 if let Err(e) = field.insert(doc_id, geopoint) {
-                                    error!(
+                                    error!(error =?e,
                                         "Cannot insert geopoint for field {:?}: {}",
                                         field_id, e
                                     );
@@ -1453,7 +1453,7 @@ impl Index {
                         IndexedValue::FilterNumber(field_id, number) => {
                             if let Some(field) = self.number_fields.get(&field_id) {
                                 if let Err(e) = field.insert(doc_id, number.0) {
-                                    error!("Failed to insert number value: {e:?}");
+                                    error!(error =?e,"Failed to insert number value: {e:?}");
                                 }
                             } else {
                                 error!("Cannot find number field {:?}", field_id);
@@ -1462,7 +1462,7 @@ impl Index {
                         IndexedValue::FilterNumber2(field_id, ref number_indexed_value) => {
                             if let Some(field) = self.number_fields.get(&field_id) {
                                 if let Err(e) = field.insert_indexed(doc_id, number_indexed_value) {
-                                    error!("Failed to insert indexed number value: {e:?}");
+                                    error!(error =?e,"Failed to insert indexed number value: {e:?}");
                                 }
                             } else {
                                 error!("Cannot find number field {:?}", field_id);
@@ -1499,7 +1499,7 @@ impl Index {
                         IndexedValue::FilterDate(field_id, timestamp) => {
                             if let Some(field) = self.date_fields.get(&field_id) {
                                 if let Err(e) = field.insert(doc_id, timestamp) {
-                                    error!("Cannot insert date for field {:?}: {}", field_id, e);
+                                    error!(error =?e,"Cannot insert date for field {:?}: {}", field_id, e);
                                 }
                             } else {
                                 error!("Cannot find date field {:?}", field_id);
@@ -1508,7 +1508,7 @@ impl Index {
                         IndexedValue::FilterDate2(field_id, ref date_indexed_value) => {
                             if let Some(field) = self.date_fields.get(&field_id) {
                                 if let Err(e) = field.insert_indexed(doc_id, date_indexed_value) {
-                                    error!(
+                                    error!(error =?e,
                                         "Cannot insert indexed date for field {:?}: {}",
                                         field_id, e
                                     );
@@ -1520,7 +1520,7 @@ impl Index {
                         IndexedValue::FilterGeoPoint(field_id, geopoint) => {
                             if let Some(field) = self.geopoint_fields.get(&field_id) {
                                 if let Err(e) = field.insert(doc_id, geopoint) {
-                                    error!(
+                                    error!(error =?e,
                                         "Cannot insert geopoint for field {:?}: {}",
                                         field_id, e
                                     );

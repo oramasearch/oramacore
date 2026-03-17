@@ -807,7 +807,7 @@ impl AdvancedAutoqueryStateMachine {
                     });
                 }
                 AdvancedAutoqueryFlow::Error(error) => {
-                    error!("Advanced search failed: {:?}", error);
+                    error!(error=?error, "Advanced search failed: {:?}", error);
                     self.send_event(AdvancedAutoqueryEvent::Error {
                         error: error.to_string(),
                         state: format!("{error:?}"),
@@ -888,7 +888,7 @@ impl AdvancedAutoqueryStateMachine {
                 Err(e) => {
                     retry_count += 1;
                     if retry_count > self.config.max_retries {
-                        error!(
+                        error!(error=?e,
                             "Operation {} failed after {} retries: {:?}",
                             operation_name, retry_count, e
                         );
@@ -1330,13 +1330,13 @@ impl AdvancedAutoqueryStateMachine {
                     let cleaned = repair_json(&response, &Default::default())
                         .map_err(|e| AdvancedAutoqueryError::JsonParsingError(e.to_string()))?;
                     let parsed = parse_properties_response(&cleaned).unwrap_or_else(|e| {
-                        error!("Failed to parse LLM response at index {index}: {e}");
+                        error!(error=?e, "Failed to parse LLM response at index {index}: {e}");
                         HashMap::new()
                     });
                     parsed_results.push(parsed);
                 }
                 Err(e) => {
-                    error!("LLM call failed at index {index}: {e}");
+                    error!(error=?e, "LLM call failed at index {index}: {e}");
                     parsed_results.push(HashMap::new());
                 }
             }
@@ -1526,7 +1526,7 @@ impl AdvancedAutoqueryStateMachine {
                     }
                 }
                 Err(e) => {
-                    error!("Hook execution at index {} failed: {:?}", index, e);
+                    error!(error=?e,"Hook execution at index {} failed: {:?}", index, e);
                     return Err(e);
                 }
             }
@@ -1583,7 +1583,7 @@ impl AdvancedAutoqueryStateMachine {
                     }
                 }
                 Err(e) => {
-                    error!("Search at index {} failed: {:?}", index, e);
+                    error!(error=?e, "Search at index {} failed: {:?}", index, e);
                     return Err(e);
                 }
             }
@@ -1627,7 +1627,7 @@ impl AdvancedAutoqueryStateMachine {
                 Err(e) => {
                     retry_count += 1;
                     if retry_count > config.max_retries {
-                        error!(
+                        error!(error =?e,
                             "Search for query '{}' failed after {} retries: {:?}",
                             query.original_query, retry_count, e
                         );
@@ -1712,7 +1712,7 @@ impl AdvancedAutoqueryStateMachine {
                 Err(e) => {
                     retry_count += 1;
                     if retry_count > 3 {
-                        error!(
+                        error!(error =?e,
                             "Hook execution for query '{}' failed after {} retries: {:?}",
                             query.original_query, retry_count, e
                         );

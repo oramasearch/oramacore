@@ -1071,7 +1071,7 @@ impl CollectionReader {
                             info!("Collection {} notified", self.id);
                         }
                         Err(e) => {
-                            error!("Error notifying collection {}: {:?}", self.id, e);
+                            error!(error =?e, "Error notifying collection {}: {:?}", self.id, e);
                         }
                     }
                 }

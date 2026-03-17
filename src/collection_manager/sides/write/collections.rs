@@ -368,6 +368,7 @@ impl CollectionsWriter {
                     }
                     Err(e) => {
                         error!(
+                            error =?e,
                             "Failed to delete expired temp index {} from collection {}: {:?}",
                             temp_index_id, collection_id, e
                         );
