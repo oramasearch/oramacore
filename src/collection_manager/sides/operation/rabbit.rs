@@ -7,7 +7,6 @@ use rabbitmq_stream_client::{
     ClientOptions, Consumer, Environment, NoDedup, OnClosed, Producer,
 };
 use serde::Deserialize;
-use tower_http::trace;
 use std::time::Duration;
 use std::{
     pin::Pin,

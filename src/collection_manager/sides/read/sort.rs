@@ -628,7 +628,7 @@ mod sort_iter {
             ];
 
             // Iterator 3: [3, 4, 7, 8]
-            let data3 = vec![
+            let data3 = [
                 (3_u8, HashSet::from([DocumentId(30)])),
                 (4, HashSet::from([DocumentId(40)])),
                 (7, HashSet::from([DocumentId(70)])),
@@ -674,7 +674,7 @@ mod sort_iter {
             ];
 
             // Iterator 3: [8, 7, 4, 3] (descending)
-            let data3 = vec![
+            let data3 = [
                 (8_u8, HashSet::from([DocumentId(80)])),
                 (7, HashSet::from([DocumentId(70)])),
                 (4, HashSet::from([DocumentId(40)])),
@@ -745,7 +745,7 @@ mod sort_iter {
         #[test]
         fn test_duplicate_keys_same_iterator() {
             // Single iterator with duplicate keys
-            let data = vec![
+            let data = [
                 (1_u8, HashSet::from([DocumentId(10)])),
                 (1, HashSet::from([DocumentId(11)])),
                 (2, HashSet::from([DocumentId(20)])),
@@ -850,7 +850,7 @@ mod sort_iter {
             ];
 
             // Long iterator: [3, 4, 5, 6, 7, 8]
-            let data2 = vec![
+            let data2 = [
                 (3_u8, HashSet::from([DocumentId(30)])),
                 (4, HashSet::from([DocumentId(40)])),
                 (5, HashSet::from([DocumentId(50)])),

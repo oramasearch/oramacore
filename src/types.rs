@@ -1141,17 +1141,12 @@ impl SearchMode {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Serialize, JsonSchema, Default)]
 pub enum Properties {
+    #[default]
     None,
     Star,
     Specified(Vec<String>),
-}
-
-impl Default for Properties {
-    fn default() -> Self {
-        Self::None
-    }
 }
 
 impl Properties {
@@ -2176,10 +2171,12 @@ impl GeoSearchRadiusValue {
 
 #[derive(Debug, Serialize, Deserialize, Clone, Copy, JsonSchema)]
 #[cfg_attr(test, derive(PartialEq, Eq))]
+#[derive(Default)]
 pub enum GeoSearchRadiusUnit {
     #[serde(rename = "cm")]
     CentiMeter,
     #[serde(rename = "m")]
+    #[default]
     Meter,
     #[serde(rename = "km")]
     KiloMeter,
@@ -2189,11 +2186,6 @@ pub enum GeoSearchRadiusUnit {
     Yard,
     #[serde(rename = "mi")]
     Mile,
-}
-impl Default for GeoSearchRadiusUnit {
-    fn default() -> Self {
-        Self::Meter
-    }
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, JsonSchema)]
