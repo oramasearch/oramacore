@@ -7,6 +7,7 @@ use rabbitmq_stream_client::{
     ClientOptions, Consumer, Environment, NoDedup, OnClosed, Producer,
 };
 use serde::Deserialize;
+use tower_http::trace;
 use std::time::Duration;
 use std::{
     pin::Pin,
@@ -15,7 +16,7 @@ use std::{
 };
 use tokio::sync::Notify;
 use tokio::time::sleep;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info, trace, warn};
 
 use crate::lock::OramaAsyncLock;
 use crate::types::CollectionId;
@@ -336,7 +337,11 @@ impl Stream for RabbitOperationReceiver {
         mut self: Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
     ) -> Poll<Option<Self::Item>> {
-        let delivery = match self.consumer.poll_next_unpin(cx) {
+        let polled = self.consumer.poll_next_unpin(cx);
+
+        trace!("Polling RabbitMQ consumer: {:?}", polled);
+
+        let delivery = match polled {
             Poll::Pending => return Poll::Pending,
             Poll::Ready(None) => return Poll::Ready(None),
             Poll::Ready(Some(Err(e))) => return Poll::Ready(Some(Err(e.into()))),

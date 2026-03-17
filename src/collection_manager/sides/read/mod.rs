@@ -1112,6 +1112,8 @@ fn start_receive_operations(
                     }
                 };
 
+                trace!("Received operation: {:?}", op);
+
                 let op = match op {
                     None => {
                         warn!("Operation receiver is closed");
