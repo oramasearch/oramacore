@@ -17,6 +17,9 @@ cargo build
 # Download test model first (required for tests)
 bash download-test-model.sh
 
+# enable python env
+source .venv/bin/activate
+
 # Run all tests
 cargo test --all
 

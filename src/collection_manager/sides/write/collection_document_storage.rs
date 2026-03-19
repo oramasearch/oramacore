@@ -58,12 +58,12 @@ impl CollectionDocumentStorage {
             Dump::V1(d) => (AtomicU64::new(d.document_id), d.last_global_document_id),
         };
 
+        let mut zebo = Zebo::try_new(base_dir.clone()).context("Cannot create collection zebo")?;
+        zebo.compact().context("Cannot compact collection zebo")?;
+
         Ok(Self {
-            base_dir: base_dir.clone(),
-            zebo: Arc::new(OramaAsyncLock::new(
-                "collection_zebo",
-                Zebo::try_new(base_dir).context("Cannot create collection zebo")?,
-            )),
+            base_dir,
+            zebo: Arc::new(OramaAsyncLock::new("collection_zebo", zebo)),
             global_document_storage,
             collection_document_id,
             last_global_document_id,
