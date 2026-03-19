@@ -1,14 +1,12 @@
 use orama_js_pool::OutputChannel;
 use oramacore_lib::{
-    data_structures::ShouldInclude,
-    filters::{DocId, FilterResult, PlainFilterResult},
+    filters::{FilterResult, PlainFilterResult},
     hook_storage::HookType,
     pin_rules::{Consequence, PinRulesReader},
 };
 use std::{
     borrow::Cow,
-    collections::{HashMap, HashSet},
-    hash::Hash,
+    collections::HashMap,
     sync::Arc,
     time::{Duration, Instant},
 };
@@ -510,25 +508,6 @@ async fn search_on_indexes(
         .collect::<Vec<_>>();
 
     Ok((search_top_results, count, facets_results, group_by_results))
-}
-
-pub struct SearchDocumentContext<'a, DocumentId> {
-    deleted_documents: &'a HashSet<DocumentId>,
-    pub filtered_doc_ids: Option<FilterResult<DocumentId>>,
-}
-
-impl<DocumentId: Sync + Send + Hash + Eq + DocId> ShouldInclude<DocumentId>
-    for SearchDocumentContext<'_, DocumentId>
-{
-    fn should_include(&self, doc_id: &DocumentId) -> bool {
-        if self.deleted_documents.contains(doc_id) {
-            return false;
-        }
-        match &self.filtered_doc_ids {
-            Some(filtered_doc_ids) => filtered_doc_ids.contains(doc_id),
-            None => true,
-        }
-    }
 }
 
 #[cfg(test)]

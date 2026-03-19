@@ -28,7 +28,7 @@ impl CommittedDiskDocumentStorage {
         create_if_not_exists(&zebo_dir).context("Cannot create zebo directory")?;
 
         let zebo_index_path = zebo_dir.join("index");
-        let zebo = if std::fs::exists(zebo_index_path).unwrap_or(false) {
+        let mut zebo = if std::fs::exists(zebo_index_path).unwrap_or(false) {
             info!("Zebo index exists");
             Zebo::try_new(zebo_dir).context("Cannot create zebo")?
         } else {
@@ -37,6 +37,7 @@ impl CommittedDiskDocumentStorage {
                 .await
                 .context("Cannot migrate to zebo")?
         };
+        zebo.compact().context("Cannot compact zebo")?;
 
         let zebo = Arc::new(OramaAsyncLock::new("zebo", zebo));
 

@@ -1457,11 +1457,6 @@ impl CollectionReader {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct Committed {
-    pub epoch: u64,
-}
-
 use derive_more::From;
 #[derive(Serialize, Debug, From)]
 #[serde(tag = "type")]

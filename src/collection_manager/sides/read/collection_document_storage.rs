@@ -113,7 +113,8 @@ impl CollectionDocumentStorage {
         let zebo_dir = base_dir.join("zebo");
         create_if_not_exists(&zebo_dir).context("Cannot create zebo directory")?;
 
-        let zebo = Zebo::try_new(zebo_dir).context("Cannot create zebo")?;
+        let mut zebo = Zebo::try_new(zebo_dir).context("Cannot create zebo")?;
+        zebo.compact().context("Cannot compact zebo")?;
         let zebo = Arc::new(OramaAsyncLock::new("zebo", zebo));
 
         Ok(Self {
@@ -497,16 +498,6 @@ impl DocumentIdStrMap {
 
         Ok(ret)
     }
-}
-
-#[derive(Deserialize, Serialize, Debug)]
-enum Dump {
-    V1(DumpV1),
-}
-
-#[derive(Deserialize, Serialize, Debug)]
-struct DumpV1 {
-    document_id: u64,
 }
 
 #[derive(Deserialize, Serialize, Debug)]

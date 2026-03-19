@@ -100,6 +100,7 @@ impl<'lock, T> Drop for OramaAsyncLockReadGuard<'lock, T> {
         }
     }
 }
+
 pub struct OramaAsyncLockWriteGuard<'lock, T> {
     guard: TokioRwLockWriteGuard<'lock, T>,
     m: Option<TimeHistogramImpl>,
