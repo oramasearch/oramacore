@@ -63,10 +63,7 @@ impl CollectionDocumentStorage {
 
         Ok(Self {
             base_dir,
-            zebo: Arc::new(OramaAsyncLock::new(
-                "collection_zebo",
-                zebo,
-            )),
+            zebo: Arc::new(OramaAsyncLock::new("collection_zebo", zebo)),
             global_document_storage,
             collection_document_id,
             last_global_document_id,

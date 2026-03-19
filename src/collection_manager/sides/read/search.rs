@@ -511,7 +511,7 @@ async fn search_on_indexes(
 }
 
 #[cfg(test)]
-impl ShouldInclude<DocumentId> for () {
+impl oramacore_lib::data_structures::ShouldInclude<DocumentId> for () {
     fn should_include(&self, _: &DocumentId) -> bool {
         true
     }
