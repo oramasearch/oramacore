@@ -33,7 +33,7 @@ use crate::{
             ReadError,
         },
         write::index::EnumStrategy,
-        CollectionWriteOperation, Offset, ReplaceIndexReason,
+        CollectionWriteOperation, IndexWriteOperation, Offset, ReplaceIndexReason,
     },
     lock::{OramaAsyncLock, OramaAsyncLockReadGuard, OramaAsyncLockWriteGuard, OramaSyncLock},
     types::{
@@ -992,19 +992,42 @@ impl CollectionReader {
                 }
             }
             CollectionWriteOperation::IndexWriteOperation(index_id, index_op) => {
-                let temp_index = self.get_temp_index_mut(index_id).await;
-                if let Some(mut temp_index) = temp_index {
-                    temp_index
-                        .update(index_op)
-                        .with_context(|| format!("Cannot update index {index_id:?}"))?;
-                } else {
-                    let index = self.get_index_mut(index_id).await;
-                    let Some(mut index) = index else {
-                        bail!("Index {index_id} not found")
-                    };
-                    index
-                        .update(index_op)
-                        .with_context(|| format!("Cannot update index {index_id:?}"))?;
+                match &index_op {
+                    IndexWriteOperation::CreateField2 { .. }
+                    | IndexWriteOperation::DeleteDocuments { .. } => {
+                        // Structural/mutating changes: needs write lock + &mut self
+                        let temp_index = self.get_temp_index_mut(index_id).await;
+                        if let Some(mut temp_index) = temp_index {
+                            temp_index.update_structure(index_op).with_context(|| {
+                                format!("Cannot update_structure index {index_id:?}")
+                            })?;
+                        } else {
+                            let index = self.get_index_mut(index_id).await;
+                            let Some(mut index) = index else {
+                                bail!("Index {index_id} not found")
+                            };
+                            index.update_structure(index_op).with_context(|| {
+                                format!("Cannot update_structure index {index_id:?}")
+                            })?;
+                        }
+                    }
+                    _ => {
+                        // Document operations: read lock + &self is sufficient
+                        let temp_index = self.get_temp_index(index_id).await;
+                        if let Some(temp_index) = temp_index {
+                            temp_index
+                                .update_data(index_op)
+                                .with_context(|| format!("Cannot update index {index_id:?}"))?;
+                        } else {
+                            let index = self.get_index(index_id).await;
+                            let Some(index) = index else {
+                                bail!("Index {index_id} not found")
+                            };
+                            index
+                                .update_data(index_op)
+                                .with_context(|| format!("Cannot update index {index_id:?}"))?;
+                        }
+                    }
                 }
             }
             CollectionWriteOperation::ReplaceIndex {
@@ -1367,6 +1390,13 @@ impl CollectionReader {
     async fn get_temp_index_mut(&self, index_id: IndexId) -> Option<IndexWriteLock<'_>> {
         let indexes_lock = self.temp_indexes.write("get_temp_index_mut").await;
         IndexWriteLock::try_new(indexes_lock, index_id)
+    }
+
+    /// Read lock variant for temp indexes, used for document-level operations
+    /// that only need &self on Index.
+    async fn get_temp_index(&self, index_id: IndexId) -> Option<IndexReadLock<'_>> {
+        let indexes_lock = self.temp_indexes.read("get_temp_index").await;
+        IndexReadLock::try_new(indexes_lock, index_id)
     }
 
     pub async fn get_pin_rules_reader(

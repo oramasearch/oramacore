@@ -347,8 +347,8 @@ async fn search_on_indexes(
 
         // Apply OMC (Orama Custom Multiplier) to the token scores for this index.
         // OMC values are stored per-index, so we need to apply them for each index.
-        let omc_lock = index.get_all_omc().await;
-        let (uncommitted_omc, committed_omc) = &**omc_lock;
+        let omc_lock = index.get_all_omc();
+        let (uncommitted_omc, committed_omc) = &*omc_lock;
         apply_omc_multipliers(&mut token_score_results, uncommitted_omc, committed_omc);
         drop(omc_lock);
 
