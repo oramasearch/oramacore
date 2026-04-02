@@ -1733,6 +1733,7 @@ impl Index {
         for &(doc_id, multiplier) in uncommitted.iter() {
             merged.insert(doc_id, multiplier);
         }
+        drop(uncommitted);
 
         merged
     }

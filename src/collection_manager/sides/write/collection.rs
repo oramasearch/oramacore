@@ -374,12 +374,16 @@ impl CollectionWriter {
 
     pub async fn get_index_ids(&self) -> Vec<IndexId> {
         let indexes = self.indexes.read("get_index_ids").await;
-        indexes.keys().copied().collect()
+        let result = indexes.keys().copied().collect();
+        drop(indexes);
+        result
     }
 
     pub async fn get_temp_index_ids(&self) -> Vec<IndexId> {
         let temp_indexes = self.temp_indexes.read("get_temp_index_ids").await;
-        temp_indexes.keys().copied().collect()
+        let result = temp_indexes.keys().copied().collect();
+        drop(temp_indexes);
+        result
     }
 
     pub async fn create_index(
@@ -500,6 +504,8 @@ impl CollectionWriter {
             .await?;
 
         temp_indexes_lock.insert(new_index_id, index);
+        drop(temp_indexes_lock);
+        drop(indexes_lock);
 
         Ok(())
     }
@@ -512,6 +518,7 @@ impl CollectionWriter {
         let mut runtime_config = self.runtime_config.write("change_runtime_config").await;
         runtime_config.default_locale = new_default_locale;
         runtime_config.embeddings_model = new_embeddings_model;
+        drop(runtime_config);
     }
 
     pub async fn delete_index(&self, index_id: IndexId) -> Result<Vec<DocumentId>, WriteError> {
@@ -626,6 +633,7 @@ impl CollectionWriter {
             let index_doc_ids = index.get_document_ids().await;
             doc_id.extend(index_doc_ids);
         }
+        drop(indexes);
 
         doc_id
     }
@@ -840,6 +848,7 @@ impl CollectionWriter {
             }
         };
         drop(temp_indexes_lock);
+        drop(indexes_lock);
 
         self.context
             .op_sender
@@ -963,6 +972,8 @@ impl CollectionWriter {
             })
             .await;
 
+        drop(storages);
+        drop(indexes_lock);
         drop(pin_rule_writer);
 
         self.context
@@ -1051,6 +1062,9 @@ impl CollectionWriter {
                 CollectionWriteOperation::PinRule(PinRuleOperation::Insert(new_rule)),
             ));
         }
+        drop(pin_rule_writer);
+        drop(storages);
+        drop(indexes_lock);
     }
 
     /// Update shelves when document IDs change.
@@ -1100,6 +1114,9 @@ impl CollectionWriter {
                 CollectionWriteOperation::Shelf(ShelfOperation::Insert(new_shelf)),
             ));
         }
+        drop(shelves_writer);
+        drop(storages);
+        drop(indexes_lock);
     }
 
     pub async fn insert_shelf(&self, shelf: Shelf<String>) -> Result<(), WriteError> {
@@ -1135,6 +1152,8 @@ impl CollectionWriter {
             })
             .await;
 
+        drop(storages);
+        drop(indexes_lock);
         drop(shelves_writer);
 
         self.context
@@ -1167,7 +1186,9 @@ impl CollectionWriter {
 
     pub async fn list_shelves(&self) -> Result<Vec<Shelf<String>>, WriteError> {
         let shelves_writer = self.shelves_writer.read("list_shelves").await;
-        Ok(shelves_writer.list_shelves().to_vec())
+        let result = shelves_writer.list_shelves().to_vec();
+        drop(shelves_writer);
+        Ok(result)
     }
 
     /// Sets a collection value and sends the operation to the reader via the channel.
@@ -1192,7 +1213,9 @@ impl CollectionWriter {
     /// Gets a collection value by key.
     pub async fn get_value(&self, key: &str) -> Option<String> {
         let lock = self.values_writer.read("get_value").await;
-        lock.get(key)
+        let result = lock.get(key);
+        drop(lock);
+        result
     }
 
     /// Deletes a collection value and sends the operation to the reader via the channel.
@@ -1220,13 +1243,17 @@ impl CollectionWriter {
     /// Returns all collection values as a shared reference.
     pub async fn list_values(&self) -> Arc<HashMap<String, String>> {
         let lock = self.values_writer.read("list_values").await;
-        lock.list()
+        let result = lock.list();
+        drop(lock);
+        result
     }
 
     /// Returns the count of collection values.
     pub async fn values_count(&self) -> usize {
         let lock = self.values_writer.read("values_count").await;
-        lock.count()
+        let result = lock.count();
+        drop(lock);
+        result
     }
 }
 

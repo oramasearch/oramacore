@@ -412,7 +412,12 @@ impl CollectionReader {
                 .context("Cannot write collection.json")?;
 
             let offset = match dump {
-                Dump::V1(_) => **self.offset.read("commit").await,
+                Dump::V1(_) => {
+                    let offset_lock = self.offset.read("commit").await;
+                    let offset = **offset_lock;
+                    drop(offset_lock);
+                    offset
+                }
                 Dump::V2(v2) => v2.offset,
             };
 
@@ -435,7 +440,9 @@ impl CollectionReader {
         //     Hence, we don't need to do anything here.
 
         // Read current offset - this is what we actually processed
-        let offset = **self.offset.read("commit").await;
+        let offset_lock = self.offset.read("commit").await;
+        let offset = **offset_lock;
+        drop(offset_lock);
 
         self.document_storage.commit(offset).await?;
 
@@ -531,17 +538,29 @@ impl CollectionReader {
         drop(values_lock);
 
         // Save DumpV2 with single offset
+        let mcp_desc_lock = self.mcp_description.read("commit").await;
+        let mcp_description = mcp_desc_lock.clone();
+        drop(mcp_desc_lock);
+
+        let read_api_key_lock = self.read_api_key.read("commit").await;
+        let read_api_key = **read_api_key_lock;
+        drop(read_api_key_lock);
+
+        let updated_at_lock = self.updated_at.read("commit").await;
+        let updated_at = **updated_at_lock;
+        drop(updated_at_lock);
+
         let dump = Dump::V2(DumpV2 {
             id: self.id,
             description: self.description.clone(),
-            mcp_description: self.mcp_description.read("commit").await.clone(),
+            mcp_description,
             default_locale: self.default_locale,
-            read_api_key: **self.read_api_key.read("commit").await,
+            read_api_key,
             write_api_key: self.write_api_key,
             index_ids,
             temp_index_ids,
             created_at: self.created_at,
-            updated_at: **self.updated_at.read("commit").await,
+            updated_at,
             // Per-collection offset tracking - single unified offset
             offset,
         });
@@ -669,31 +688,30 @@ impl CollectionReader {
         master_api_key: Option<ApiKey>,
     ) -> Result<(), ReadError> {
         let read_api_key = self.read_api_key.read("check_read_api_key").await;
-        match api_key {
+        let result = match api_key {
             ReadApiKey::ApiKey(api_key) => {
                 if *api_key == **read_api_key {
-                    return Ok(());
-                }
-                if let Some(write_api_key) = self.write_api_key {
-                    if write_api_key == *api_key {
-                        return Ok(());
-                    }
-                }
-                if let Some(master_api_key) = master_api_key {
-                    if master_api_key == *api_key {
-                        return Ok(());
-                    }
+                    Ok(())
+                } else if self.write_api_key.is_some_and(|wk| wk == *api_key) {
+                    Ok(())
+                } else if master_api_key.is_some_and(|mk| mk == *api_key) {
+                    Ok(())
+                } else {
+                    Err(ReadError::Generic(anyhow!("Invalid read api key")))
                 }
             }
             ReadApiKey::Claims(claims) => {
                 // For JWT claims, verify the orak matches this collection's read API key
                 if claims.orak == **read_api_key {
-                    return Ok(());
+                    Ok(())
+                } else {
+                    Err(ReadError::Generic(anyhow!("Invalid read api key")))
                 }
             }
-        }
+        };
+        drop(read_api_key);
 
-        Err(ReadError::Generic(anyhow!("Invalid read api key")))
+        result
     }
 
     #[inline]
@@ -1196,12 +1214,18 @@ impl CollectionReader {
 
     /// Gets a collection value by key from the reader.
     pub async fn get_value(&self, key: &str) -> Option<String> {
-        self.values_reader.read("get_value").await.get(key)
+        let lock = self.values_reader.read("get_value").await;
+        let result = lock.get(key);
+        drop(lock);
+        result
     }
 
     /// Returns all collection values from the reader as a shared reference.
     pub async fn list_values(&self) -> Arc<HashMap<String, String>> {
-        self.values_reader.read("list_values").await.list()
+        let lock = self.values_reader.read("list_values").await;
+        let result = lock.list();
+        drop(lock);
+        result
     }
 
     pub async fn stats(&self, _req: CollectionStatsRequest) -> Result<CollectionStats, ReadError> {
@@ -1233,6 +1257,7 @@ impl CollectionReader {
             }
             indexes_stats.push(i.stats(true).await?);
         }
+        drop(temp_indexes_lock);
 
         let lock = self.hooks_reader.read("stats").await;
         let hooks = lock.list()?;
@@ -1242,7 +1267,17 @@ impl CollectionReader {
             .collect();
         drop(lock);
 
-        let values_count = self.values_reader.read("stats").await.count();
+        let values_reader_lock = self.values_reader.read("stats").await;
+        let values_count = values_reader_lock.count();
+        drop(values_reader_lock);
+
+        let mcp_description_lock = self.mcp_description.read("stats").await;
+        let mcp_description = mcp_description_lock.clone();
+        drop(mcp_description_lock);
+
+        let updated_at_lock = self.updated_at.read("stats").await;
+        let updated_at = **updated_at_lock;
+        drop(updated_at_lock);
 
         Ok(CollectionStats {
             id: self.get_id(),
@@ -1251,14 +1286,14 @@ impl CollectionReader {
                 .map(|i| i.document_count)
                 .sum::<usize>(),
             description: self.description.clone(),
-            mcp_description: self.mcp_description.read("stats").await.clone(),
+            mcp_description,
             default_locale: self.default_locale,
             embedding_model,
             indexes_stats,
             hooks,
             values_count,
             created_at: self.created_at,
-            updated_at: **self.updated_at.read("stats").await,
+            updated_at,
         })
     }
 
@@ -1408,13 +1443,15 @@ impl CollectionReader {
     }
 
     pub async fn get_shelf(&self, id: ShelfId) -> Result<Shelf<DocumentId>, ReadError> {
-        let shelves_writer = self.shelves_reader.read("get_shelf").await;
-        shelves_writer
+        let shelves_lock = self.shelves_reader.read("get_shelf").await;
+        let result = shelves_lock
             .list_shelves()
             .iter()
             .find(|shelf| shelf.id == id)
             .cloned()
-            .ok_or_else(|| ReadError::ShelfNotFound(id))
+            .ok_or_else(|| ReadError::ShelfNotFound(id));
+        drop(shelves_lock);
+        result
     }
 
     /// Retrieves the documents for a given shelf in the order specified by the shelf.

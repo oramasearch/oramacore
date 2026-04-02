@@ -177,6 +177,7 @@ impl CollectionsReader {
                 }
             }
         }
+        drop(col);
 
         let guard = self.last_reindexed_collections.read("commit").await;
         let collections_info = CollectionsInfo::V1(CollectionsInfoV1 {
@@ -194,7 +195,6 @@ impl CollectionsReader {
         info!("Collections committed");
 
         if !to_delete.is_empty() {
-            drop(col);
             let mut guard = self.collections.write("commit").await;
             for id in to_delete.iter() {
                 guard.remove(id);
@@ -230,6 +230,7 @@ impl CollectionsReader {
             })?;
 
         collection.commit(true).await?;
+        drop(col);
 
         Ok(())
     }
@@ -243,6 +244,7 @@ impl CollectionsReader {
                 .await
                 .with_context(|| format!("collection {:?}", collection.id()))?;
         }
+        drop(collections);
 
         Ok(())
     }
@@ -341,6 +343,7 @@ impl CollectionsReader {
             collection.mark_as_deleted();
             info!(collection_id=?collection_id, "Collection marked as deleted {:?}", collection_id);
         }
+        drop(guard);
 
         Ok(())
     }

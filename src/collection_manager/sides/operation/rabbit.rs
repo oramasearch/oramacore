@@ -80,6 +80,7 @@ impl OnClosed for MyHAProducer {
         }
 
         **producer = new_producer;
+        drop(producer);
 
         self.0
             .is_opened

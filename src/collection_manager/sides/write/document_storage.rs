@@ -58,6 +58,7 @@ impl DocumentStorage {
         if !ids.is_empty() {
             let mut zebo = self.zebo.write("remove").await;
             zebo.remove_documents(ids, false).unwrap();
+            drop(zebo);
         }
     }
 
@@ -130,6 +131,7 @@ impl DocumentStorage {
         let last = zebo
             .get_last_inserted_document_id()
             .context("Cannot get last inserted document id from zebo")?;
+        drop(zebo);
 
         let mut lock = self
             .last_document_id

@@ -114,6 +114,7 @@ impl CollectionDocumentStorage {
             let mut zebo = self.zebo.write("remove").await;
             zebo.remove_documents(local_ids, false)
                 .context("cannot remove documents from collection document id")?;
+            drop(zebo);
         }
 
         if !global_ids.is_empty() {

@@ -440,6 +440,7 @@ impl AnswerStateMachine {
                 collection_id,
                 read_api_key,
             };
+            drop(state);
         }
 
         let total_steps = 10; // Total number of states in the flow
@@ -449,7 +450,9 @@ impl AnswerStateMachine {
             current_step += 1;
             let current_state = {
                 let state = self.state.lock().await;
-                state.clone()
+                let cloned = state.clone();
+                drop(state);
+                cloned
             };
 
             // Send progress event with JSON-formatted current_step
@@ -458,6 +461,7 @@ impl AnswerStateMachine {
             if let Some(analytics_holder) = self.analytics_holder.as_ref() {
                 let mut lock = analytics_holder.lock().await;
                 lock.add_rag_step(current_step_json.clone());
+                drop(lock);
             }
 
             self.send_event(AnswerEvent::Progress {
@@ -843,6 +847,7 @@ impl AnswerStateMachine {
             collection_id,
             read_api_key,
         };
+        drop(state);
         Ok(())
     }
 
@@ -870,6 +875,7 @@ impl AnswerStateMachine {
             collection_id,
             read_api_key,
         };
+        drop(state);
         Ok(llm_config)
     }
     async fn transition_to_determine_query_strategy(
@@ -978,6 +984,7 @@ impl AnswerStateMachine {
                 collection_id: self.collection_id,
                 read_api_key: self.read_api_key.clone(),
             };
+            drop(state);
         } else {
             // Simple RAG flow - go directly to system prompt handling
             self.send_event(AnswerEvent::StateChanged {
@@ -996,6 +1003,7 @@ impl AnswerStateMachine {
                 read_api_key: self.read_api_key.clone(),
                 optimized_query: interaction.query.clone(),
             };
+            drop(state);
         }
         Ok(query_strategy)
     }
@@ -1029,6 +1037,7 @@ impl AnswerStateMachine {
             read_api_key,
             optimized_query: optimized_query.clone(),
         };
+        drop(state);
 
         Ok(optimized_query)
     }
@@ -1053,6 +1062,7 @@ impl AnswerStateMachine {
             read_api_key,
             log_sender: None,
         };
+        drop(state);
 
         Ok(())
     }
@@ -1076,6 +1086,7 @@ impl AnswerStateMachine {
             collection_id,
             read_api_key,
         };
+        drop(state);
 
         Ok(())
     }
@@ -1113,6 +1124,7 @@ impl AnswerStateMachine {
             collection_id,
             read_api_key,
         };
+        drop(state);
         Ok((variables, processed_system_prompt))
     }
 
@@ -1132,6 +1144,7 @@ impl AnswerStateMachine {
             collection_id,
             read_api_key,
         };
+        drop(state);
         Ok(())
     }
 
@@ -1168,6 +1181,7 @@ impl AnswerStateMachine {
             collection_id,
             read_api_key,
         };
+        drop(state);
         Ok(answer)
     }
 
@@ -1218,6 +1232,7 @@ impl AnswerStateMachine {
                     {
                         let mut counts = self.retry_count.lock().await;
                         counts.insert(operation_name.to_string(), retry_count);
+                        drop(counts);
                     }
 
                     // Wait before retry
@@ -1497,6 +1512,7 @@ impl AnswerStateMachine {
             if let Some(ana) = self.analytics_holder.as_ref() {
                 let mut lock = ana.lock().await;
                 lock.set_system_prompt_id(system_prompt.id.clone());
+                drop(lock);
             }
         }
 
@@ -1524,6 +1540,7 @@ impl AnswerStateMachine {
                 if let Some(analytics_holder) = self.analytics_holder.as_ref() {
                     let mut lock = analytics_holder.lock().await;
                     lock.set_time_to_first_token(start_time_to_first_token.elapsed());
+                    drop(lock);
                 }
             }
 
@@ -1548,6 +1565,7 @@ impl AnswerStateMachine {
                 Default::default()
             };
             lock.set_assistant_response(answer.clone(), delta);
+            drop(lock);
         }
 
         Ok(answer)
@@ -1589,7 +1607,9 @@ impl AnswerStateMachine {
 
         let analytics_metadata = if let Some(analytics_holder) = self.analytics_holder.as_ref() {
             let lock = analytics_holder.lock().await;
-            Some(lock.get_analytics_metadata().clone())
+            let metadata = lock.get_analytics_metadata().clone();
+            drop(lock);
+            Some(metadata)
         } else {
             None
         };
@@ -1645,12 +1665,16 @@ impl AnswerStateMachine {
     /// Get current state for monitoring/debugging
     pub async fn current_state(&self) -> AnswerFlow {
         let state = self.state.lock().await;
-        state.clone()
+        let cloned = state.clone();
+        drop(state);
+        cloned
     }
 
     /// Get retry statistics
     pub async fn retry_stats(&self) -> HashMap<String, usize> {
         let counts = self.retry_count.lock().await;
-        counts.clone()
+        let cloned = counts.clone();
+        drop(counts);
+        cloned
     }
 }
