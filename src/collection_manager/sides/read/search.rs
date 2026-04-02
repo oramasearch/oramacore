@@ -36,20 +36,12 @@ use tracing::{info, trace};
 /// Applies OMC (Orama Custom Multiplier) to token scores.
 /// Documents with an OMC value have their scores multiplied by that value.
 /// Uncommitted values take precedence over committed values.
-fn apply_omc_multipliers(
-    scores: &mut HashMap<DocumentId, f32>,
-    uncommitted_omc: &HashMap<DocumentId, f32>,
-    committed_omc: &HashMap<DocumentId, f32>,
-) {
-    if uncommitted_omc.is_empty() && committed_omc.is_empty() {
+fn apply_omc_multipliers(scores: &mut HashMap<DocumentId, f32>, omc: &HashMap<DocumentId, f32>) {
+    if omc.is_empty() {
         return;
     }
     for (doc_id, score) in scores.iter_mut() {
-        // Check uncommitted first (newer values), then committed
-        if let Some(multiplier) = uncommitted_omc
-            .get(doc_id)
-            .or_else(|| committed_omc.get(doc_id))
-        {
+        if let Some(multiplier) = omc.get(doc_id) {
             *score *= multiplier;
         }
     }
@@ -347,10 +339,8 @@ async fn search_on_indexes(
 
         // Apply OMC (Orama Custom Multiplier) to the token scores for this index.
         // OMC values are stored per-index, so we need to apply them for each index.
-        let omc_lock = index.get_all_omc();
-        let (uncommitted_omc, committed_omc) = &*omc_lock;
-        apply_omc_multipliers(&mut token_score_results, uncommitted_omc, committed_omc);
-        drop(omc_lock);
+        let omc = index.get_all_omc();
+        apply_omc_multipliers(&mut token_score_results, &omc);
 
         if !score_params.facets.is_empty() {
             // Orama provides a UI component that shows the search results

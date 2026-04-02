@@ -63,7 +63,7 @@ use std::{
     path::PathBuf,
     sync::{
         atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering},
-        Arc, RwLock,
+        Arc, Mutex, RwLock,
     },
 };
 
@@ -169,11 +169,14 @@ pub struct Index {
 
     enum_strategy: EnumStrategy,
 
-    /// Custom multipliers (OMC - Orama Custom Multiplier) for documents.
-    /// These multipliers are applied to document scores during search.
-    /// The first HashMap is uncommitted OMC values, the second is committed.
-    /// Uses sync RwLock since update() is sync and critical sections are tiny.
-    omc: RwLock<(HashMap<DocumentId, f32>, HashMap<DocumentId, f32>)>,
+    /// Uncommitted OMC (Orama Custom Multiplier) entries as an append-only log.
+    /// Insert path pushes entries here; commit drains them position-based.
+    /// Uses Mutex for brief append-only access (same pattern as oramacore_fields' LiveLayer).
+    omc_uncommitted: Mutex<Vec<(DocumentId, f32)>>,
+
+    /// Committed OMC values merged from the uncommitted log during commit.
+    /// Search reads this (read lock) to get document multipliers.
+    omc_committed: RwLock<HashMap<DocumentId, f32>>,
 }
 
 impl Index {
@@ -218,7 +221,8 @@ impl Index {
 
             enum_strategy,
 
-            omc: RwLock::new((HashMap::new(), HashMap::new())),
+            omc_uncommitted: Mutex::new(Vec::new()),
+            omc_committed: RwLock::new(HashMap::new()),
         }
     }
 
@@ -388,7 +392,8 @@ impl Index {
             enum_strategy: dump.enum_strategy,
 
             // Use OMC loaded from dedicated file or from dump (backward compatibility)
-            omc: RwLock::new((HashMap::new(), committed_omc)),
+            omc_uncommitted: Mutex::new(Vec::new()),
+            omc_committed: RwLock::new(committed_omc),
         })
     }
 
@@ -597,34 +602,52 @@ impl Index {
         drop(uncommitted_fields);
         drop(committed_fields);
 
-        // Merge and commit OMC values
-        // Get write lock to merge uncommitted_omc into committed_omc
-        let mut omc_lock = self.omc.write().expect("omc lock poisoned during commit");
+        // Merge OMC values using position-based draining (same pattern as oramacore_fields).
+        // 1. Snapshot the uncommitted log: record its length so concurrent inserts are preserved.
+        let omc_snapshot = {
+            let omc_uncommitted = self
+                .omc_uncommitted
+                .lock()
+                .expect("omc_uncommitted lock poisoned during commit");
+            let snapshot_len = omc_uncommitted.len();
+            let snapshot: Vec<_> = omc_uncommitted[..snapshot_len].to_vec();
+            (snapshot, snapshot_len)
+        };
+        let (omc_snapshot_entries, omc_snapshot_len) = omc_snapshot;
 
-        // Collect uncommitted OMC values first to avoid borrow issues
-        let uncommitted_omc_values: Vec<_> = omc_lock.0.drain().collect();
-
-        // Merge uncommitted OMC into committed OMC
-        for (doc_id, multiplier) in uncommitted_omc_values {
-            omc_lock.1.insert(doc_id, multiplier);
+        // 2. Merge snapshot entries into committed OMC and remove deleted docs.
+        let mut omc_committed = self
+            .omc_committed
+            .write()
+            .expect("omc_committed lock poisoned during commit");
+        for (doc_id, multiplier) in omc_snapshot_entries {
+            omc_committed.insert(doc_id, multiplier);
         }
-
-        // Remove deleted documents from committed OMC
         for doc_id in &self.uncommitted_deleted_documents {
-            omc_lock.1.remove(doc_id);
+            omc_committed.remove(doc_id);
         }
 
         // Save OMC to dedicated versioned file (only if not empty)
-        if !omc_lock.1.is_empty() {
+        if !omc_committed.is_empty() {
             let omc_dump = OmcDump::V1(OmcDumpV1 {
-                data: omc_lock.1.clone(),
+                data: omc_committed.clone(),
             });
             BufferedFile::create_or_overwrite(data_dir.join("omc.bin"))
                 .context("Cannot create omc.bin")?
                 .write_bincode_data(&omc_dump)
                 .context("Cannot write omc.bin")?;
         }
-        drop(omc_lock);
+        drop(omc_committed);
+
+        // 3. Drain only the entries that were snapshotted. Concurrent inserts at
+        //    indices omc_snapshot_len.. are preserved for the next commit cycle.
+        {
+            let mut omc_uncommitted = self
+                .omc_uncommitted
+                .lock()
+                .expect("omc_uncommitted lock poisoned during commit drain");
+            omc_uncommitted.drain(..omc_snapshot_len);
+        }
 
         let dump = Dump::V1(DumpV1 {
             id: self.id,
@@ -1323,13 +1346,22 @@ impl Index {
             IndexWriteOperation::DeleteDocuments { doc_ids } => {
                 let len = doc_ids.len() as u64;
 
-                // Also remove OMC values for deleted documents
+                // Also remove OMC values for deleted documents.
+                // This runs under &mut self (indexes.write() held), so exclusive access is guaranteed.
                 {
-                    let mut omc_lock = self.omc.write().expect("omc lock poisoned");
-                    let (ref mut uncommitted_omc, ref mut committed_omc) = *omc_lock;
+                    let mut omc_uncommitted = self
+                        .omc_uncommitted
+                        .lock()
+                        .expect("omc_uncommitted lock poisoned");
+                    omc_uncommitted.retain(|(id, _)| !doc_ids.contains(id));
+                }
+                {
+                    let mut omc_committed = self
+                        .omc_committed
+                        .write()
+                        .expect("omc_committed lock poisoned");
                     for doc_id in &doc_ids {
-                        uncommitted_omc.remove(doc_id);
-                        committed_omc.remove(doc_id);
+                        omc_committed.remove(doc_id);
                     }
                 }
 
@@ -1539,10 +1571,13 @@ impl Index {
                 // Handle Index2: same as Index but also stores the OMC value if present
                 self.document_count.fetch_add(1, Ordering::Relaxed);
 
-                // Store OMC value if provided
+                // Append OMC value to the uncommitted log (brief lock, append-only).
                 if let Some(multiplier) = omc {
-                    let mut omc_lock = self.omc.write().expect("omc lock poisoned");
-                    omc_lock.0.insert(doc_id, multiplier);
+                    let mut omc_uncommitted = self
+                        .omc_uncommitted
+                        .lock()
+                        .expect("omc_uncommitted lock poisoned");
+                    omc_uncommitted.push((doc_id, multiplier));
                 }
 
                 for indexed_value in indexed_values {
@@ -1679,12 +1714,27 @@ impl Index {
             .is_some()
     }
 
-    /// Get all OMC values at once for batch operations.
-    /// Returns a read guard to both uncommitted and committed OMC maps.
-    pub fn get_all_omc(
-        &self,
-    ) -> std::sync::RwLockReadGuard<'_, (HashMap<DocumentId, f32>, HashMap<DocumentId, f32>)> {
-        self.omc.read().expect("omc lock poisoned")
+    /// Get all OMC values by merging both the committed map and the uncommitted log.
+    /// Returns a single HashMap with the latest multiplier for each document.
+    /// Uncommitted entries override committed ones (last-writer wins).
+    pub fn get_all_omc(&self) -> HashMap<DocumentId, f32> {
+        let committed = self
+            .omc_committed
+            .read()
+            .expect("omc_committed lock poisoned");
+        let mut merged = committed.clone();
+        drop(committed);
+
+        let uncommitted = self
+            .omc_uncommitted
+            .lock()
+            .expect("omc_uncommitted lock poisoned");
+        // Apply uncommitted entries on top (last entry for a doc_id wins)
+        for &(doc_id, multiplier) in uncommitted.iter() {
+            merged.insert(doc_id, multiplier);
+        }
+
+        merged
     }
 
     // Since we only have one embedding model for all indexes in a collection,

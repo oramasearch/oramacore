@@ -20,6 +20,7 @@ use notify::NotifierConfig;
 use orama_js_pool::OutputChannel;
 use oramacore_lib::secrets::{SecretsProviderConfig, SecretsService};
 use oramacore_lib::shelves::ShelfId;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use std::{collections::HashMap, path::PathBuf};
@@ -161,9 +162,15 @@ pub struct ReadSide {
     operation_counter: OramaAsyncLock<u64>,
     insert_batch_commit_size: u64,
     data_dir: PathBuf,
-    live_offset: OramaAsyncLock<Offset>,
-    // This offset will update everytime a change is made to the read side.
-    commit_insert_mutex: OramaAsyncMutex<Offset>,
+    // Tracks the latest offset received from the operation stream (updated atomically by update()).
+    live_offset: AtomicU64,
+    // The highest offset that has been successfully committed to disk.
+    // Used by update() for deduplication (skip already-committed operations).
+    committed_offset: AtomicU64,
+    // Serializes commits against each other but does NOT block inserts.
+    // This allows update() and commit() to run in parallel while preventing
+    // two concurrent commits from interleaving their I/O.
+    commit_mutex: OramaAsyncMutex<()>,
     master_api_key: Option<ApiKey>,
     system_prompts: SystemPromptInterface,
     training_sets: TrainingSetInterface,
@@ -293,8 +300,9 @@ impl ReadSide {
             _global_document_storage: global_document_storage,
             operation_counter: OramaAsyncLock::new("operation_counter", Default::default()),
             insert_batch_commit_size,
-            live_offset: OramaAsyncLock::new("live_offset", last_offset),
-            commit_insert_mutex: OramaAsyncMutex::new("commit_insert_mutex", last_offset),
+            live_offset: AtomicU64::new(last_offset.0),
+            committed_offset: AtomicU64::new(last_offset.0),
+            commit_mutex: OramaAsyncMutex::new("commit_mutex", ()),
             master_api_key: config.master_api_key,
             system_prompts,
             training_sets,
@@ -367,7 +375,7 @@ impl ReadSide {
 
         // Write the final offset to read.info to capture any messages
         // dequeued between the forced commit and the stop signal.
-        let final_offset = **self.live_offset.read("final_stop").await;
+        let final_offset = Offset(self.live_offset.load(Ordering::Acquire));
         if let Err(e) =
             BufferedFile::create_or_overwrite(self.data_dir.join("read.info")).and_then(|f| {
                 f.write_json_data(&ReadInfo::V1(ReadInfoV1 {
@@ -384,14 +392,12 @@ impl ReadSide {
     }
 
     pub async fn commit(&self, force: bool) -> Result<()> {
-        // We stop insertion operations while we are committing
-        // This lock is needed to prevent any collection from being created, deleted or changed
-        // ie, we stop to process any new events
-        let mut commit_insert_mutex_lock = self.commit_insert_mutex.lock("commit").await;
+        // Serialize commits against each other, but do NOT block inserts.
+        // Inserts can proceed in parallel because oramacore_fields handles
+        // concurrent insert/compact safely at the field level.
+        let commit_guard = self.commit_mutex.lock("commit").await;
 
-        let live_offset = self.live_offset.write("commit").await;
-        let offset = **live_offset;
-        drop(live_offset);
+        let offset = Offset(self.live_offset.load(Ordering::Acquire));
 
         // Pass force parameter to collections commit
         let min_offset = self.collections.commit(force).await?;
@@ -419,9 +425,10 @@ impl ReadSide {
             }
         }
 
-        **commit_insert_mutex_lock = offset;
+        // Advance the committed offset so update() can deduplicate replayed operations.
+        self.committed_offset.store(offset.0, Ordering::Release);
 
-        drop(commit_insert_mutex_lock);
+        drop(commit_guard);
 
         Ok(())
     }
@@ -430,8 +437,10 @@ impl ReadSide {
     /// Only the collection's own data is persisted. The global offset is advanced
     /// only by full commits (timer or forced), ensuring crash recovery correctness.
     async fn commit_single_collection(&self, collection_id: CollectionId) -> Result<()> {
-        let _lock = self.commit_insert_mutex.lock("commit_single").await;
+        // Serialize commits against each other, but do NOT block inserts.
+        let commit_guard = self.commit_mutex.lock("commit_single").await;
         self.collections.commit_collection(collection_id).await?;
+        drop(commit_guard);
         Ok(())
     }
 
@@ -499,19 +508,15 @@ impl ReadSide {
 
         let m = OPERATION_COUNT.create(Empty);
 
-        // We stop commit operations while we are updating
-        // The lock is released at the end of this function
-        let commit_insert_mutex_lock = self.commit_insert_mutex.lock("update").await;
-
-        // Already applied. We can skip this operation.
-        if offset <= **commit_insert_mutex_lock && !commit_insert_mutex_lock.is_zero() {
+        // Check if this operation was already committed (deduplication on replay).
+        // No mutex needed — the atomic provides a consistent snapshot of the committed offset.
+        let committed = self.committed_offset.load(Ordering::Acquire);
+        if offset.0 <= committed && committed != 0 {
             warn!(offset=?offset, "Operation already applied. Skipping");
             return Ok(());
         }
 
-        let mut live_offset = self.live_offset.write("update").await;
-        **live_offset = offset;
-        drop(live_offset);
+        self.live_offset.store(offset.0, Ordering::Release);
 
         match op {
             WriteOperation::CreateCollection {
@@ -597,8 +602,6 @@ impl ReadSide {
             false
         };
         drop(lock);
-
-        drop(commit_insert_mutex_lock);
 
         if should_commit {
             info!(insert_batch_commit_size=?self.insert_batch_commit_size, "insert_batch_commit_size reached, requesting commit");

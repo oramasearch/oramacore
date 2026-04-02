@@ -75,21 +75,28 @@ impl UncommittedDocumentStorage {
         Ok(())
     }
 
-    pub fn clone_inner(&self) -> Vec<(DocumentId, Arc<RawJSONDocument>)> {
+    /// Takes a snapshot of the current uncommitted documents and returns them
+    /// along with the snapshot length. The snapshot length is used later to drain
+    /// only the snapshotted entries, preserving any concurrent inserts.
+    pub fn snapshot(&self) -> (Vec<(DocumentId, Arc<RawJSONDocument>)>, usize) {
         let storage_lock = self
             .storage
-            .read("clone_inner")
-            .expect("Cannot lock uncommitted storage for clone");
-        storage_lock.clone()
+            .read("snapshot")
+            .expect("Cannot lock uncommitted storage for snapshot");
+        let len = storage_lock.len();
+        let data = storage_lock.clone();
+        (data, len)
     }
 
-    pub fn clear(&self) {
+    /// Drains only the first `snapshot_len` entries that were included in the snapshot.
+    /// Entries appended concurrently after the snapshot was taken (at indices snapshot_len..)
+    /// are preserved for the next commit cycle.
+    pub fn drain_compacted(&self, snapshot_len: usize) {
         let mut storage_lock = self
             .storage
-            .write("clear")
-            .expect("Cannot lock uncommitted storage for clean");
-        // NB: release also the memory, not only clear the vector
-        **storage_lock = Vec::new();
+            .write("drain_compacted")
+            .expect("Cannot lock uncommitted storage for drain");
+        storage_lock.drain(..snapshot_len);
     }
 }
 
@@ -311,12 +318,17 @@ impl CollectionDocumentStorage {
             side: "read",
         });
 
-        let uncommitted_docs = self.uncommitted.clone_inner();
+        // Snapshot uncommitted docs: record their count so we only drain what we commit.
+        // Inserts that arrive concurrently (at indices snapshot_len..) are preserved.
+        let (uncommitted_docs, docs_snapshot_len) = self.uncommitted.snapshot();
 
-        let uncommitted_document_deletions_lock = self.deleted_documents.read("commit").await;
-        let to_delete = uncommitted_document_deletions_lock.clone();
-        drop(uncommitted_document_deletions_lock);
+        // Snapshot deleted documents with the same position-based pattern.
+        let deleted_documents_lock = self.deleted_documents.read("commit").await;
+        let delete_snapshot_len = deleted_documents_lock.len();
+        let to_delete = deleted_documents_lock.clone();
+        drop(deleted_documents_lock);
 
+        // Write to zebo — no locks held on uncommitted storage, so inserts can proceed.
         let mut zebo = self.zebo.write("commit").await;
         let docs: Vec<_> = uncommitted_docs
             .into_iter()
@@ -328,16 +340,15 @@ impl CollectionDocumentStorage {
                 .write_all()
                 .context("Cannot write documents")?;
         }
-        zebo.remove_documents(to_delete.clone(), false)
+        zebo.remove_documents(to_delete, false)
             .context("Cannot remove documents")?;
 
-        self.uncommitted.clear();
+        // Drain only the entries that were included in the snapshot.
+        // Concurrent inserts appended after the snapshot are preserved for the next commit.
+        self.uncommitted.drain_compacted(docs_snapshot_len);
 
         let mut deleted_documents_lock = self.deleted_documents.write("commit").await;
-        // We drop the memory used for tracking deletions
-        // NB: this operation is not atomic but commit stops writes, so it is safe
-        // otherwise we should remove only the committed deletions
-        **deleted_documents_lock = vec![];
+        deleted_documents_lock.drain(..delete_snapshot_len);
         drop(deleted_documents_lock);
 
         self.doc_id_map
@@ -355,6 +366,7 @@ impl CollectionDocumentStorage {
     }
 }
 
+#[derive(Clone)]
 enum DocumentIdStrMapUncommittedChange {
     Insert(String, DocumentId),
     Delete(String, DocumentId),
@@ -418,8 +430,14 @@ impl DocumentIdStrMap {
             .read_bincode_data()
             .context("Cannot deserialize DocumentIdStrMap")?;
 
-        let mut uncommitted_lock = self.uncommitted.write("commit").await;
-        for change in uncommitted_lock.drain(..) {
+        // Snapshot the uncommitted changes: record their count so we only drain
+        // what we process. Concurrent inserts at indices snapshot_len.. are preserved.
+        let uncommitted_lock = self.uncommitted.read("commit_snapshot").await;
+        let snapshot_len = uncommitted_lock.len();
+        let snapshot: Vec<_> = uncommitted_lock.iter().take(snapshot_len).cloned().collect();
+        drop(uncommitted_lock);
+
+        for change in snapshot {
             match change {
                 DocumentIdStrMapUncommittedChange::Insert(doc_id_str, doc_id) => {
                     map.insert(doc_id_str, doc_id);
@@ -438,12 +456,16 @@ impl DocumentIdStrMap {
                 }
             }
         }
-        drop(uncommitted_lock);
 
         BufferedFile::create_or_overwrite(lock.clone())
             .with_context(|| format!("Cannot create or overwrite {:?}", **lock))?
             .write_bincode_data(&map)
             .context("Cannot serialize DocumentIdStrMap")?;
+
+        // Drain only the entries that were included in the snapshot.
+        let mut uncommitted_lock = self.uncommitted.write("commit_drain").await;
+        uncommitted_lock.drain(..snapshot_len);
+        drop(uncommitted_lock);
 
         drop(lock);
 
