@@ -206,6 +206,34 @@ impl CollectionsReader {
         Ok(min_offset)
     }
 
+    /// Commits a single collection by ID, creating its directory if needed.
+    /// Does not write info.json (that metadata only changes on collection creation/deletion).
+    pub async fn commit_collection(&self, collection_id: CollectionId) -> Result<()> {
+        let col = self.collections.read("commit_collection").await;
+        let collection = match col.get(&collection_id) {
+            Some(c) if !c.is_deleted() => c,
+            _ => return Ok(()),
+        };
+
+        let collection_dir = self
+            .indexes_config
+            .data_dir
+            .join("collections")
+            .join(collection_id.as_str());
+        create_if_not_exists_async(&collection_dir)
+            .await
+            .with_context(|| {
+                format!(
+                    "Cannot create directory for collection '{}'",
+                    collection_id.as_str()
+                )
+            })?;
+
+        collection.commit(true).await?;
+
+        Ok(())
+    }
+
     pub async fn clean_up(&self) -> Result<()> {
         let collections = self.collections.read("clean_up").await;
 

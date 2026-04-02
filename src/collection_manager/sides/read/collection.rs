@@ -870,11 +870,14 @@ impl CollectionReader {
         IndexReadLock::try_new(indexes_lock, index_id)
     }
 
+    /// Applies a write operation to this collection.
+    /// Returns `true` if the collection's pending operation threshold has been reached
+    /// and it requests to be committed.
     pub async fn update(
         &self,
         offset: Offset,
         collection_operation: CollectionWriteOperation,
-    ) -> Result<()> {
+    ) -> Result<bool> {
         // Check if operation already applied to THIS collection
         let current = self.offset.read("update").await;
         if offset <= **current && !current.is_zero() {
@@ -883,7 +886,7 @@ impl CollectionReader {
                 offset=?offset,
                 "Already applied to this collection"
             );
-            return Ok(());
+            return Ok(false);
         }
         drop(current);
 
@@ -1172,21 +1175,19 @@ impl CollectionReader {
         **current = offset;
         drop(current);
 
-        // Commit collection if threshold reached
-        // NB: this commits only this collection
+        // Signal whether this collection wants to be committed
         let pending = self.pending_operations.fetch_add(1, Ordering::SeqCst) + 1;
-        if pending >= self.commit_config.operation_threshold {
+        let needs_commit = pending >= self.commit_config.operation_threshold;
+        if needs_commit {
             info!(
                 collection_id=?self.id,
                 offset=?offset,
                 pending=pending,
-                "Collection threshold reached, committing"
+                "Collection threshold reached, requesting commit"
             );
-            // Force commit since we've reached the per-collection threshold
-            self.commit(true).await?;
         }
 
-        Ok(())
+        Ok(needs_commit)
     }
 
     pub fn get_document_storage(&self) -> &CollectionDocumentStorage {

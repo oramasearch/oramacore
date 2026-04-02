@@ -87,6 +87,15 @@ pub struct ReadSideConfig {
     pub secrets_manager: Option<Vec<SecretsProviderConfig>>,
 }
 
+/// Indicates the scope of a commit request sent from the update path to the commit loop.
+#[derive(Debug, Clone)]
+pub enum CommitScope {
+    /// Commit all collections (triggered when global operation counter threshold is reached)
+    AllCollections,
+    /// Commit a single collection (triggered when per-collection operation threshold is reached)
+    SelectedCollection(CollectionId),
+}
+
 /// Configuration for per-collection commit thresholds
 #[derive(Debug, Deserialize, Clone, Copy)]
 pub struct CollectionCommitConfig {
@@ -166,6 +175,10 @@ pub struct ReadSide {
     hook_logs: HookLogs,
 
     analytics_storage: Option<OramaCoreAnalytics>,
+
+    // Channel to send commit requests from the update path to the commit loop.
+    // This decouples the update path from the commit process.
+    commit_request_sender: tokio::sync::mpsc::Sender<CommitScope>,
 
     // Handle to stop the read side
     // This is used to stop the read side when the server is shutting down
@@ -248,6 +261,10 @@ impl ReadSide {
         let commit_loop_receiver = stop_sender.subscribe();
         let receive_operation_loop_receiver = stop_sender.subscribe();
 
+        // Channel for sending commit requests from the update path to the commit loop.
+        let (commit_request_sender, commit_request_receiver) =
+            tokio::sync::mpsc::channel::<CommitScope>(64);
+
         let analytics_storage = if let Some(config) = config.analytics {
             Some(
                 OramaCoreAnalytics::try_new(data_dir.join("analytics_new"), config)
@@ -291,6 +308,8 @@ impl ReadSide {
 
             data_dir,
 
+            commit_request_sender,
+
             stop_sender,
             stop_done_receiver: OramaAsyncLock::new("stop_done_receiver", stop_done_receiver),
             python_service,
@@ -310,6 +329,7 @@ impl ReadSide {
             force_commit,
             commit_loop_receiver,
             stop_done_sender.clone(),
+            commit_request_receiver,
         );
         start_receive_operations(
             read_side.clone(),
@@ -403,6 +423,15 @@ impl ReadSide {
 
         drop(commit_insert_mutex_lock);
 
+        Ok(())
+    }
+
+    /// Commits a single collection without updating the global offset (read.info).
+    /// Only the collection's own data is persisted. The global offset is advanced
+    /// only by full commits (timer or forced), ensuring crash recovery correctness.
+    async fn commit_single_collection(&self, collection_id: CollectionId) -> Result<()> {
+        let _lock = self.commit_insert_mutex.lock("commit_single").await;
+        self.collections.commit_collection(collection_id).await?;
         Ok(())
     }
 
@@ -531,8 +560,16 @@ impl ReadSide {
                     .get_collection(collection_id)
                     .await
                     .ok_or_else(|| anyhow::anyhow!("Collection {} not found", collection_id))?;
-                // Pass offset to collection - it handles per-collection tracking internally
-                collection.update(offset, collection_operation).await?;
+                // Collection returns true if it wants to be committed
+                let needs_commit = collection.update(offset, collection_operation).await?;
+                if needs_commit {
+                    if let Err(e) = self
+                        .commit_request_sender
+                        .try_send(CommitScope::SelectedCollection(collection_id))
+                    {
+                        warn!(error=?e, collection_id=?collection_id, "Cannot send per-collection commit request, commit loop will handle it on next tick");
+                    }
+                }
             }
             #[allow(deprecated)]
             WriteOperation::DocumentStorage(op) => {
@@ -564,9 +601,13 @@ impl ReadSide {
         drop(commit_insert_mutex_lock);
 
         if should_commit {
-            info!(insert_batch_commit_size=?self.insert_batch_commit_size, "insert_batch_commit_size reached, committing");
-            // Use non-forced commit to allow collections to skip if below threshold
-            self.commit(false).await?;
+            info!(insert_batch_commit_size=?self.insert_batch_commit_size, "insert_batch_commit_size reached, requesting commit");
+            if let Err(e) = self
+                .commit_request_sender
+                .try_send(CommitScope::AllCollections)
+            {
+                warn!(error=?e, "Cannot send all-collections commit request, commit loop will handle it on next tick");
+            }
         }
 
         trace!(offset=?offset, "Updated");
@@ -1045,6 +1086,7 @@ fn start_commit_loop(
     force_commit: u32,
     mut stop_receiver: tokio::sync::broadcast::Receiver<()>,
     stop_done_sender: tokio::sync::mpsc::Sender<()>,
+    mut commit_request_receiver: tokio::sync::mpsc::Receiver<CommitScope>,
 ) {
     tokio::task::spawn(async move {
         let start = Instant::now() + insert_batch_commit_size;
@@ -1053,7 +1095,7 @@ fn start_commit_loop(
         // If for some reason we miss a tick, we skip it.
         // In fact, the commit is blocked only by `update` method.
         // If the collection is under heavy load,
-        // the commit will be run due to the `insert_batch_commit_size` config.
+        // the commit will be requested via the commit_request_receiver channel.
         interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
 
         let mut counter: u32 = 0;
@@ -1065,15 +1107,43 @@ fn start_commit_loop(
                 }
                 _ = interval.tick() => {
                     counter = (counter + 1) % force_commit;
+                    info!(
+                        "{:?} time reached. Committing read side",
+                        insert_batch_commit_size
+                    );
+                    if let Err(e) = read_side.commit(counter == 0).await {
+                        error!(error = ?e, "Cannot commit read side");
+                    }
                 }
-            };
-            info!(
-                "{:?} time reached. Committing read side",
-                insert_batch_commit_size.clone()
-            );
-            // Use non-forced commit to allow collections to skip if below threshold
-            if let Err(e) = read_side.commit(counter == 0).await {
-                error!(error = ?e, "Cannot commit read side");
+                Some(scope) = commit_request_receiver.recv() => {
+                    // Drain queued messages to deduplicate
+                    let mut scopes = vec![scope];
+                    while let Ok(additional) = commit_request_receiver.try_recv() {
+                        scopes.push(additional);
+                    }
+
+                    // If any AllCollections is present, do one full commit (subsumes per-collection)
+                    let has_all = scopes.iter().any(|s| matches!(s, CommitScope::AllCollections));
+                    if has_all {
+                        info!("Batch threshold reached. Committing all collections");
+                        if let Err(e) = read_side.commit(false).await {
+                            error!(error = ?e, "Cannot commit read side");
+                        }
+                    } else {
+                        // Deduplicate collection IDs
+                        let mut seen = std::collections::HashSet::new();
+                        for s in scopes {
+                            if let CommitScope::SelectedCollection(id) = s {
+                                if seen.insert(id) {
+                                    info!(collection_id=?id, "Collection threshold reached. Committing single collection");
+                                    if let Err(e) = read_side.commit_single_collection(id).await {
+                                        error!(error=?e, collection_id=?id, "Cannot commit collection");
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
 
