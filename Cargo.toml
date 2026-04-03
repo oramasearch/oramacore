@@ -115,6 +115,10 @@ eventsource-stream = "0.2"
 name = "oramacore"
 path = "src/bin/oramacore.rs"
 
+[[bin]]
+name = "load_transcripts"
+path = "src/bin/load_transcripts.rs"
+
 # [[bench]]
 # name = "phrase_match"
 # harness = false

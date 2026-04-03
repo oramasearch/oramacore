@@ -1197,6 +1197,11 @@ impl CollectionReader {
         let pending = self.pending_operations.fetch_add(1, Ordering::SeqCst) + 1;
         let needs_commit = pending >= self.commit_config.operation_threshold;
         if needs_commit {
+            // Reset the counter immediately so subsequent updates don't keep
+            // triggering commit requests while the commit loop processes this one.
+            // The commit will still reset to 0 on completion, but this prevents
+            // every update after the threshold from flooding the commit channel.
+            self.pending_operations.store(0, Ordering::SeqCst);
             info!(
                 collection_id=?self.id,
                 offset=?offset,
