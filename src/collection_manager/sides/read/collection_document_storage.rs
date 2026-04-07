@@ -434,7 +434,11 @@ impl DocumentIdStrMap {
         // what we process. Concurrent inserts at indices snapshot_len.. are preserved.
         let uncommitted_lock = self.uncommitted.read("commit_snapshot").await;
         let snapshot_len = uncommitted_lock.len();
-        let snapshot: Vec<_> = uncommitted_lock.iter().take(snapshot_len).cloned().collect();
+        let snapshot: Vec<_> = uncommitted_lock
+            .iter()
+            .take(snapshot_len)
+            .cloned()
+            .collect();
         drop(uncommitted_lock);
 
         for change in snapshot {

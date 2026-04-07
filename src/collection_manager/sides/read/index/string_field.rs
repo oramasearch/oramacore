@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use oramacore_fields::string::{
     ContributionsResult, DocumentFilter, IndexedValue as StringIndexedValue, SearchParams,
-    SegmentConfig, StringStorage, TermData, Threshold,
+    SegmentConfig, StringStorage, TermData,
 };
 use oramacore_lib::filters::FilterResult;
 use serde::Serialize;

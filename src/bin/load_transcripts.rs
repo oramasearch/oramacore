@@ -97,7 +97,11 @@ fn flatten_json(value: &Value) -> Value {
     Value::Object(result)
 }
 
-fn flatten_into(result: &mut serde_json::Map<String, Value>, map: &serde_json::Map<String, Value>, prefix: &str) {
+fn flatten_into(
+    result: &mut serde_json::Map<String, Value>,
+    map: &serde_json::Map<String, Value>,
+    prefix: &str,
+) {
     for (key, value) in map {
         let full_key = if prefix.is_empty() {
             key.clone()
@@ -193,10 +197,7 @@ async fn insert_batch(
 async fn main() -> anyhow::Result<()> {
     let config = parse_args();
 
-    println!(
-        "Loading transcripts from: {}",
-        config.file_path
-    );
+    println!("Loading transcripts from: {}", config.file_path);
     println!(
         "Batch size: {}, Parallelism: {}, Collection: {}, Index: {}",
         config.batch_size, config.parallelism, config.collection_id, config.index_id
@@ -214,7 +215,7 @@ async fn main() -> anyhow::Result<()> {
     let file = std::fs::File::open(&config.file_path)?;
     let total_lines = BufReader::new(file)
         .lines()
-        .filter(|l| l.as_ref().map_or(false, |s| !s.trim().is_empty()))
+        .filter(|l| l.as_ref().is_ok_and(|s| !s.trim().is_empty()))
         .count();
     println!("Total documents in file: {total_lines}");
 
@@ -261,7 +262,8 @@ async fn main() -> anyhow::Result<()> {
         if batch.len() >= config.batch_size {
             total_docs += batch.len();
             total_batches += 1;
-            let batch_to_send = std::mem::replace(&mut batch, Vec::with_capacity(config.batch_size));
+            let batch_to_send =
+                std::mem::replace(&mut batch, Vec::with_capacity(config.batch_size));
 
             let permit = semaphore.clone().acquire_owned().await?;
             let client = client.clone();
@@ -270,8 +272,7 @@ async fn main() -> anyhow::Result<()> {
             let docs_so_far = total_docs;
 
             tasks.push(tokio::spawn(async move {
-                let result =
-                    insert_batch(&client, &collection_id, &index_id, batch_to_send).await;
+                let result = insert_batch(&client, &collection_id, &index_id, batch_to_send).await;
                 drop(permit);
                 match result {
                     Ok(()) => {
