@@ -20,6 +20,7 @@ use notify::NotifierConfig;
 use orama_js_pool::OutputChannel;
 use oramacore_lib::secrets::{SecretsProviderConfig, SecretsService};
 use oramacore_lib::shelves::ShelfId;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use std::{collections::HashMap, path::PathBuf};
@@ -87,6 +88,15 @@ pub struct ReadSideConfig {
     pub secrets_manager: Option<Vec<SecretsProviderConfig>>,
 }
 
+/// Indicates the scope of a commit request sent from the update path to the commit loop.
+#[derive(Debug, Clone)]
+pub enum CommitScope {
+    /// Commit all collections (triggered when global operation counter threshold is reached)
+    AllCollections,
+    /// Commit a single collection (triggered when per-collection operation threshold is reached)
+    SelectedCollection(CollectionId),
+}
+
 /// Configuration for per-collection commit thresholds
 #[derive(Debug, Deserialize, Clone, Copy)]
 pub struct CollectionCommitConfig {
@@ -152,9 +162,15 @@ pub struct ReadSide {
     operation_counter: OramaAsyncLock<u64>,
     insert_batch_commit_size: u64,
     data_dir: PathBuf,
-    live_offset: OramaAsyncLock<Offset>,
-    // This offset will update everytime a change is made to the read side.
-    commit_insert_mutex: OramaAsyncMutex<Offset>,
+    // Tracks the latest offset received from the operation stream (updated atomically by update()).
+    live_offset: AtomicU64,
+    // The highest offset that has been successfully committed to disk.
+    // Used by update() for deduplication (skip already-committed operations).
+    committed_offset: AtomicU64,
+    // Serializes commits against each other but does NOT block inserts.
+    // This allows update() and commit() to run in parallel while preventing
+    // two concurrent commits from interleaving their I/O.
+    commit_mutex: OramaAsyncMutex<()>,
     master_api_key: Option<ApiKey>,
     system_prompts: SystemPromptInterface,
     training_sets: TrainingSetInterface,
@@ -166,6 +182,10 @@ pub struct ReadSide {
     hook_logs: HookLogs,
 
     analytics_storage: Option<OramaCoreAnalytics>,
+
+    // Channel to send commit requests from the update path to the commit loop.
+    // This decouples the update path from the commit process.
+    commit_request_sender: tokio::sync::mpsc::Sender<CommitScope>,
 
     // Handle to stop the read side
     // This is used to stop the read side when the server is shutting down
@@ -248,6 +268,10 @@ impl ReadSide {
         let commit_loop_receiver = stop_sender.subscribe();
         let receive_operation_loop_receiver = stop_sender.subscribe();
 
+        // Channel for sending commit requests from the update path to the commit loop.
+        let (commit_request_sender, commit_request_receiver) =
+            tokio::sync::mpsc::channel::<CommitScope>(64);
+
         let analytics_storage = if let Some(config) = config.analytics {
             Some(
                 OramaCoreAnalytics::try_new(data_dir.join("analytics_new"), config)
@@ -276,8 +300,9 @@ impl ReadSide {
             _global_document_storage: global_document_storage,
             operation_counter: OramaAsyncLock::new("operation_counter", Default::default()),
             insert_batch_commit_size,
-            live_offset: OramaAsyncLock::new("live_offset", last_offset),
-            commit_insert_mutex: OramaAsyncMutex::new("commit_insert_mutex", last_offset),
+            live_offset: AtomicU64::new(last_offset.0),
+            committed_offset: AtomicU64::new(last_offset.0),
+            commit_mutex: OramaAsyncMutex::new("commit_mutex", ()),
             master_api_key: config.master_api_key,
             system_prompts,
             training_sets,
@@ -290,6 +315,8 @@ impl ReadSide {
             analytics_storage,
 
             data_dir,
+
+            commit_request_sender,
 
             stop_sender,
             stop_done_receiver: OramaAsyncLock::new("stop_done_receiver", stop_done_receiver),
@@ -310,6 +337,7 @@ impl ReadSide {
             force_commit,
             commit_loop_receiver,
             stop_done_sender.clone(),
+            commit_request_receiver,
         );
         start_receive_operations(
             read_side.clone(),
@@ -347,7 +375,7 @@ impl ReadSide {
 
         // Write the final offset to read.info to capture any messages
         // dequeued between the forced commit and the stop signal.
-        let final_offset = **self.live_offset.read("final_stop").await;
+        let final_offset = Offset(self.live_offset.load(Ordering::Acquire));
         if let Err(e) =
             BufferedFile::create_or_overwrite(self.data_dir.join("read.info")).and_then(|f| {
                 f.write_json_data(&ReadInfo::V1(ReadInfoV1 {
@@ -364,14 +392,12 @@ impl ReadSide {
     }
 
     pub async fn commit(&self, force: bool) -> Result<()> {
-        // We stop insertion operations while we are committing
-        // This lock is needed to prevent any collection from being created, deleted or changed
-        // ie, we stop to process any new events
-        let mut commit_insert_mutex_lock = self.commit_insert_mutex.lock("commit").await;
+        // Serialize commits against each other, but do NOT block inserts.
+        // Inserts can proceed in parallel because oramacore_fields handles
+        // concurrent insert/compact safely at the field level.
+        let commit_guard = self.commit_mutex.lock("commit").await;
 
-        let live_offset = self.live_offset.write("commit").await;
-        let offset = **live_offset;
-        drop(live_offset);
+        let offset = Offset(self.live_offset.load(Ordering::Acquire));
 
         // Pass force parameter to collections commit
         let min_offset = self.collections.commit(force).await?;
@@ -399,10 +425,22 @@ impl ReadSide {
             }
         }
 
-        **commit_insert_mutex_lock = offset;
+        // Advance the committed offset so update() can deduplicate replayed operations.
+        self.committed_offset.store(offset.0, Ordering::Release);
 
-        drop(commit_insert_mutex_lock);
+        drop(commit_guard);
 
+        Ok(())
+    }
+
+    /// Commits a single collection without updating the global offset (read.info).
+    /// Only the collection's own data is persisted. The global offset is advanced
+    /// only by full commits (timer or forced), ensuring crash recovery correctness.
+    async fn commit_single_collection(&self, collection_id: CollectionId) -> Result<()> {
+        // Serialize commits against each other, but do NOT block inserts.
+        let commit_guard = self.commit_mutex.lock("commit_single").await;
+        self.collections.commit_collection(collection_id).await?;
+        drop(commit_guard);
         Ok(())
     }
 
@@ -470,19 +508,15 @@ impl ReadSide {
 
         let m = OPERATION_COUNT.create(Empty);
 
-        // We stop commit operations while we are updating
-        // The lock is released at the end of this function
-        let commit_insert_mutex_lock = self.commit_insert_mutex.lock("update").await;
-
-        // Already applied. We can skip this operation.
-        if offset <= **commit_insert_mutex_lock && !commit_insert_mutex_lock.is_zero() {
+        // Check if this operation was already committed (deduplication on replay).
+        // No mutex needed — the atomic provides a consistent snapshot of the committed offset.
+        let committed = self.committed_offset.load(Ordering::Acquire);
+        if offset.0 <= committed && committed != 0 {
             warn!(offset=?offset, "Operation already applied. Skipping");
             return Ok(());
         }
 
-        let mut live_offset = self.live_offset.write("update").await;
-        **live_offset = offset;
-        drop(live_offset);
+        self.live_offset.store(offset.0, Ordering::Release);
 
         match op {
             WriteOperation::CreateCollection {
@@ -531,8 +565,16 @@ impl ReadSide {
                     .get_collection(collection_id)
                     .await
                     .ok_or_else(|| anyhow::anyhow!("Collection {} not found", collection_id))?;
-                // Pass offset to collection - it handles per-collection tracking internally
-                collection.update(offset, collection_operation).await?;
+                // Collection returns true if it wants to be committed
+                let needs_commit = collection.update(offset, collection_operation).await?;
+                if needs_commit {
+                    if let Err(e) = self
+                        .commit_request_sender
+                        .try_send(CommitScope::SelectedCollection(collection_id))
+                    {
+                        warn!(error=?e, collection_id=?collection_id, "Cannot send per-collection commit request, commit loop will handle it on next tick");
+                    }
+                }
             }
             #[allow(deprecated)]
             WriteOperation::DocumentStorage(op) => {
@@ -561,12 +603,14 @@ impl ReadSide {
         };
         drop(lock);
 
-        drop(commit_insert_mutex_lock);
-
         if should_commit {
-            info!(insert_batch_commit_size=?self.insert_batch_commit_size, "insert_batch_commit_size reached, committing");
-            // Use non-forced commit to allow collections to skip if below threshold
-            self.commit(false).await?;
+            info!(insert_batch_commit_size=?self.insert_batch_commit_size, "insert_batch_commit_size reached, requesting commit");
+            if let Err(e) = self
+                .commit_request_sender
+                .try_send(CommitScope::AllCollections)
+            {
+                warn!(error=?e, "Cannot send all-collections commit request, commit loop will handle it on next tick");
+            }
         }
 
         trace!(offset=?offset, "Updated");
@@ -1045,6 +1089,7 @@ fn start_commit_loop(
     force_commit: u32,
     mut stop_receiver: tokio::sync::broadcast::Receiver<()>,
     stop_done_sender: tokio::sync::mpsc::Sender<()>,
+    mut commit_request_receiver: tokio::sync::mpsc::Receiver<CommitScope>,
 ) {
     tokio::task::spawn(async move {
         let start = Instant::now() + insert_batch_commit_size;
@@ -1053,7 +1098,7 @@ fn start_commit_loop(
         // If for some reason we miss a tick, we skip it.
         // In fact, the commit is blocked only by `update` method.
         // If the collection is under heavy load,
-        // the commit will be run due to the `insert_batch_commit_size` config.
+        // the commit will be requested via the commit_request_receiver channel.
         interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
 
         let mut counter: u32 = 0;
@@ -1065,15 +1110,43 @@ fn start_commit_loop(
                 }
                 _ = interval.tick() => {
                     counter = (counter + 1) % force_commit;
+                    info!(
+                        "{:?} time reached. Committing read side",
+                        insert_batch_commit_size
+                    );
+                    if let Err(e) = read_side.commit(counter == 0).await {
+                        error!(error = ?e, "Cannot commit read side");
+                    }
                 }
-            };
-            info!(
-                "{:?} time reached. Committing read side",
-                insert_batch_commit_size.clone()
-            );
-            // Use non-forced commit to allow collections to skip if below threshold
-            if let Err(e) = read_side.commit(counter == 0).await {
-                error!(error = ?e, "Cannot commit read side");
+                Some(scope) = commit_request_receiver.recv() => {
+                    // Drain queued messages to deduplicate
+                    let mut scopes = vec![scope];
+                    while let Ok(additional) = commit_request_receiver.try_recv() {
+                        scopes.push(additional);
+                    }
+
+                    // If any AllCollections is present, do one full commit (subsumes per-collection)
+                    let has_all = scopes.iter().any(|s| matches!(s, CommitScope::AllCollections));
+                    if has_all {
+                        info!("Batch threshold reached. Committing all collections");
+                        if let Err(e) = read_side.commit(false).await {
+                            error!(error = ?e, "Cannot commit read side");
+                        }
+                    } else {
+                        // Deduplicate collection IDs
+                        let mut seen = std::collections::HashSet::new();
+                        for s in scopes {
+                            if let CommitScope::SelectedCollection(id) = s {
+                                if seen.insert(id) {
+                                    info!(collection_id=?id, "Collection threshold reached. Committing single collection");
+                                    if let Err(e) = read_side.commit_single_collection(id).await {
+                                        error!(error=?e, collection_id=?id, "Cannot commit collection");
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
 

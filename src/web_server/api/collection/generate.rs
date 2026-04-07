@@ -226,17 +226,20 @@ async fn answer_v1(
                     if let Ok(rq) = serde_json::to_string(queries) {
                         let mut lock = analytics_holder.lock().await;
                         lock.set_generated_related_queries(rq);
+                        drop(lock);
                     }
                 }
                 AnswerEvent::SelectedLLM { provider, model } => {
                     let mut lock = analytics_holder.lock().await;
                     lock.set_llm_info(provider.to_string(), model.to_string());
+                    drop(lock);
                 }
                 AnswerEvent::SearchResults { results } => {
                     match serde_json::to_string(results) {
                         Ok(r) => {
                             let mut lock = analytics_holder.lock().await;
                             lock.set_full_context(r);
+                            drop(lock);
                         }
                         Err(err) => {
                             tracing::error!(error = ?err, "Cannot set full context");

@@ -177,6 +177,7 @@ impl CollectionsReader {
                 }
             }
         }
+        drop(col);
 
         let guard = self.last_reindexed_collections.read("commit").await;
         let collections_info = CollectionsInfo::V1(CollectionsInfoV1 {
@@ -194,7 +195,6 @@ impl CollectionsReader {
         info!("Collections committed");
 
         if !to_delete.is_empty() {
-            drop(col);
             let mut guard = self.collections.write("commit").await;
             for id in to_delete.iter() {
                 guard.remove(id);
@@ -206,6 +206,35 @@ impl CollectionsReader {
         Ok(min_offset)
     }
 
+    /// Commits a single collection by ID, creating its directory if needed.
+    /// Does not write info.json (that metadata only changes on collection creation/deletion).
+    pub async fn commit_collection(&self, collection_id: CollectionId) -> Result<()> {
+        let col = self.collections.read("commit_collection").await;
+        let collection = match col.get(&collection_id) {
+            Some(c) if !c.is_deleted() => c,
+            _ => return Ok(()),
+        };
+
+        let collection_dir = self
+            .indexes_config
+            .data_dir
+            .join("collections")
+            .join(collection_id.as_str());
+        create_if_not_exists_async(&collection_dir)
+            .await
+            .with_context(|| {
+                format!(
+                    "Cannot create directory for collection '{}'",
+                    collection_id.as_str()
+                )
+            })?;
+
+        collection.commit(true).await?;
+        drop(col);
+
+        Ok(())
+    }
+
     pub async fn clean_up(&self) -> Result<()> {
         let collections = self.collections.read("clean_up").await;
 
@@ -215,6 +244,7 @@ impl CollectionsReader {
                 .await
                 .with_context(|| format!("collection {:?}", collection.id()))?;
         }
+        drop(collections);
 
         Ok(())
     }
@@ -313,6 +343,7 @@ impl CollectionsReader {
             collection.mark_as_deleted();
             info!(collection_id=?collection_id, "Collection marked as deleted {:?}", collection_id);
         }
+        drop(guard);
 
         Ok(())
     }

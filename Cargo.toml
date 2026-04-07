@@ -55,7 +55,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 
 oramacore_lib = "0.4.4"
-oramacore_fields = { version = "0.1.2", features = ["serde"] }
+oramacore_fields = { version = "0.2.0", features = ["serde"] }
 
 # JS
 oxc_parser = "0.47.1"
@@ -114,6 +114,10 @@ eventsource-stream = "0.2"
 [[bin]]
 name = "oramacore"
 path = "src/bin/oramacore.rs"
+
+[[bin]]
+name = "load_transcripts"
+path = "src/bin/load_transcripts.rs"
 
 # [[bench]]
 # name = "phrase_match"

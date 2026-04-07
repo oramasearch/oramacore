@@ -484,6 +484,7 @@ impl AdvancedAutoqueryStateMachine {
                 collection_id,
                 read_api_key,
             };
+            drop(state);
         }
 
         let total_steps = 8; // Total number of states in the flow
@@ -493,7 +494,9 @@ impl AdvancedAutoqueryStateMachine {
             current_step += 1;
             let current_state = {
                 let state = self.state.lock().await;
-                state.clone()
+                let cloned = state.clone();
+                drop(state);
+                cloned
             };
 
             // Send progress event
@@ -574,6 +577,7 @@ impl AdvancedAutoqueryStateMachine {
                         collection_id,
                         read_api_key,
                     };
+                    drop(state);
                 }
                 AdvancedAutoqueryFlow::BudgetPlanned {
                     optimized_queries,
@@ -904,6 +908,7 @@ impl AdvancedAutoqueryStateMachine {
                     {
                         let mut counts = self.retry_count.lock().await;
                         counts.insert(operation_name.to_string(), retry_count);
+                        drop(counts);
                     }
 
                     // Wait before retry
@@ -930,6 +935,7 @@ impl AdvancedAutoqueryStateMachine {
             collection_id,
             read_api_key,
         };
+        drop(state);
         Ok(())
     }
 
@@ -960,6 +966,7 @@ impl AdvancedAutoqueryStateMachine {
             collection_id,
             read_api_key,
         };
+        drop(state);
 
         Ok(optimized_queries)
     }
@@ -984,6 +991,7 @@ impl AdvancedAutoqueryStateMachine {
             collection_id,
             read_api_key,
         };
+        drop(state);
         Ok(())
     }
 
@@ -1016,6 +1024,7 @@ impl AdvancedAutoqueryStateMachine {
             collection_id,
             read_api_key,
         };
+        drop(state);
         Ok(())
     }
 
@@ -1047,6 +1056,7 @@ impl AdvancedAutoqueryStateMachine {
             collection_id,
             read_api_key,
         };
+        drop(state);
         Ok(())
     }
 
@@ -1078,6 +1088,7 @@ impl AdvancedAutoqueryStateMachine {
             collection_id,
             read_api_key,
         };
+        drop(state);
         Ok(())
     }
 
@@ -1108,6 +1119,7 @@ impl AdvancedAutoqueryStateMachine {
             collection_id,
             read_api_key,
         };
+        drop(state);
         Ok(())
     }
 
@@ -1123,6 +1135,7 @@ impl AdvancedAutoqueryStateMachine {
             collection_id,
             read_api_key,
         };
+        drop(state);
         Ok(())
     }
 
@@ -1154,6 +1167,7 @@ impl AdvancedAutoqueryStateMachine {
             collection_id,
             read_api_key,
         };
+        drop(state);
         Ok(())
     }
 
@@ -1169,6 +1183,7 @@ impl AdvancedAutoqueryStateMachine {
             collection_id,
             read_api_key,
         };
+        drop(state);
         Ok(())
     }
 
@@ -1205,6 +1220,7 @@ impl AdvancedAutoqueryStateMachine {
             collection_id,
             read_api_key,
         };
+        drop(state);
         Ok(())
     }
 
@@ -1220,6 +1236,7 @@ impl AdvancedAutoqueryStateMachine {
             collection_id,
             read_api_key,
         };
+        drop(state);
         Ok(())
     }
 
@@ -1252,6 +1269,7 @@ impl AdvancedAutoqueryStateMachine {
 
         let mut state = self.state.lock().await;
         *state = AdvancedAutoqueryFlow::SearchResults { results };
+        drop(state);
         Ok(())
     }
 
@@ -2029,13 +2047,17 @@ impl AdvancedAutoqueryStateMachine {
     /// Get current state for monitoring/debugging
     pub async fn current_state(&self) -> AdvancedAutoqueryFlow {
         let state = self.state.lock().await;
-        state.clone()
+        let cloned = state.clone();
+        drop(state);
+        cloned
     }
 
     /// Get retry statistics
     pub async fn retry_stats(&self) -> HashMap<String, usize> {
         let counts = self.retry_count.lock().await;
-        counts.clone()
+        let cloned = counts.clone();
+        drop(counts);
+        cloned
     }
 }
 

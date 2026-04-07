@@ -196,6 +196,8 @@ impl CollectionsWriter {
 
         let new_key = collection.regenerate_read_api_key();
 
+        drop(collections);
+
         sender
             .send(WriteOperation::Collection(
                 collection_id,
@@ -216,6 +218,7 @@ impl CollectionsWriter {
         for collection in collections.values() {
             r.push(collection.as_dto().await);
         }
+        drop(collections);
         r
     }
 
@@ -274,6 +277,7 @@ impl CollectionsWriter {
     pub async fn delete_collection(&self, collection_id: CollectionId) -> Result<()> {
         let mut collections = self.collections.write("delete_collection").await;
         let collection = collections.remove(&collection_id);
+        drop(collections);
 
         let collection = match collection {
             None => return Ok(()),
@@ -381,6 +385,7 @@ impl CollectionsWriter {
                     collection_id, temp_index_id
                 );
             }
+            drop(collections);
         }
 
         info!("Cleaned up {} expired temp indexes", cleanup_count);

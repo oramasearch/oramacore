@@ -1,5 +1,6 @@
 use chrono::{DateTime, Utc};
 use committed_field::{BoolFieldInfo, NumberFieldInfo, StringFilterFieldInfo, VectorFieldInfo};
+use debug_panic::debug_panic;
 use path_to_index_id_map::PathToIndexId;
 use serde::{Deserialize, Serialize};
 use tracing::{debug, error, info, trace, warn};
@@ -61,8 +62,8 @@ use std::{
     collections::{HashMap, HashSet},
     path::PathBuf,
     sync::{
-        atomic::{AtomicBool, Ordering},
-        Arc,
+        atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering},
+        Arc, Mutex, RwLock,
     },
 };
 
@@ -123,7 +124,7 @@ pub struct Index {
     // Always known from construction time.
     data_dir: PathBuf,
 
-    document_count: u64,
+    document_count: AtomicU64,
     uncommitted_deleted_documents: HashSet<DocumentId>,
 
     // Bool fields are managed directly by BoolFieldStorage (backed by oramacore_fields)
@@ -163,14 +164,19 @@ pub struct Index {
     is_new: AtomicBool,
 
     created_at: DateTime<Utc>,
-    updated_at: DateTime<Utc>,
+    /// Stored as milliseconds since epoch for atomic access from &self.
+    updated_at: AtomicI64,
 
     enum_strategy: EnumStrategy,
 
-    /// Custom multipliers (OMC - Orama Custom Multiplier) for documents.
-    /// These multipliers are applied to document scores during search.
-    /// The first HashMap is uncommitted OMC values, the second is committed.
-    omc: OramaAsyncLock<(HashMap<DocumentId, f32>, HashMap<DocumentId, f32>)>,
+    /// Uncommitted OMC (Orama Custom Multiplier) entries as an append-only log.
+    /// Insert path pushes entries here; commit drains them position-based.
+    /// Uses Mutex for brief append-only access (same pattern as oramacore_fields' LiveLayer).
+    omc_uncommitted: Mutex<Vec<(DocumentId, f32)>>,
+
+    /// Committed OMC values merged from the uncommitted log during commit.
+    /// Search reads this (read lock) to get document multipliers.
+    omc_committed: RwLock<HashMap<DocumentId, f32>>,
 }
 
 impl Index {
@@ -193,7 +199,7 @@ impl Index {
 
             data_dir,
 
-            document_count: 0,
+            document_count: AtomicU64::new(0),
             uncommitted_deleted_documents: HashSet::new(),
 
             bool_fields: HashMap::new(),
@@ -211,11 +217,12 @@ impl Index {
             is_new: AtomicBool::new(true),
 
             created_at: Utc::now(),
-            updated_at: Utc::now(),
+            updated_at: AtomicI64::new(Utc::now().timestamp_millis()),
 
             enum_strategy,
 
-            omc: OramaAsyncLock::new("omc", (HashMap::new(), HashMap::new())),
+            omc_uncommitted: Mutex::new(Vec::new()),
+            omc_committed: RwLock::new(HashMap::new()),
         }
     }
 
@@ -362,7 +369,7 @@ impl Index {
 
             data_dir,
 
-            document_count: dump.document_count,
+            document_count: AtomicU64::new(dump.document_count),
             uncommitted_deleted_documents: HashSet::new(),
 
             bool_fields,
@@ -380,12 +387,13 @@ impl Index {
             is_new: AtomicBool::new(false),
 
             created_at: dump.created_at,
-            updated_at: dump.updated_at,
+            updated_at: AtomicI64::new(dump.updated_at.timestamp_millis()),
 
             enum_strategy: dump.enum_strategy,
 
             // Use OMC loaded from dedicated file or from dump (backward compatibility)
-            omc: OramaAsyncLock::new("omc", (HashMap::new(), committed_omc)),
+            omc_uncommitted: Mutex::new(Vec::new()),
+            omc_committed: RwLock::new(committed_omc),
         })
     }
 
@@ -400,7 +408,7 @@ impl Index {
         );
 
         IndexSearchStore {
-            document_count: self.document_count,
+            document_count: self.document_count.load(Ordering::Relaxed),
             committed_fields,
             uncommitted_fields,
             bool_fields: &self.bool_fields,
@@ -420,7 +428,7 @@ impl Index {
     pub async fn get_all_document_ids(&self) -> Result<Vec<DocumentId>> {
         let context = token_score::TokenScoreContext::new(
             self.id,
-            self.document_count,
+            self.document_count.load(Ordering::Relaxed),
             &self.embedding_fields,
             &self.string_fields,
             &self.text_parser,
@@ -594,38 +602,56 @@ impl Index {
         drop(uncommitted_fields);
         drop(committed_fields);
 
-        // Merge and commit OMC values
-        // Get write lock to merge uncommitted_omc into committed_omc
-        let mut omc_lock = self.omc.write("commit").await;
+        // Merge OMC values using position-based draining (same pattern as oramacore_fields).
+        // 1. Snapshot the uncommitted log: record its length so concurrent inserts are preserved.
+        let omc_snapshot = {
+            let omc_uncommitted = self
+                .omc_uncommitted
+                .lock()
+                .expect("omc_uncommitted lock poisoned during commit");
+            let snapshot_len = omc_uncommitted.len();
+            let snapshot: Vec<_> = omc_uncommitted[..snapshot_len].to_vec();
+            (snapshot, snapshot_len)
+        };
+        let (omc_snapshot_entries, omc_snapshot_len) = omc_snapshot;
 
-        // Collect uncommitted OMC values first to avoid borrow issues
-        let uncommitted_omc_values: Vec<_> = omc_lock.0.drain().collect();
-
-        // Merge uncommitted OMC into committed OMC
-        for (doc_id, multiplier) in uncommitted_omc_values {
-            omc_lock.1.insert(doc_id, multiplier);
+        // 2. Merge snapshot entries into committed OMC and remove deleted docs.
+        let mut omc_committed = self
+            .omc_committed
+            .write()
+            .expect("omc_committed lock poisoned during commit");
+        for (doc_id, multiplier) in omc_snapshot_entries {
+            omc_committed.insert(doc_id, multiplier);
         }
-
-        // Remove deleted documents from committed OMC
         for doc_id in &self.uncommitted_deleted_documents {
-            omc_lock.1.remove(doc_id);
+            omc_committed.remove(doc_id);
         }
 
         // Save OMC to dedicated versioned file (only if not empty)
-        if !omc_lock.1.is_empty() {
+        if !omc_committed.is_empty() {
             let omc_dump = OmcDump::V1(OmcDumpV1 {
-                data: omc_lock.1.clone(),
+                data: omc_committed.clone(),
             });
             BufferedFile::create_or_overwrite(data_dir.join("omc.bin"))
                 .context("Cannot create omc.bin")?
                 .write_bincode_data(&omc_dump)
                 .context("Cannot write omc.bin")?;
         }
-        drop(omc_lock);
+        drop(omc_committed);
+
+        // 3. Drain only the entries that were snapshotted. Concurrent inserts at
+        //    indices omc_snapshot_len.. are preserved for the next commit cycle.
+        {
+            let mut omc_uncommitted = self
+                .omc_uncommitted
+                .lock()
+                .expect("omc_uncommitted lock poisoned during commit drain");
+            omc_uncommitted.drain(..omc_snapshot_len);
+        }
 
         let dump = Dump::V1(DumpV1 {
             id: self.id,
-            document_count: self.document_count,
+            document_count: self.document_count.load(Ordering::Relaxed),
             locale: self.locale,
             aliases: self.aliases.clone(),
             bool_field_ids: self
@@ -666,7 +692,8 @@ impl Index {
             // Not used anymore. We calculate it on the fly
             path_to_index_id_map: Vec::new(),
             created_at: self.created_at,
-            updated_at: self.updated_at,
+            updated_at: DateTime::from_timestamp_millis(self.updated_at.load(Ordering::Relaxed))
+                .unwrap_or(self.created_at),
             enum_strategy: self.enum_strategy,
             // OMC is now stored in dedicated omc.bin file; set to None for new data
             ocm: None,
@@ -845,7 +872,8 @@ impl Index {
         self.promoted_to_runtime_index
             .store(true, Ordering::Relaxed);
         // We need to update the created_at and updated_at fields
-        self.updated_at = Utc::now();
+        self.updated_at
+            .store(Utc::now().timestamp_millis(), Ordering::Relaxed);
 
         // Relocate bool fields from temp_indexes/ path to the permanent indexes/ path.
         // Other fields handle this in commit() via merge_type + copy_items,
@@ -1202,7 +1230,8 @@ impl Index {
     pub fn mark_as_deleted(&mut self, reason: DeletionReason) {
         debug_assert!(self.deleted.is_none(), "Index is already deleted");
         self.deleted = Some(reason);
-        self.updated_at = Utc::now();
+        self.updated_at
+            .store(Utc::now().timestamp_millis(), Ordering::Relaxed);
     }
 
     pub fn get_deletion_reason(&self) -> Option<DeletionReason> {
@@ -1213,8 +1242,10 @@ impl Index {
         self.deleted.is_some()
     }
 
-    pub fn update(&mut self, op: IndexWriteOperation) -> Result<()> {
-        self.updated_at = Utc::now();
+    /// Structural changes that require exclusive access (field creation).
+    pub fn update_structure(&mut self, op: IndexWriteOperation) -> Result<()> {
+        self.updated_at
+            .store(Utc::now().timestamp_millis(), Ordering::Relaxed);
         match op {
             IndexWriteOperation::CreateField2 {
                 field_id,
@@ -1229,8 +1260,6 @@ impl Index {
                             field_id,
                             FieldType::Bool,
                         );
-                        // Create BoolFieldStorage with a stable path under the index data dir.
-                        // data_dir is always known from construction time.
                         let bool_base_path =
                             self.data_dir.join("bool").join(field_id.0.to_string());
                         let storage = BoolFieldStorage::new(field_path, bool_base_path)
@@ -1243,7 +1272,6 @@ impl Index {
                             field_id,
                             FieldType::Number,
                         );
-                        // Create NumberFieldStorage with a stable path under the index data dir.
                         let number_base_path =
                             self.data_dir.join("number").join(field_id.0.to_string());
                         let storage = NumberFieldStorage::new(field_path, number_base_path)
@@ -1256,7 +1284,6 @@ impl Index {
                             field_id,
                             FieldType::StringFilter,
                         );
-                        // Create StringFilterFieldStorage with a stable path under the index data dir.
                         let string_filter_base_path = self
                             .data_dir
                             .join("string_filter")
@@ -1272,7 +1299,6 @@ impl Index {
                             field_id,
                             FieldType::Date,
                         );
-                        // Create DateFieldStorage with a stable path under the index data dir.
                         let date_base_path =
                             self.data_dir.join("date").join(field_id.0.to_string());
                         let storage = DateFieldStorage::new(field_path, date_base_path)
@@ -1317,11 +1343,121 @@ impl Index {
                     }
                 };
             }
+            IndexWriteOperation::DeleteDocuments { doc_ids } => {
+                let len = doc_ids.len() as u64;
+
+                // Also remove OMC values for deleted documents.
+                // This runs under &mut self (indexes.write() held), so exclusive access is guaranteed.
+                {
+                    let mut omc_uncommitted = self
+                        .omc_uncommitted
+                        .lock()
+                        .expect("omc_uncommitted lock poisoned");
+                    omc_uncommitted.retain(|(id, _)| !doc_ids.contains(id));
+                }
+                {
+                    let mut omc_committed = self
+                        .omc_committed
+                        .write()
+                        .expect("omc_committed lock poisoned");
+                    for doc_id in &doc_ids {
+                        omc_committed.remove(doc_id);
+                    }
+                }
+
+                // Delete from bool fields directly (they manage their own deletion)
+                for doc_id in &doc_ids {
+                    for bool_field in self.bool_fields.values() {
+                        bool_field.delete(*doc_id);
+                    }
+                }
+
+                // Delete from geopoint fields directly (they manage their own deletion)
+                for doc_id in &doc_ids {
+                    for geopoint_field in self.geopoint_fields.values() {
+                        geopoint_field.delete(*doc_id);
+                    }
+                }
+
+                // Delete from string_filter fields directly (they manage their own deletion)
+                for doc_id in &doc_ids {
+                    for string_filter_field in self.string_filter_fields.values() {
+                        string_filter_field.delete(*doc_id);
+                    }
+                }
+
+                // Delete from date fields directly (they manage their own deletion via I64Storage)
+                for doc_id in &doc_ids {
+                    for date_field in self.date_fields.values() {
+                        date_field.delete(*doc_id);
+                    }
+                }
+
+                // Delete from number fields directly (they manage their own deletion via dual I64/F64 storages)
+                for doc_id in &doc_ids {
+                    for number_field in self.number_fields.values() {
+                        number_field.delete(*doc_id);
+                    }
+                }
+
+                // Delete from embedding fields directly (they manage their own deletion via EmbeddingStorage)
+                for doc_id in &doc_ids {
+                    for embedding_field in self.embedding_fields.values() {
+                        embedding_field.delete(*doc_id);
+                    }
+                }
+
+                // Delete from string fields directly (they manage their own deletion via StringStorage)
+                for doc_id in &doc_ids {
+                    for string_field in self.string_fields.values() {
+                        string_field.delete(*doc_id);
+                    }
+                }
+
+                self.uncommitted_deleted_documents.extend(doc_ids);
+                // Atomically subtract, clamping at zero
+                let _ = self.document_count.fetch_update(
+                    Ordering::Relaxed,
+                    Ordering::Relaxed,
+                    |current| Some(current.saturating_sub(len)),
+                );
+            }
+            other => {
+                // Delegate document-level operations to update_data()
+                return self.update_data(other);
+            }
+        };
+
+        Ok(())
+    }
+
+    /// Document insertion operations that work with shared access (&self).
+    /// Handles Index, Index2, IndexEmbedding, PinRule.
+    pub fn update_data(&self, op: IndexWriteOperation) -> Result<()> {
+        self.updated_at
+            .store(Utc::now().timestamp_millis(), Ordering::Relaxed);
+        match op {
+            IndexWriteOperation::CreateField2 { .. } => {
+                debug_panic!(
+                    "CreateField2 requires exclusive access; use update_structure() instead"
+                );
+                anyhow::bail!(
+                    "CreateField2 requires exclusive access; use update_structure() instead"
+                );
+            }
+            IndexWriteOperation::DeleteDocuments { .. } => {
+                debug_panic!(
+                    "DeleteDocuments requires exclusive access; use update_structure() instead"
+                );
+                anyhow::bail!(
+                    "DeleteDocuments requires exclusive access; use update_structure() instead"
+                );
+            }
             IndexWriteOperation::Index {
                 doc_id,
                 indexed_values,
             } => {
-                self.document_count += 1;
+                self.document_count.fetch_add(1, Ordering::Relaxed);
                 for indexed_value in indexed_values {
                     match indexed_value {
                         IndexedValue::FilterBool(field_id, bool_value) => {
@@ -1433,12 +1569,15 @@ impl Index {
                 omc,
             } => {
                 // Handle Index2: same as Index but also stores the OMC value if present
-                self.document_count += 1;
+                self.document_count.fetch_add(1, Ordering::Relaxed);
 
-                // Store OMC value if provided
+                // Append OMC value to the uncommitted log (brief lock, append-only).
                 if let Some(multiplier) = omc {
-                    let (ref mut uncommitted_omc, _) = *self.omc.get_mut();
-                    uncommitted_omc.insert(doc_id, multiplier);
+                    let mut omc_uncommitted = self
+                        .omc_uncommitted
+                        .lock()
+                        .expect("omc_uncommitted lock poisoned");
+                    omc_uncommitted.push((doc_id, multiplier));
                 }
 
                 for indexed_value in indexed_values {
@@ -1557,68 +1696,6 @@ impl Index {
                     }
                 }
             }
-            IndexWriteOperation::DeleteDocuments { doc_ids } => {
-                let len = doc_ids.len() as u64;
-
-                // Also remove OMC values for deleted documents
-                let (ref mut uncommitted_omc, ref mut committed_omc) = *self.omc.get_mut();
-                for doc_id in &doc_ids {
-                    uncommitted_omc.remove(doc_id);
-                    committed_omc.remove(doc_id);
-                }
-
-                // Delete from bool fields directly (they manage their own deletion)
-                for doc_id in &doc_ids {
-                    for bool_field in self.bool_fields.values() {
-                        bool_field.delete(*doc_id);
-                    }
-                }
-
-                // Delete from geopoint fields directly (they manage their own deletion)
-                for doc_id in &doc_ids {
-                    for geopoint_field in self.geopoint_fields.values() {
-                        geopoint_field.delete(*doc_id);
-                    }
-                }
-
-                // Delete from string_filter fields directly (they manage their own deletion)
-                for doc_id in &doc_ids {
-                    for string_filter_field in self.string_filter_fields.values() {
-                        string_filter_field.delete(*doc_id);
-                    }
-                }
-
-                // Delete from date fields directly (they manage their own deletion via I64Storage)
-                for doc_id in &doc_ids {
-                    for date_field in self.date_fields.values() {
-                        date_field.delete(*doc_id);
-                    }
-                }
-
-                // Delete from number fields directly (they manage their own deletion via dual I64/F64 storages)
-                for doc_id in &doc_ids {
-                    for number_field in self.number_fields.values() {
-                        number_field.delete(*doc_id);
-                    }
-                }
-
-                // Delete from embedding fields directly (they manage their own deletion via EmbeddingStorage)
-                for doc_id in &doc_ids {
-                    for embedding_field in self.embedding_fields.values() {
-                        embedding_field.delete(*doc_id);
-                    }
-                }
-
-                // Delete from string fields directly (they manage their own deletion via StringStorage)
-                for doc_id in &doc_ids {
-                    for string_field in self.string_fields.values() {
-                        string_field.delete(*doc_id);
-                    }
-                }
-
-                self.uncommitted_deleted_documents.extend(doc_ids);
-                self.document_count = self.document_count.saturating_sub(len);
-            }
             IndexWriteOperation::PinRule(_) => {
                 warn!("Ignore this rule");
             }
@@ -1637,15 +1714,28 @@ impl Index {
             .is_some()
     }
 
-    /// Get all OMC values at once for batch operations.
-    /// Returns a reference to both uncommitted and committed OMC maps.
-    pub async fn get_all_omc(
-        &self,
-    ) -> crate::lock::OramaAsyncLockReadGuard<
-        '_,
-        (HashMap<DocumentId, f32>, HashMap<DocumentId, f32>),
-    > {
-        self.omc.read("get_all_omc").await
+    /// Get all OMC values by merging both the committed map and the uncommitted log.
+    /// Returns a single HashMap with the latest multiplier for each document.
+    /// Uncommitted entries override committed ones (last-writer wins).
+    pub fn get_all_omc(&self) -> HashMap<DocumentId, f32> {
+        let committed = self
+            .omc_committed
+            .read()
+            .expect("omc_committed lock poisoned");
+        let mut merged = committed.clone();
+        drop(committed);
+
+        let uncommitted = self
+            .omc_uncommitted
+            .lock()
+            .expect("omc_uncommitted lock poisoned");
+        // Apply uncommitted entries on top (last entry for a doc_id wins)
+        for &(doc_id, multiplier) in uncommitted.iter() {
+            merged.insert(doc_id, multiplier);
+        }
+        drop(uncommitted);
+
+        merged
     }
 
     // Since we only have one embedding model for all indexes in a collection,
@@ -1731,11 +1821,12 @@ impl Index {
         Ok(IndexStats {
             id: self.id,
             default_locale: self.locale,
-            document_count: self.document_count as usize,
+            document_count: self.document_count.load(Ordering::Relaxed) as usize,
             is_temp,
             fields_stats,
             created_at: self.created_at,
-            updated_at: self.updated_at,
+            updated_at: DateTime::from_timestamp_millis(self.updated_at.load(Ordering::Relaxed))
+                .unwrap_or(self.created_at),
             type_parsing_strategies: TypeParsingStrategies {
                 enum_strategy: self.enum_strategy,
             },
@@ -1743,7 +1834,7 @@ impl Index {
     }
 
     pub fn document_count(&self) -> u64 {
-        self.document_count
+        self.document_count.load(Ordering::Relaxed)
     }
 }
 

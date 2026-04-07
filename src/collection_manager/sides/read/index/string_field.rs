@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use oramacore_fields::string::{
     ContributionsResult, DocumentFilter, IndexedValue as StringIndexedValue, SearchParams,
-    StringStorage, TermData, Threshold,
+    SegmentConfig, StringStorage, TermData,
 };
 use oramacore_lib::filters::FilterResult;
 use serde::Serialize;
@@ -15,6 +15,17 @@ use crate::{
 };
 
 use super::committed_field::StringFieldInfo;
+
+/// Returns the SegmentConfig tuned for OramaCore's workload.
+/// We raise `max_postings_per_segment` from the library default (5M) to 50M
+/// because all segments are scanned on every search — fewer, larger segments
+/// means fewer FST lookups per query token.
+fn oramacore_segment_config() -> SegmentConfig {
+    SegmentConfig {
+        max_postings_per_segment: 50_000_000,
+        ..Default::default()
+    }
+}
 
 /// Wrapper around `oramacore_fields::string::StringStorage` that provides
 /// a unified string (fulltext/BM25) field with built-in persistence.
@@ -61,7 +72,7 @@ impl DocumentFilter for DocIdSetFilter<'_> {
 impl StringFieldStorage {
     /// Creates a new StringFieldStorage at the given path.
     pub fn new(field_path: Box<[String]>, base_path: PathBuf) -> Result<Self> {
-        let storage = StringStorage::new(base_path.clone(), Threshold::default())
+        let storage = StringStorage::new(base_path.clone(), oramacore_segment_config())
             .context("Failed to create StringStorage")?;
         Ok(Self {
             field_path,
@@ -82,7 +93,7 @@ impl StringFieldStorage {
             // then insert them into the new StringStorage.
             use super::committed_field::string::load_old_fst_data;
 
-            let storage = StringStorage::new(base_path.clone(), Threshold::default())
+            let storage = StringStorage::new(base_path.clone(), oramacore_segment_config())
                 .context("Failed to create StringStorage for migration")?;
 
             let entries = load_old_fst_data(&base_path)
@@ -122,7 +133,7 @@ impl StringFieldStorage {
             })
         } else {
             // New format or already migrated: StringStorage loads its own CURRENT/versions/ structure
-            let storage = StringStorage::new(base_path.clone(), Threshold::default())
+            let storage = StringStorage::new(base_path.clone(), oramacore_segment_config())
                 .context("Failed to load StringStorage")?;
             Ok(Self {
                 field_path: info.field_path,

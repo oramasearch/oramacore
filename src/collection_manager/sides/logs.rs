@@ -45,12 +45,14 @@ impl HookLogs {
             .channels
             .write("get_sender")
             .expect("This lock should never panic");
-        if let Some(entry) = lock.get_mut(collection_id) {
+        let result = if let Some(entry) = lock.get_mut(collection_id) {
             entry.last_used = Instant::now();
             Some(entry.sender.clone())
         } else {
             None
-        }
+        };
+        drop(lock);
+        result
     }
 
     pub fn get_or_create_receiver(
