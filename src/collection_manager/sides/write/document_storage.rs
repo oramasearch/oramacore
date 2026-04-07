@@ -31,7 +31,7 @@ impl DocumentStorage {
         create_if_not_exists(&zebo_dir).context("Cannot create zebo directory")?;
 
         let zebo_index_path = zebo_dir.join("index");
-        let zebo = if std::fs::exists(zebo_index_path).unwrap_or(false) {
+        let mut zebo = if std::fs::exists(zebo_index_path).unwrap_or(false) {
             info!("Zebo index exists");
             Zebo::try_new(zebo_dir).context("Cannot create zebo")?
         } else {
@@ -40,6 +40,8 @@ impl DocumentStorage {
                 .await
                 .context("Cannot migrate to zebo")?
         };
+
+        zebo.compact().context("Cannot compact zebo storage")?;
 
         let last = zebo
             .get_last_inserted_document_id()
@@ -56,6 +58,7 @@ impl DocumentStorage {
         if !ids.is_empty() {
             let mut zebo = self.zebo.write("remove").await;
             zebo.remove_documents(ids, false).unwrap();
+            drop(zebo);
         }
     }
 
@@ -128,6 +131,7 @@ impl DocumentStorage {
         let last = zebo
             .get_last_inserted_document_id()
             .context("Cannot get last inserted document id from zebo")?;
+        drop(zebo);
 
         let mut lock = self
             .last_document_id

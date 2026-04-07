@@ -49,7 +49,7 @@ fn main() -> anyhow::Result<()> {
     let oramacore_config = match load_config() {
         Ok(config) => config,
         Err(e) => {
-            error!("Failed to load configuration {e:?}");
+            error!(error =?e, "Failed to load configuration {e:?}");
             eprintln!("Failed to load configuration: {e:?}");
             println!("Failed to load configuration: {e:?}");
             return Err(anyhow!("Failed to load configuration"));

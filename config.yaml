@@ -8,9 +8,7 @@ log:
     # Comment the following line to disable the logging
     file_path: "./log.log"
     levels:
-        oramacore: trace
-        oramacore_lib: trace
-        orama_js_pool: info
+        oramacore: info
 
 writer_side:
     output:
@@ -60,15 +58,15 @@ writer_side:
         # The maximum number of embeddings that can be stored in the queue
         # before the writer starts to be blocked
         # NB: the elements are in memory, so be careful with this value
-        embedding_queue_limit: 50000
+        embedding_queue_limit: 50
         # The number of the document insertions after the write side will commit the changes
-        insert_batch_commit_size: 50000000
+        insert_batch_commit_size: 50000
         # The default embedding model used to calculate the embeddings
         # if not specified in the collection creation
         default_embedding_model: BGESmall
         # The maximum number of request to javascript runtime that can be stored in the queue
         # NB: the elements are in memory, so be careful with this value
-        javascript_queue_limit: 500000
+        javascript_queue_limit: 50
         # Set interval for commiting the changes to the disk
         commit_interval: 1m
         # Temporary index cleanup configuration
@@ -116,7 +114,7 @@ reader_side:
     config:
         data_dir: ./.data/reader
         # The number of the write operation after the read side will commit the changes
-        insert_batch_commit_size: 50000000
+        insert_batch_commit_size: 5000
         # Set interval for commiting the changes to the disk
         commit_interval: 10m
         # Each Nth commit will be forced, regardless of per-collection thresholds
@@ -142,61 +140,6 @@ reader_side:
         # Timeout for hook execution 
         execution_timeout: 1s
 
-    # Uncomment to allow analytics
-    analytics:
-        api_key: my-analytics-api-key
-        metadata_from_headers:
-            -   header: user-agent
-                metadata_key: ua
-            -   header: CF-Connecting-IP
-                metadata_key: ip
-            -   header: CF-IPCountry
-                metadata_key: country
-            -   header: continent
-                metadata_key: continent
-            -   header: colo
-                metadata_key: colo
-            -   header: latitude
-                metadata_key: latitude
-            -   header: longitude
-                metadata_key: longitude
-
-    # Uncomment to enable secrets fetched from external providers (e.g. AWS Secrets Manager).
-    # Secrets are cached in memory with configurable TTL and passed to hooks as a third argument.
-    # Key pattern: oramacore_<collection_uuid>_<secretKey>
-    # Multiple providers can be specified as a list; secrets are merged (later entries override).
-    # secrets_manager:
-    #     - aws:
-    #         region: us-east-1
-    #         ttl: 5m
-    #         access_key_id: test
-    #         secret_access_key: test
-    #     - local:
-    #         secrets:
-    #             col1_TOKEN: my-token
-
-    # Uncomment to enable customer JWT validation for search requests.
-    # This allows customers to use their own identity provider (IdP) for authentication.
-    # The JWT must include an "orak" claim containing the collection's read API key.
-    # Additional claims can be accessed by the beforeSearch hook to apply custom restrictions.
-    # Example JWT claim: {"orak":"c1_my-read-api-key", "country": "US", "iss":"https://issuer"}
-    jwt:
-        providers:
-            -   name: "Supabase"
-                jwks_url: https://czjqejhvicpcufovzrtj.supabase.co/auth/v1/.well-known/jwks.json
-                issuers:
-                    - https://czjqejhvicpcufovzrtj.supabase.co/auth/v1
-                audiences:
-                    - authenticated
-                refresh_interval: 1h
-            # Add more providers as needed for different customers:
-            # - name: "auth0-production"
-            #   jwks_url: https://your-tenant.auth0.com/.well-known/jwks.json
-            #   issuers:
-            #       - https://your-tenant.auth0.com/
-            #   audiences:
-            #       - https://api.yourservice.com
-
 ai_server:
     scheme: http
     host: 0.0.0.0
@@ -211,7 +154,7 @@ ai_server:
         execution_providers:
             #- CUDAExecutionProvider
             - CPUExecutionProvider
-        total_threads: 8
+        total_threads: 2
         # automatic_embeddings_selector:
         #     model: "gpt-4.1"
         #     provider: openai

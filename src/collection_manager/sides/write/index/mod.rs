@@ -224,7 +224,7 @@ impl Index {
                 return Err(anyhow::anyhow!("Field is not an embedding field"));
             }
         };
-        match field.get_embedding_calculation() {
+        let result = match field.get_embedding_calculation() {
             EmbeddingStringCalculation::AllProperties => {
                 Ok(IndexEmbeddingsCalculation::AllProperties)
             }
@@ -236,7 +236,9 @@ impl Index {
                 }
                 Ok(IndexEmbeddingsCalculation::Properties(results))
             }
-        }
+        };
+        drop(score_fields);
+        result
     }
 
     pub async fn add_embedding_field(
@@ -329,6 +331,7 @@ impl Index {
         doc_id_storage
             .commit(data_dir)
             .context("Cannot commit index")?;
+        drop(doc_id_storage);
 
         self.is_dirty.store(false, Ordering::SeqCst);
 
@@ -340,7 +343,9 @@ impl Index {
 
     pub async fn get_document_ids(&self) -> Vec<DocumentId> {
         let doc_id_storage = self.doc_id_storage.read("get").await;
-        doc_id_storage.get_document_ids().collect()
+        let result = doc_id_storage.get_document_ids().collect();
+        drop(doc_id_storage);
+        result
     }
 
     pub async fn reindex_document(
@@ -562,6 +567,8 @@ impl Index {
         } else {
             None
         };
+        drop(filter_fields);
+        drop(score_fields);
 
         DescribeCollectionIndexResponse {
             id: self.index_id,
@@ -574,7 +581,9 @@ impl Index {
 
     pub async fn get_document_count(&self, reason: &'static str) -> usize {
         let doc_id_storage = self.doc_id_storage.read(reason).await;
-        doc_id_storage.len()
+        let result = doc_id_storage.len();
+        drop(doc_id_storage);
+        result
     }
 
     pub async fn add_fields_if_needed(&self, docs: &DocumentList) -> Result<()> {

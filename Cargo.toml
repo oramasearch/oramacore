@@ -55,7 +55,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 
 oramacore_lib = "0.4.4"
-oramacore_fields = { version = "0.1.2", features = ["serde"] }
+oramacore_fields = { version = "0.2.0", features = ["serde"] }
 
 # JS
 oxc_parser = "0.47.1"
@@ -71,7 +71,7 @@ cuid2 = "0.1.4"
 
 redact = { version = "0.1", features = ["serde"] }
 duration-str = "0.12.0"
-rabbitmq-stream-client = { git = "https://github.com/rabbitmq/rabbitmq-stream-rust-client.git", branch = "fix-credit-zero", features = ["serde"] }
+rabbitmq-stream-client = { version = "0.11.0", features = ["serde"] }
 backoff = { version = "0.4.0", features = ["tokio"] }
 debug_panic = "0.2.1"
 async-openai = "0.28.0"
@@ -86,7 +86,7 @@ reqwest = { version = "0.12", features = ["json"] }
 fs_extra = "1.3.0"
 rustls = "0.23.26"
 
-zebo = "0.5.2"
+zebo = "0.5.3"
 llm_json = "1.0.2"
 dateparser = "0.2.1"
 jwt-authorizer = "0.15"
@@ -114,6 +114,10 @@ eventsource-stream = "0.2"
 [[bin]]
 name = "oramacore"
 path = "src/bin/oramacore.rs"
+
+[[bin]]
+name = "load_transcripts"
+path = "src/bin/load_transcripts.rs"
 
 # [[bench]]
 # name = "phrase_match"

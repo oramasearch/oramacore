@@ -127,7 +127,7 @@ impl OperationReceiver {
                         match bincode::deserialize(&data).context("Cannot deserialize operation") {
                             Ok(op) => op,
                             Err(e) => {
-                                error!("Error deserializing message: {:?}", e);
+                                error!(error =?e,"Error deserializing message: {:?}", e);
                                 return None;
                             }
                         };
@@ -136,7 +136,7 @@ impl OperationReceiver {
                 }
                 Err(tokio::sync::mpsc::error::TryRecvError::Empty) => None,
                 Err(e) => {
-                    error!("Error receiving message: {:?}", e);
+                    error!(error =?e,"Error receiving message: {:?}", e);
                     None
                 }
             },
@@ -159,7 +159,7 @@ impl OperationReceiver {
                     match bincode::deserialize(&data).context("Cannot deserialize operation") {
                         Ok(op) => op,
                         Err(e) => {
-                            error!("Error deserializing message: {:?}", e);
+                            error!(error =?e,"Error deserializing message: {:?}", e);
                             return None;
                         }
                     };

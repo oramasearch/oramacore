@@ -69,7 +69,7 @@ impl SearchService {
 
     fn search_json(&self, params_json: String) -> PyResult<String> {
         let search_params: SearchParams = serde_json::from_str(&params_json).map_err(|e| {
-            tracing::error!("Failed to parse MCP search params JSON: {}", e);
+            tracing::error!(error =?e, "Failed to parse MCP search params JSON: {}", e);
             PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
                 "Failed to parse MCP search params JSON: {e}"
             ))
@@ -111,7 +111,7 @@ impl SearchService {
     fn nlp_search(&self, py: Python, params: Bound<'_, PyDict>) -> PyResult<Py<PyAny>> {
         let nlp_request: NLPSearchRequest =
             serde_pyobject::from_pyobject(params.clone()).map_err(|e| {
-                tracing::error!("Failed to deserialize MCP NLP search params: {}", e);
+                tracing::error!(error =?e,"Failed to deserialize MCP NLP search params: {}", e);
                 PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
                     "Failed to deserialize MCP NLP search params: {e}"
                 ))

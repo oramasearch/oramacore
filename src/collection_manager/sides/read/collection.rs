@@ -33,7 +33,7 @@ use crate::{
             ReadError,
         },
         write::index::EnumStrategy,
-        CollectionWriteOperation, Offset, ReplaceIndexReason,
+        CollectionWriteOperation, IndexWriteOperation, Offset, ReplaceIndexReason,
     },
     lock::{OramaAsyncLock, OramaAsyncLockReadGuard, OramaAsyncLockWriteGuard, OramaSyncLock},
     types::{
@@ -412,7 +412,12 @@ impl CollectionReader {
                 .context("Cannot write collection.json")?;
 
             let offset = match dump {
-                Dump::V1(_) => **self.offset.read("commit").await,
+                Dump::V1(_) => {
+                    let offset_lock = self.offset.read("commit").await;
+                    let offset = **offset_lock;
+                    drop(offset_lock);
+                    offset
+                }
                 Dump::V2(v2) => v2.offset,
             };
 
@@ -435,7 +440,9 @@ impl CollectionReader {
         //     Hence, we don't need to do anything here.
 
         // Read current offset - this is what we actually processed
-        let offset = **self.offset.read("commit").await;
+        let offset_lock = self.offset.read("commit").await;
+        let offset = **offset_lock;
+        drop(offset_lock);
 
         self.document_storage.commit(offset).await?;
 
@@ -531,17 +538,29 @@ impl CollectionReader {
         drop(values_lock);
 
         // Save DumpV2 with single offset
+        let mcp_desc_lock = self.mcp_description.read("commit").await;
+        let mcp_description = mcp_desc_lock.clone();
+        drop(mcp_desc_lock);
+
+        let read_api_key_lock = self.read_api_key.read("commit").await;
+        let read_api_key = **read_api_key_lock;
+        drop(read_api_key_lock);
+
+        let updated_at_lock = self.updated_at.read("commit").await;
+        let updated_at = **updated_at_lock;
+        drop(updated_at_lock);
+
         let dump = Dump::V2(DumpV2 {
             id: self.id,
             description: self.description.clone(),
-            mcp_description: self.mcp_description.read("commit").await.clone(),
+            mcp_description,
             default_locale: self.default_locale,
-            read_api_key: **self.read_api_key.read("commit").await,
+            read_api_key,
             write_api_key: self.write_api_key,
             index_ids,
             temp_index_ids,
             created_at: self.created_at,
-            updated_at: **self.updated_at.read("commit").await,
+            updated_at,
             // Per-collection offset tracking - single unified offset
             offset,
         });
@@ -669,31 +688,30 @@ impl CollectionReader {
         master_api_key: Option<ApiKey>,
     ) -> Result<(), ReadError> {
         let read_api_key = self.read_api_key.read("check_read_api_key").await;
-        match api_key {
+        let result = match api_key {
             ReadApiKey::ApiKey(api_key) => {
                 if *api_key == **read_api_key {
-                    return Ok(());
-                }
-                if let Some(write_api_key) = self.write_api_key {
-                    if write_api_key == *api_key {
-                        return Ok(());
-                    }
-                }
-                if let Some(master_api_key) = master_api_key {
-                    if master_api_key == *api_key {
-                        return Ok(());
-                    }
+                    Ok(())
+                } else if self.write_api_key.is_some_and(|wk| wk == *api_key) {
+                    Ok(())
+                } else if master_api_key.is_some_and(|mk| mk == *api_key) {
+                    Ok(())
+                } else {
+                    Err(ReadError::Generic(anyhow!("Invalid read api key")))
                 }
             }
             ReadApiKey::Claims(claims) => {
                 // For JWT claims, verify the orak matches this collection's read API key
                 if claims.orak == **read_api_key {
-                    return Ok(());
+                    Ok(())
+                } else {
+                    Err(ReadError::Generic(anyhow!("Invalid read api key")))
                 }
             }
-        }
+        };
+        drop(read_api_key);
 
-        Err(ReadError::Generic(anyhow!("Invalid read api key")))
+        result
     }
 
     #[inline]
@@ -870,11 +888,14 @@ impl CollectionReader {
         IndexReadLock::try_new(indexes_lock, index_id)
     }
 
+    /// Applies a write operation to this collection.
+    /// Returns `true` if the collection's pending operation threshold has been reached
+    /// and it requests to be committed.
     pub async fn update(
         &self,
         offset: Offset,
         collection_operation: CollectionWriteOperation,
-    ) -> Result<()> {
+    ) -> Result<bool> {
         // Check if operation already applied to THIS collection
         let current = self.offset.read("update").await;
         if offset <= **current && !current.is_zero() {
@@ -883,7 +904,7 @@ impl CollectionReader {
                 offset=?offset,
                 "Already applied to this collection"
             );
-            return Ok(());
+            return Ok(false);
         }
         drop(current);
 
@@ -992,19 +1013,42 @@ impl CollectionReader {
                 }
             }
             CollectionWriteOperation::IndexWriteOperation(index_id, index_op) => {
-                let temp_index = self.get_temp_index_mut(index_id).await;
-                if let Some(mut temp_index) = temp_index {
-                    temp_index
-                        .update(index_op)
-                        .with_context(|| format!("Cannot update index {index_id:?}"))?;
-                } else {
-                    let index = self.get_index_mut(index_id).await;
-                    let Some(mut index) = index else {
-                        bail!("Index {index_id} not found")
-                    };
-                    index
-                        .update(index_op)
-                        .with_context(|| format!("Cannot update index {index_id:?}"))?;
+                match &index_op {
+                    IndexWriteOperation::CreateField2 { .. }
+                    | IndexWriteOperation::DeleteDocuments { .. } => {
+                        // Structural/mutating changes: needs write lock + &mut self
+                        let temp_index = self.get_temp_index_mut(index_id).await;
+                        if let Some(mut temp_index) = temp_index {
+                            temp_index.update_structure(index_op).with_context(|| {
+                                format!("Cannot update_structure index {index_id:?}")
+                            })?;
+                        } else {
+                            let index = self.get_index_mut(index_id).await;
+                            let Some(mut index) = index else {
+                                bail!("Index {index_id} not found")
+                            };
+                            index.update_structure(index_op).with_context(|| {
+                                format!("Cannot update_structure index {index_id:?}")
+                            })?;
+                        }
+                    }
+                    _ => {
+                        // Document operations: read lock + &self is sufficient
+                        let temp_index = self.get_temp_index(index_id).await;
+                        if let Some(temp_index) = temp_index {
+                            temp_index
+                                .update_data(index_op)
+                                .with_context(|| format!("Cannot update index {index_id:?}"))?;
+                        } else {
+                            let index = self.get_index(index_id).await;
+                            let Some(index) = index else {
+                                bail!("Index {index_id} not found")
+                            };
+                            index
+                                .update_data(index_op)
+                                .with_context(|| format!("Cannot update index {index_id:?}"))?;
+                        }
+                    }
                 }
             }
             CollectionWriteOperation::ReplaceIndex {
@@ -1071,7 +1115,7 @@ impl CollectionReader {
                             info!("Collection {} notified", self.id);
                         }
                         Err(e) => {
-                            error!("Error notifying collection {}: {:?}", self.id, e);
+                            error!(error =?e, "Error notifying collection {}: {:?}", self.id, e);
                         }
                     }
                 }
@@ -1149,21 +1193,24 @@ impl CollectionReader {
         **current = offset;
         drop(current);
 
-        // Commit collection if threshold reached
-        // NB: this commits only this collection
+        // Signal whether this collection wants to be committed
         let pending = self.pending_operations.fetch_add(1, Ordering::SeqCst) + 1;
-        if pending >= self.commit_config.operation_threshold {
+        let needs_commit = pending >= self.commit_config.operation_threshold;
+        if needs_commit {
+            // Reset the counter immediately so subsequent updates don't keep
+            // triggering commit requests while the commit loop processes this one.
+            // The commit will still reset to 0 on completion, but this prevents
+            // every update after the threshold from flooding the commit channel.
+            self.pending_operations.store(0, Ordering::SeqCst);
             info!(
                 collection_id=?self.id,
                 offset=?offset,
                 pending=pending,
-                "Collection threshold reached, committing"
+                "Collection threshold reached, requesting commit"
             );
-            // Force commit since we've reached the per-collection threshold
-            self.commit(true).await?;
         }
 
-        Ok(())
+        Ok(needs_commit)
     }
 
     pub fn get_document_storage(&self) -> &CollectionDocumentStorage {
@@ -1172,12 +1219,18 @@ impl CollectionReader {
 
     /// Gets a collection value by key from the reader.
     pub async fn get_value(&self, key: &str) -> Option<String> {
-        self.values_reader.read("get_value").await.get(key)
+        let lock = self.values_reader.read("get_value").await;
+        let result = lock.get(key);
+        drop(lock);
+        result
     }
 
     /// Returns all collection values from the reader as a shared reference.
     pub async fn list_values(&self) -> Arc<HashMap<String, String>> {
-        self.values_reader.read("list_values").await.list()
+        let lock = self.values_reader.read("list_values").await;
+        let result = lock.list();
+        drop(lock);
+        result
     }
 
     pub async fn stats(&self, _req: CollectionStatsRequest) -> Result<CollectionStats, ReadError> {
@@ -1209,6 +1262,7 @@ impl CollectionReader {
             }
             indexes_stats.push(i.stats(true).await?);
         }
+        drop(temp_indexes_lock);
 
         let lock = self.hooks_reader.read("stats").await;
         let hooks = lock.list()?;
@@ -1218,7 +1272,17 @@ impl CollectionReader {
             .collect();
         drop(lock);
 
-        let values_count = self.values_reader.read("stats").await.count();
+        let values_reader_lock = self.values_reader.read("stats").await;
+        let values_count = values_reader_lock.count();
+        drop(values_reader_lock);
+
+        let mcp_description_lock = self.mcp_description.read("stats").await;
+        let mcp_description = mcp_description_lock.clone();
+        drop(mcp_description_lock);
+
+        let updated_at_lock = self.updated_at.read("stats").await;
+        let updated_at = **updated_at_lock;
+        drop(updated_at_lock);
 
         Ok(CollectionStats {
             id: self.get_id(),
@@ -1227,14 +1291,14 @@ impl CollectionReader {
                 .map(|i| i.document_count)
                 .sum::<usize>(),
             description: self.description.clone(),
-            mcp_description: self.mcp_description.read("stats").await.clone(),
+            mcp_description,
             default_locale: self.default_locale,
             embedding_model,
             indexes_stats,
             hooks,
             values_count,
             created_at: self.created_at,
-            updated_at: **self.updated_at.read("stats").await,
+            updated_at,
         })
     }
 
@@ -1369,6 +1433,13 @@ impl CollectionReader {
         IndexWriteLock::try_new(indexes_lock, index_id)
     }
 
+    /// Read lock variant for temp indexes, used for document-level operations
+    /// that only need &self on Index.
+    async fn get_temp_index(&self, index_id: IndexId) -> Option<IndexReadLock<'_>> {
+        let indexes_lock = self.temp_indexes.read("get_temp_index").await;
+        IndexReadLock::try_new(indexes_lock, index_id)
+    }
+
     pub async fn get_pin_rules_reader(
         &self,
         reason: &'static str,
@@ -1377,13 +1448,15 @@ impl CollectionReader {
     }
 
     pub async fn get_shelf(&self, id: ShelfId) -> Result<Shelf<DocumentId>, ReadError> {
-        let shelves_writer = self.shelves_reader.read("get_shelf").await;
-        shelves_writer
+        let shelves_lock = self.shelves_reader.read("get_shelf").await;
+        let result = shelves_lock
             .list_shelves()
             .iter()
             .find(|shelf| shelf.id == id)
             .cloned()
-            .ok_or_else(|| ReadError::ShelfNotFound(id))
+            .ok_or_else(|| ReadError::ShelfNotFound(id));
+        drop(shelves_lock);
+        result
     }
 
     /// Retrieves the documents for a given shelf in the order specified by the shelf.
@@ -1455,11 +1528,6 @@ impl CollectionReader {
             }
         }
     }
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct Committed {
-    pub epoch: u64,
 }
 
 use derive_more::From;

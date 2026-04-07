@@ -7,7 +7,6 @@ use rabbitmq_stream_client::{
     ClientOptions, Consumer, Environment, NoDedup, OnClosed, Producer,
 };
 use serde::Deserialize;
-use tower_http::trace;
 use std::time::Duration;
 use std::{
     pin::Pin,
@@ -66,7 +65,7 @@ impl OnClosed for MyHAProducer {
         let new_producer = match new_producer {
             Ok(p) => p,
             Err(e) => {
-                error!("Failed to create new producer: {:?}", e);
+                error!(error =?e,"Failed to create new producer: {:?}", e);
                 return;
             }
         };
@@ -76,11 +75,12 @@ impl OnClosed for MyHAProducer {
         if !unconfirmed.is_empty() {
             info!("Resending {} unconfirmed messages.", unconfirmed.len());
             if let Err(e) = producer.batch_send_with_confirm(unconfirmed).await {
-                error!(e = ?e, "Error resending unconfirmed messages.");
+                error!(error =?e, "Error resending unconfirmed messages.");
             }
         }
 
         **producer = new_producer;
+        drop(producer);
 
         self.0
             .is_opened
@@ -356,8 +356,9 @@ impl Stream for RabbitOperationReceiver {
 
         let data = match message.data() {
             None => {
-                error!("No data in message");
-                return Poll::Ready(Some(Err(anyhow::anyhow!("No data in message"))));
+                let e = anyhow::anyhow!("No data in message");
+                error!(error =?e,"No data in message");
+                return Poll::Ready(Some(Err(e)));
             }
             Some(data) => data,
         };

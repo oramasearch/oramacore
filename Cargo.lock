@@ -5311,9 +5311,9 @@ dependencies = [
 
 [[package]]
 name = "oramacore_fields"
-version = "0.1.2"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6996fca99411920d472ba084d985b94087034b2c302f2cc11b50c634f519cb39"
+checksum = "f146a0665e48ab7622e260d27fbb35d2f74a71f03cf3cd3a2fe8d4ac8e9b4010"
 dependencies = [
  "anyhow",
  "arc-swap",
@@ -5979,6 +5979,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "positioned-io"
+version = "0.3.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d4ec4b80060f033312b99b6874025d9503d2af87aef2dd4c516e253fbfcdada7"
+dependencies = [
+ "byteorder",
+ "libc",
+ "winapi",
+]
+
+[[package]]
 name = "potential_utf"
 version = "0.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6304,8 +6315,9 @@ checksum = "f8dcc9c7d52a811697d2151c701e0d08956f92b0e24136cf4cf27b57a6a0d9bf"
 
 [[package]]
 name = "rabbitmq-stream-client"
-version = "0.10.0"
-source = "git+https://github.com/rabbitmq/rabbitmq-stream-rust-client.git?branch=fix-credit-zero#8077edcebca77016da021a828a87fd0e4da99f9a"
+version = "0.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f7e766fd5cccfba5caa077d0b00de81840f0553a15325f22b59e87322f235d10"
 dependencies = [
  "async-trait",
  "bytes",
@@ -6314,7 +6326,7 @@ dependencies = [
  "murmur3",
  "pin-project",
  "rabbitmq-stream-protocol",
- "rand 0.8.5",
+ "rand 0.10.0",
  "rustls-pemfile",
  "serde",
  "thiserror 2.0.18",
@@ -6328,8 +6340,9 @@ dependencies = [
 
 [[package]]
 name = "rabbitmq-stream-protocol"
-version = "0.10.0"
-source = "git+https://github.com/rabbitmq/rabbitmq-stream-rust-client.git?branch=fix-credit-zero#8077edcebca77016da021a828a87fd0e4da99f9a"
+version = "0.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "97fedda81585bf2b5f8b91be49a592d2c91cb060c2c1927840617c52a67d1b7d"
 dependencies = [
  "byteorder",
  "chrono",
@@ -9574,11 +9587,12 @@ dependencies = [
 
 [[package]]
 name = "zebo"
-version = "0.5.2"
+version = "0.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "17b0670d92cf39758cc447e7c74f47f5a4020b683614ee4fa9ae037822103551"
+checksum = "5ed7dc8c4d3dc99b972fa39aa97049c0ef5dfb2eb80ab2e244e4084923b8a08b"
 dependencies = [
  "clap",
+ "positioned-io",
  "tracing",
 ]
 

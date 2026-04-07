@@ -319,14 +319,14 @@ impl TestContext {
             .unwrap()
     }
 
-    pub async fn create_collection(&self) -> Result<TestCollectionClient> {
+    pub async fn create_collection(&self) -> Result<TestCollectionClient<'_>> {
         self.create_collection_with_language(None).await
     }
 
     pub async fn create_collection_with_language(
         &self,
         language: Option<LanguageDTO>,
-    ) -> Result<TestCollectionClient> {
+    ) -> Result<TestCollectionClient<'_>> {
         let id = Self::generate_collection_id();
         let write_api_key = Self::generate_api_key();
         let read_api_key_raw = Self::generate_api_key();
@@ -373,7 +373,7 @@ impl TestContext {
         collection_id: CollectionId,
         write_api_key: WriteApiKey,
         read_api_key: ReadApiKey,
-    ) -> Result<TestCollectionClient> {
+    ) -> Result<TestCollectionClient<'_>> {
         Ok(TestCollectionClient {
             collection_id,
             write_api_key,
@@ -433,7 +433,7 @@ pub struct TestCollectionClient<'test> {
     pub writer: &'test WriteSide,
 }
 impl TestCollectionClient<'_> {
-    pub async fn create_index(&self) -> Result<TestIndexClient> {
+    pub async fn create_index(&self) -> Result<TestIndexClient<'_>> {
         self.create_index_with_explicit_type_strategy(TypeParsingStrategies::default())
             .await
     }
@@ -441,7 +441,7 @@ impl TestCollectionClient<'_> {
     pub async fn create_index_with_explicit_type_strategy(
         &self,
         type_strategy: TypeParsingStrategies,
-    ) -> Result<TestIndexClient> {
+    ) -> Result<TestIndexClient<'_>> {
         let index_id = Self::generate_index_id("index");
         self.writer
             .create_index(
@@ -483,7 +483,7 @@ impl TestCollectionClient<'_> {
         self.get_test_index_client(index_id)
     }
 
-    pub async fn create_temp_index(&self, copy_from: IndexId) -> Result<TestIndexClient> {
+    pub async fn create_temp_index(&self, copy_from: IndexId) -> Result<TestIndexClient<'_>> {
         let index_id = Self::generate_index_id("temp");
         self.writer
             .create_temp_index(
@@ -503,7 +503,7 @@ impl TestCollectionClient<'_> {
         self.get_test_index_client(index_id)
     }
 
-    pub fn get_test_index_client(&self, index_id: IndexId) -> Result<TestIndexClient> {
+    pub fn get_test_index_client(&self, index_id: IndexId) -> Result<TestIndexClient<'_>> {
         Ok(TestIndexClient {
             collection_id: self.collection_id,
             index_id,

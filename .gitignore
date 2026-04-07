@@ -31,3 +31,4 @@ config-local-rabbit.yaml
 *.tar.gz
 
 .venv
+cache
