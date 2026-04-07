@@ -210,7 +210,15 @@ async fn main() -> anyhow::Result<()> {
     create_collection(&client, &config.collection_id).await?;
     create_index(&client, &config.collection_id, &config.index_id).await?;
 
-    // Step 2: Read file line by line and send batches
+    // Step 2: Count total documents in the file
+    let file = std::fs::File::open(&config.file_path)?;
+    let total_lines = BufReader::new(file)
+        .lines()
+        .filter(|l| l.as_ref().map_or(false, |s| !s.trim().is_empty()))
+        .count();
+    println!("Total documents in file: {total_lines}");
+
+    // Step 3: Read file line by line and send batches
     let file = std::fs::File::open(&config.file_path)?;
     let reader = BufReader::new(file);
 
@@ -259,7 +267,7 @@ async fn main() -> anyhow::Result<()> {
             let client = client.clone();
             let collection_id = collection_id.clone();
             let index_id = index_id.clone();
-            let batch_num = total_batches;
+            let docs_so_far = total_docs;
 
             tasks.push(tokio::spawn(async move {
                 let result =
@@ -267,12 +275,11 @@ async fn main() -> anyhow::Result<()> {
                 drop(permit);
                 match result {
                     Ok(()) => {
-                        if batch_num % 50 == 0 {
-                            println!("Batch {batch_num} inserted successfully");
-                        }
+                        let pct = docs_so_far as f64 / total_lines as f64 * 100.0;
+                        println!("{docs_so_far}/{total_lines} documents inserted ({pct:.1}%)");
                     }
                     Err(e) => {
-                        eprintln!("Batch {batch_num} failed: {e}");
+                        eprintln!("Insert failed at {docs_so_far}/{total_lines} documents: {e}");
                     }
                 }
             }));
@@ -287,14 +294,13 @@ async fn main() -> anyhow::Result<()> {
         let client = client.clone();
         let collection_id = collection_id.clone();
         let index_id = index_id.clone();
-        let batch_num = total_batches;
 
         tasks.push(tokio::spawn(async move {
             let result = insert_batch(&client, &collection_id, &index_id, batch).await;
             drop(permit);
             match result {
-                Ok(()) => println!("Final batch {batch_num} inserted successfully"),
-                Err(e) => eprintln!("Final batch {batch_num} failed: {e}"),
+                Ok(()) => println!("{total_docs}/{total_lines} documents inserted (100.0%)"),
+                Err(e) => eprintln!("Insert failed at {total_docs}/{total_lines} documents: {e}"),
             }
         }));
     }
