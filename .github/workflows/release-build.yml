@@ -3,6 +3,9 @@ name: Build and Release
 on:
   release:
     types: [created]
+  # TEMP: remove before merging — added to validate Dockerfile rust:1.91 bump
+  # against the AWS self-hosted runners without cutting a real release.
+  workflow_dispatch:
 
 permissions:
   contents: write
