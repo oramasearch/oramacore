@@ -86,6 +86,10 @@ jobs:
         run: cp ./target/release/oramacore ./target/release/oramacore-writer
 
       - name: Upload Binaries to Release
+        # TEMP: skip upload on workflow_dispatch (no release object to attach
+        # to). Remove this `if` together with the workflow_dispatch trigger
+        # before merging.
+        if: github.event_name == 'release'
         uses: softprops/action-gh-release@v1
         with:
           files: |
