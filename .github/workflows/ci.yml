@@ -15,7 +15,7 @@ env:
 
 jobs:
   build:
-    runs-on: [self-hosted, gpu, cuda]
+    runs-on: [self-hosted, aws, linux, x86_64]
 
     steps:
       - uses: actions/checkout@v4
