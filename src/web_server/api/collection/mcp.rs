@@ -4,7 +4,7 @@ use axum::{
     body::Body,
     extract::{Path, State},
     http::{HeaderMap, StatusCode},
-    response::IntoResponse,
+    response::{IntoResponse, Response},
     routing::{post, put},
     Json, Router,
 };
@@ -41,7 +41,7 @@ async fn mcp_endpoint(
     read_api_key: ReadApiKey,
     _headers: HeaderMap,
     body: Body,
-) -> impl IntoResponse {
+) -> Response {
     if let Err(_err) = read_side
         .check_read_api_key(collection_id, &read_api_key)
         .await
@@ -54,7 +54,7 @@ async fn mcp_endpoint(
                 "message": "unauthorized"
             }
         });
-        return (StatusCode::UNAUTHORIZED, Json(error_response));
+        return (StatusCode::UNAUTHORIZED, Json(error_response)).into_response();
     }
 
     let body_bytes = match axum::body::to_bytes(body, usize::MAX).await {
@@ -68,7 +68,7 @@ async fn mcp_endpoint(
                     "message": "Failed to read request body"
                 }
             });
-            return (StatusCode::BAD_REQUEST, Json(error_response));
+            return (StatusCode::BAD_REQUEST, Json(error_response)).into_response();
         }
     };
 
@@ -83,9 +83,26 @@ async fn mcp_endpoint(
                     "message": "Invalid UTF-8 in request body"
                 }
             });
-            return (StatusCode::BAD_REQUEST, Json(error_response));
+            return (StatusCode::BAD_REQUEST, Json(error_response)).into_response();
         }
     };
+
+    // JSON-RPC notifications have no `id` field. The MCP Streamable HTTP
+    // transport spec requires a 202 Accepted with an empty body for
+    // notification-only POSTs — rmcp clients fail to decode any JSON-RPC
+    // body on a notification and abort the session, which is what was
+    // killing Amaro's handshake on `notifications/initialized`.
+    let is_notification = serde_json::from_str::<serde_json::Value>(&request_str)
+        .ok()
+        .and_then(|v| v.as_object().map(|obj| !obj.contains_key("id")))
+        .unwrap_or(false);
+
+    if is_notification {
+        return Response::builder()
+            .status(StatusCode::ACCEPTED)
+            .body(Body::empty())
+            .unwrap();
+    }
 
     let collection_info = read_side
         .collection_stats(
@@ -119,7 +136,7 @@ async fn mcp_endpoint(
                     "message": format!("Failed to initialize MCP service: {}", e)
                 }
             });
-            return (StatusCode::INTERNAL_SERVER_ERROR, Json(error_response));
+            return (StatusCode::INTERNAL_SERVER_ERROR, Json(error_response)).into_response();
         }
     };
 
@@ -134,12 +151,12 @@ async fn mcp_endpoint(
                     "message": format!("Internal error: {}", e)
                 }
             });
-            return (StatusCode::INTERNAL_SERVER_ERROR, Json(error_response));
+            return (StatusCode::INTERNAL_SERVER_ERROR, Json(error_response)).into_response();
         }
     };
 
     match serde_json::from_str::<serde_json::Value>(&response_str) {
-        Ok(response_json) => (StatusCode::OK, Json(response_json)),
+        Ok(response_json) => (StatusCode::OK, Json(response_json)).into_response(),
         Err(e) => {
             let error_response = serde_json::json!({
                 "jsonrpc": "2.0",
@@ -149,7 +166,7 @@ async fn mcp_endpoint(
                     "message": format!("Failed to parse Python response: {}", e)
                 }
             });
-            (StatusCode::INTERNAL_SERVER_ERROR, Json(error_response))
+            (StatusCode::INTERNAL_SERVER_ERROR, Json(error_response)).into_response()
         }
     }
 }
