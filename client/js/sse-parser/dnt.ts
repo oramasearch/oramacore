@@ -30,7 +30,7 @@ await build({
       url: 'git+https://github.com/oramasearch/oramacore.git',
     },
     bugs: {
-      url: 'https://github.com/oramasearch/oramacore/repo/issues',
+      url: 'https://github.com/oramasearch/oramacore/issues',
     },
   },
   testPattern: '**/*_test.{ts,js}',
