@@ -9588,7 +9588,7 @@ dependencies = [
 [[package]]
 name = "zebo"
 version = "0.5.3"
-source = "git+https://github.com/oramasearch/zebo?rev=a8e05425a2b60c17958718d91582ab2207c1aee2#a8e05425a2b60c17958718d91582ab2207c1aee2"
+source = "git+https://github.com/oramasearch/zebo?rev=8f0bf89f05381907c4acec6275bc747358ec31f5#8f0bf89f05381907c4acec6275bc747358ec31f5"
 dependencies = [
  "clap",
  "positioned-io",
