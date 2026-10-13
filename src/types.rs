@@ -111,6 +111,18 @@ impl Display for CollectionId {
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, Serialize, Deserialize, PartialOrd, Ord)]
 pub struct DocumentId(pub u64);
 
+/// Sorts `docs` by id and drops duplicate ids, keeping the last entry for each id, so later
+/// writes win. Zebo refuses an insert batch whose ids are not strictly ascending.
+pub fn sort_and_dedup_by_id<T>(docs: &mut Vec<(DocumentId, T)>) {
+    if docs.is_sorted_by(|a, b| a.0 < b.0) {
+        return;
+    }
+    // Reversed, the stable sort puts the latest entry first among equal ids, and dedup keeps it.
+    docs.reverse();
+    docs.sort_by_key(|(id, _)| *id);
+    docs.dedup_by_key(|(id, _)| *id);
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Document {
     #[serde(flatten)]
