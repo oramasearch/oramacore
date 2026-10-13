@@ -155,6 +155,32 @@ const answerSession = collection.createAnswerSession({
 
 Read more on the [official documentation](https://docs.oramacore.com/docs).
 
+## Health checks
+
+| Endpoint        | Purpose   | Response                                                                                       |
+| --------------- | --------- | ---------------------------------------------------------------------------------------------- |
+| `/health`       | Liveness  | Always `200` with `"up"` while the HTTP server runs.                                           |
+| `/health/ready` | Readiness | `200` when the reader keeps up with the operation stream and commits on schedule, `503` if not. |
+
+`/health/ready` returns `503` when the stream has an operation newer than the
+last applied one and nothing has been applied for
+`reader_side.replication.apply_stall_threshold` (default `5m`), or when the
+last commit failed or is older than twice `reader_side.config.commit_interval`.
+The body is the same for both status codes:
+
+```json
+{
+  "applied_offset": 1042,
+  "last_applied_at": "2026-01-01T12:00:00.000Z",
+  "last_received_at": "2026-01-01T12:00:00.000Z",
+  "last_commit_at": "2026-01-01T11:59:00.000Z",
+  "ready": true
+}
+```
+
+Timestamps are `null` until the event first happens after startup. A node
+running without the reader side always reports ready.
+
 ## License
 
 [AGPLv3](/LICENSE.md)

@@ -14,7 +14,7 @@ use std::{
     task::Poll,
 };
 use tokio::sync::Notify;
-use tokio::time::sleep;
+use tokio::time::{sleep, timeout, timeout_at, Instant};
 use tracing::{debug, error, info, trace, warn};
 
 use crate::lock::OramaAsyncLock;
@@ -176,7 +176,6 @@ impl RabbitOperationReceiverCreator {
             consumer,
             environment: self.environment,
             config: self.config,
-            last_offset,
         })
     }
 }
@@ -314,19 +313,67 @@ pub struct RabbitOperationReceiver {
     consumer: Consumer,
     environment: Box<Environment>,
     config: RabbitMQConsumerConfig,
-    last_offset: Offset,
 }
 
+// Bounds the broker round trips made while closing a consumer or probing the stream head,
+// so a dead connection cannot hang the caller.
+const CONSUMER_CLOSE_TIMEOUT: Duration = Duration::from_secs(5);
+const HEAD_PROBE_TIMEOUT: Duration = Duration::from_secs(10);
+// The probe has read the last chunk once no message arrives for this long.
+const HEAD_PROBE_IDLE: Duration = Duration::from_millis(500);
+
 impl RabbitOperationReceiver {
-    pub async fn reconnect(&mut self) -> Result<()> {
-        self.consumer = create_consumer(
-            &self.environment,
-            &self.config,
-            Offset(self.last_offset.0 + 1),
+    /// Closes the current consumer and creates a new one that starts at `from`.
+    /// Used both after the consumer ends and when it goes silent.
+    pub async fn recreate(&mut self, from: Offset) -> Result<()> {
+        // The old connection may be dead: closing it is best effort.
+        match timeout(CONSUMER_CLOSE_TIMEOUT, self.consumer.handle().close()).await {
+            Ok(Ok(())) => {}
+            Ok(Err(e)) => debug!(error = ?e, "Cannot close the previous consumer"),
+            Err(_) => warn!("Timed out closing the previous consumer"),
+        }
+
+        self.consumer = create_consumer(&self.environment, &self.config, from)
+            .await
+            .context("Cannot recreate consumer")?;
+        Ok(())
+    }
+
+    /// Returns the offset of the newest message in the stream, or `None` if the stream is empty.
+    /// The stream client has no call for the stream head, so this opens a short-lived consumer
+    /// on its own connection at the last chunk and reads that chunk to the end.
+    pub async fn query_stream_head(&self) -> Result<Option<Offset>> {
+        let mut probe = timeout(
+            HEAD_PROBE_TIMEOUT,
+            self.environment
+                .consumer()
+                .client_provided_name(&format!("{}-head-probe", self.config.consumer_name))
+                .offset(OffsetSpecification::Last)
+                .build(&self.config.stream_name),
         )
         .await
-        .context("Cannot reconnect")?;
-        Ok(())
+        .context("Timed out creating the stream head probe")?
+        .context("Cannot create the stream head probe")?;
+
+        let mut head: Option<u64> = None;
+        let deadline = Instant::now() + HEAD_PROBE_TIMEOUT;
+        let result = loop {
+            let idle_deadline = (Instant::now() + HEAD_PROBE_IDLE).min(deadline);
+            match timeout_at(idle_deadline, probe.next()).await {
+                Ok(Some(Ok(delivery))) => {
+                    head = Some(head.map_or(delivery.offset(), |h| h.max(delivery.offset())));
+                }
+                Ok(Some(Err(e))) => break Err(anyhow::Error::from(e)),
+                // The probe was closed by the broker, or the last chunk has been read.
+                Ok(None) | Err(_) => break Ok(head.map(Offset)),
+            }
+        };
+
+        if let Err(e) = timeout(CONSUMER_CLOSE_TIMEOUT, probe.handle().close()).await {
+            debug!(error = ?e, "Timed out closing the stream head probe");
+        }
+
+        result.context("Cannot read from the stream head probe")
     }
 }
 
@@ -350,9 +397,6 @@ impl Stream for RabbitOperationReceiver {
 
         let message = delivery.message();
         let offset = Offset(delivery.offset());
-
-        // Save last offset in case of reconnect
-        self.last_offset = offset;
 
         let data = match message.data() {
             None => {

@@ -6,6 +6,7 @@ mod context;
 pub mod document_storage;
 mod index;
 pub mod notify;
+mod replication;
 mod search;
 pub mod sort;
 
@@ -67,12 +68,14 @@ use crate::HooksConfig;
 use oramacore_lib::fs::BufferedFile;
 use oramacore_lib::generic_kv::{KVConfig, KV};
 use oramacore_lib::nlp::NLPService;
+#[cfg(test)]
+pub(crate) use replication::OperationSource;
+pub(crate) use replication::{spawn_receive_loop, ReplicationStatus};
+pub use replication::{ExitHook, ReadinessReport, ReplicationConfig};
 pub use search::SearchRequest;
 
 use super::system_prompts::{SystemPrompt, SystemPromptInterface};
-use super::{
-    InputSideChannelType, Offset, OperationReceiver, OperationReceiverCreator, WriteOperation,
-};
+use super::{InputSideChannelType, Offset, OperationReceiverCreator, WriteOperation};
 pub use collections::CollectionReadLock;
 use thiserror::Error;
 
@@ -86,6 +89,8 @@ pub struct ReadSideConfig {
     pub hooks: HooksConfig,
     pub jwt: Option<JwtConfig>,
     pub secrets_manager: Option<Vec<SecretsProviderConfig>>,
+    #[serde(default)]
+    pub replication: ReplicationConfig,
 }
 
 /// Indicates the scope of a commit request sent from the update path to the commit loop.
@@ -198,6 +203,9 @@ pub struct ReadSide {
     jwt_manager: JwtManager<CustomerClaims>,
 
     secrets_service: Arc<SecretsService>,
+
+    // Receive, apply and commit progress, reported by `/health/ready`.
+    replication_status: Arc<ReplicationStatus>,
 }
 
 impl ReadSide {
@@ -221,6 +229,7 @@ impl ReadSide {
         let commit_interval = config.config.commit_interval;
         let force_commit = config.config.force_commit;
         let data_dir = config.config.data_dir.clone();
+        let replication_config = config.replication;
 
         let mut notifier = None;
         if let Some(notifier_config) = &config.config.notifier {
@@ -325,6 +334,12 @@ impl ReadSide {
             jwt_manager,
 
             secrets_service,
+
+            replication_status: Arc::new(ReplicationStatus::new(
+                last_offset,
+                replication_config.apply_stall_threshold,
+                commit_interval,
+            )),
         };
 
         let operation_receiver = operation_receiver_creator.create(last_offset).await?;
@@ -339,9 +354,15 @@ impl ReadSide {
             stop_done_sender.clone(),
             commit_request_receiver,
         );
-        start_receive_operations(
-            read_side.clone(),
+        let apply_side = read_side.clone();
+        spawn_receive_loop(
             operation_receiver,
+            move |op| {
+                let read_side = apply_side.clone();
+                async move { read_side.update(op).await }
+            },
+            read_side.replication_status.clone(),
+            replication_config,
             receive_operation_loop_receiver,
             stop_done_sender,
         );
@@ -392,6 +413,18 @@ impl ReadSide {
     }
 
     pub async fn commit(&self, force: bool) -> Result<()> {
+        let result = self.commit_inner(force).await;
+        self.replication_status.record_commit(result.is_ok());
+        result
+    }
+
+    /// Readiness of this reader: whether it keeps up with the operation stream and commits
+    /// on schedule. Served by `/health/ready`.
+    pub fn readiness(&self) -> ReadinessReport {
+        self.replication_status.report()
+    }
+
+    async fn commit_inner(&self, force: bool) -> Result<()> {
         // Serialize commits against each other, but do NOT block inserts.
         // Inserts can proceed in parallel because oramacore_fields handles
         // concurrent insert/compact safely at the field level.
@@ -1148,111 +1181,6 @@ fn start_commit_loop(
                     }
                 }
             }
-        }
-
-        if let Err(e) = stop_done_sender.send(()).await {
-            error!(error = ?e, "Cannot send stop signal to read side");
-        }
-    });
-}
-
-fn start_receive_operations(
-    read_side: Arc<ReadSide>,
-    mut operation_receiver: OperationReceiver,
-    stop_receiver: tokio::sync::broadcast::Receiver<()>,
-    stop_done_sender: tokio::sync::mpsc::Sender<()>,
-) {
-    tokio::task::spawn(async move {
-        use backoff::future::retry;
-        use backoff::ExponentialBackoff;
-        use core::pin::pin;
-
-        let mut stopped = false;
-
-        let mut stop_receiver = pin!(stop_receiver);
-
-        info!("Starting operation receiver");
-        'outer: loop {
-            loop {
-                let op = tokio::select! {
-                    _ = stop_receiver.recv() => {
-                        stopped = true;
-                        info!("Stopping operation receiver");
-                        break 'outer;
-                    }
-                    op = operation_receiver.recv() => {
-                        op
-                    }
-                };
-
-                trace!("Received operation: {:?}", op);
-
-                let op = match op {
-                    None => {
-                        warn!("Operation receiver is closed");
-                        break;
-                    }
-                    Some(op) => op,
-                };
-                let op = match op {
-                    Ok(op) => op,
-                    Err(e) => {
-                        // If there's a deserialization error, should we skip it or something different?
-                        // TODO: think about it
-                        error!(error = ?e, "Cannot receive operation");
-                        continue;
-                    }
-                };
-                trace!(?op, "Received operation");
-                let offset = op.0;
-                if let Err(e) = read_side.update(op).await {
-                    error!(error = ?e, "Cannot update read side");
-                    e.chain()
-                        .skip(1)
-                        .for_each(|cause| eprintln!("because: {cause}"));
-                }
-
-                info!("Operation applied {:?}", offset);
-            }
-
-            warn!("Operation receiver is closed.");
-
-            if !operation_receiver.should_reconnect() {
-                break;
-            }
-
-            warn!("Reconnecting...");
-
-            let arc = Arc::new(OramaAsyncLock::new(
-                "operation_receiver",
-                &mut operation_receiver,
-            ));
-            let op = || async {
-                let arc = arc.clone();
-                let mut operation_receiver = arc.write("reconnect").await;
-                operation_receiver
-                    .reconnect()
-                    .await
-                    .map_err(|e| backoff::Error::Transient {
-                        err: e,
-                        retry_after: None,
-                    })?;
-                Ok::<(), backoff::Error<anyhow::Error>>(())
-            };
-
-            match retry(ExponentialBackoff::default(), op).await {
-                Ok(_) => {}
-                Err(e) => {
-                    error!(error = ?e, "Cannot reconnect to operation receiver");
-                    break;
-                }
-            };
-
-            info!("Reconnected to operation receiver");
-        }
-
-        if !stopped {
-            error!("Read side stopped to receive operations. It is disconnected and will not be able to update the read side");
         }
 
         if let Err(e) = stop_done_sender.send(()).await {
