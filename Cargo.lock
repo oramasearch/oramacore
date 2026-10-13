@@ -5234,7 +5234,7 @@ dependencies = [
 
 [[package]]
 name = "oramacore"
-version = "1.2.38"
+version = "1.2.39"
 dependencies = [
  "anyhow",
  "arrayvec",
@@ -9588,8 +9588,7 @@ dependencies = [
 [[package]]
 name = "zebo"
 version = "0.5.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5ed7dc8c4d3dc99b972fa39aa97049c0ef5dfb2eb80ab2e244e4084923b8a08b"
+source = "git+https://github.com/oramasearch/zebo?rev=ef2104301d9196fde6f5cd8b7e25761ae49243e1#ef2104301d9196fde6f5cd8b7e25761ae49243e1"
 dependencies = [
  "clap",
  "positioned-io",
