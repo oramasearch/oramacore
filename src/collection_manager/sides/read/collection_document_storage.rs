@@ -14,7 +14,7 @@ use crate::{
     },
     lock::{OramaAsyncLock, OramaSyncLock},
     metrics::{commit::COLLECTION_DOCUMENT_COMMIT_CALCULATION_TIME, CollectionCommitLabels},
-    types::{sort_and_dedup_by_id, CollectionId, DocumentId, RawJSONDocument},
+    types::{CollectionId, DocumentId, RawJSONDocument},
 };
 
 // 1GB
@@ -141,6 +141,10 @@ impl CollectionDocumentStorage {
                 self.uncommitted.insert(doc_id, Arc::new(doc.0))?;
             }
             DocumentStorageWriteOperation::InsertDocuments(docs) => {
+                if cfg!(test) && !docs.is_sorted_by(|a, b| a.0 < b.0) {
+                    panic!("Add documents are not in order");
+                }
+
                 self.uncommitted.insert_many(
                     docs.into_iter()
                         .map(|(doc_id, doc)| (doc_id, Arc::new(doc.0))),
@@ -164,6 +168,10 @@ impl CollectionDocumentStorage {
                     .context("Cannot update doc_id_str_map")?;
             }
             DocumentStorageWriteOperation::InsertDocumentsWithDocIdStr(docs) => {
+                if cfg!(test) && !docs.is_sorted_by(|a, b| a.0 < b.0) {
+                    panic!("Add documents are not in order");
+                }
+
                 self.doc_id_map
                     .update_doc_id_str_map(&docs)
                     .await
@@ -322,11 +330,10 @@ impl CollectionDocumentStorage {
 
         // Write to zebo — no locks held on uncommitted storage, so inserts can proceed.
         let mut zebo = self.zebo.write("commit").await;
-        let mut docs: Vec<_> = uncommitted_docs
+        let docs: Vec<_> = uncommitted_docs
             .into_iter()
             .map(|(doc_id, doc)| (doc_id, ZeboDocument::FromJSONDoc(doc)))
             .collect();
-        sort_and_dedup_by_id(&mut docs);
         if !docs.is_empty() {
             zebo.reserve_space_for(&docs)
                 .context("Cannot reserve space for documents")?
@@ -522,96 +529,4 @@ impl DocumentIdStrMap {
 #[derive(Deserialize, Serialize, Debug)]
 enum DocumentIdStrMapDump {
     V1(HashMap<String, DocumentId>),
-}
-
-#[cfg(test)]
-mod tests {
-    use serde_json::{json, Value};
-
-    use super::*;
-    use crate::{
-        collection_manager::sides::{
-            read::document_storage::DocumentStorageConfig, DocumentToInsert,
-        },
-        tests::utils::generate_new_path,
-    };
-
-    fn doc(id: u64, version: &str) -> (DocumentId, DocumentToInsert) {
-        let raw = json!({ "id": id.to_string(), "version": version })
-            .try_into()
-            .unwrap();
-        (DocumentId(id), DocumentToInsert(raw))
-    }
-
-    /// Ids 3, 1, 2, 1: out of order, with a later write to id 1.
-    fn out_of_order_batch() -> Vec<(DocumentId, DocumentToInsert)> {
-        vec![doc(3, "v1"), doc(1, "v1"), doc(2, "v1"), doc(1, "v2")]
-    }
-
-    fn versions(mut docs: Vec<(DocumentId, Arc<RawJSONDocument>)>) -> Vec<(u64, String)> {
-        docs.sort_by_key(|(id, _)| *id);
-        docs.into_iter()
-            .map(|(id, doc)| {
-                let value: Value = serde_json::from_str(doc.inner.get()).unwrap();
-                (id.0, value["version"].as_str().unwrap().to_string())
-            })
-            .collect()
-    }
-
-    fn latest_versions() -> Vec<(u64, String)> {
-        vec![(1, "v2".into()), (2, "v1".into()), (3, "v1".into())]
-    }
-
-    #[tokio::test]
-    async fn test_out_of_order_batch_commits_latest_write_per_id() {
-        let ids = vec![DocumentId(1), DocumentId(2), DocumentId(3)];
-        let global = Arc::new(
-            DocumentStorage::try_new(DocumentStorageConfig {
-                data_dir: generate_new_path(),
-            })
-            .await
-            .unwrap(),
-        );
-
-        // Global storage
-        #[allow(deprecated)]
-        global
-            .update(DocumentStorageWriteOperation::InsertDocuments(
-                out_of_order_batch(),
-            ))
-            .await
-            .unwrap();
-        global.commit().await.unwrap();
-        let mut docs = Vec::new();
-        #[allow(deprecated)]
-        global
-            .get_documents_by_ids(ids.clone(), &mut docs)
-            .await
-            .unwrap();
-        assert_eq!(versions(docs), latest_versions());
-
-        // Collection storage, on a fresh global storage so every id is local
-        let global = Arc::new(
-            DocumentStorage::try_new(DocumentStorageConfig {
-                data_dir: generate_new_path(),
-            })
-            .await
-            .unwrap(),
-        );
-        let storage = CollectionDocumentStorage::new(
-            global,
-            generate_new_path(),
-            CollectionId::try_new("test").unwrap(),
-        )
-        .unwrap();
-        storage
-            .update(DocumentStorageWriteOperation::InsertDocuments(
-                out_of_order_batch(),
-            ))
-            .await
-            .unwrap();
-        storage.commit(Offset(0)).await.unwrap();
-        let docs = storage.get_documents_by_ids(ids).await.unwrap();
-        assert_eq!(versions(docs), latest_versions());
-    }
 }

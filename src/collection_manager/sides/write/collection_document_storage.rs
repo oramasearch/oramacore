@@ -1,5 +1,4 @@
 use std::{
-    borrow::Cow,
     path::PathBuf,
     sync::{atomic::AtomicU64, Arc},
 };
@@ -17,7 +16,7 @@ use zebo::Zebo;
 use crate::{
     collection_manager::sides::write::document_storage::{DocumentStorage, ZeboDocument},
     lock::OramaAsyncLock,
-    types::{sort_and_dedup_by_id, DocumentId, RawJSONDocument},
+    types::{DocumentId, RawJSONDocument},
 };
 
 // 1GB
@@ -82,25 +81,6 @@ impl CollectionDocumentStorage {
         if docs.is_empty() {
             return Ok(());
         }
-
-        // Zebo needs a strictly ascending batch: reorder a borrowed copy only when needed.
-        let sorted: Vec<_>;
-        let docs = if docs.is_sorted_by(|a, b| a.0 < b.0) {
-            docs
-        } else {
-            let mut copy: Vec<_> = docs
-                .iter()
-                .map(|(id, doc)| {
-                    (
-                        *id,
-                        ZeboDocument::new(Cow::Borrowed(&doc.0), Cow::Borrowed(&doc.1)),
-                    )
-                })
-                .collect();
-            sort_and_dedup_by_id(&mut copy);
-            sorted = copy;
-            &sorted
-        };
 
         let mut zebo = self.zebo.write("insert_many").await;
         let space = zebo
@@ -239,46 +219,4 @@ enum Dump {
 struct DumpV1 {
     document_id: u64,
     last_global_document_id: u64,
-}
-
-#[cfg(test)]
-mod tests {
-    use serde_json::Value;
-
-    use super::*;
-    use crate::tests::utils::generate_new_path;
-
-    #[tokio::test]
-    async fn test_insert_many_out_of_order_keeps_latest_write_per_id() {
-        let global = Arc::new(DocumentStorage::try_new(generate_new_path()).await.unwrap());
-        let storage = CollectionDocumentStorage::new(global, generate_new_path())
-            .await
-            .unwrap();
-
-        // Ids 3, 1, 2, 1: out of order, with a later write to id 1.
-        let doc = |id: u64, version: &str| {
-            let json = format!(r#"{{"version":"{version}"}}"#);
-            (
-                DocumentId(id),
-                ZeboDocument::new(Cow::Owned(id.to_string()), Cow::Owned(json)),
-            )
-        };
-        let docs = [doc(3, "v1"), doc(1, "v1"), doc(2, "v1"), doc(1, "v2")];
-        storage.insert_many(&docs).await.unwrap();
-
-        let mut found: Vec<(u64, String)> = storage
-            .stream_documents(vec![DocumentId(1), DocumentId(2), DocumentId(3)])
-            .await
-            .map(|(id, doc)| {
-                let value: Value = serde_json::from_str(doc.inner.get()).unwrap();
-                (id.0, value["version"].as_str().unwrap().to_string())
-            })
-            .collect()
-            .await;
-        found.sort();
-        assert_eq!(
-            found,
-            [(1, "v2".into()), (2, "v1".into()), (3, "v1".into())]
-        );
-    }
 }
