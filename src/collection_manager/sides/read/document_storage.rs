@@ -10,7 +10,7 @@ use crate::{
     collection_manager::sides::DocumentToInsert,
     lock::OramaAsyncLock,
     metrics::{commit::DOCUMENT_COMMIT_CALCULATION_TIME, Empty},
-    types::{DocumentId, RawJSONDocument},
+    types::{sort_and_dedup_by_id, DocumentId, RawJSONDocument},
 };
 use anyhow::{Context, Result};
 use oramacore_lib::fs::{create_if_not_exists, read_file};
@@ -104,10 +104,11 @@ impl CommittedDiskDocumentStorage {
                     .await;
             }
         };
-        let docs: Vec<_> = new_docs
+        let mut docs: Vec<_> = new_docs
             .into_iter()
             .map(|(doc_id, doc)| (doc_id, ZeboDocument::FromJSONDoc(doc)))
             .collect();
+        sort_and_dedup_by_id(&mut docs);
         if !docs.is_empty() {
             zebo.reserve_space_for(&docs)
                 .context("Cannot reserve space for documents")?
@@ -212,10 +213,6 @@ impl DocumentStorage {
     }
 
     async fn add_documents(&self, docs: Vec<(DocumentId, DocumentToInsert)>) {
-        if cfg!(test) && !docs.is_sorted_by(|a, b| a.0 < b.0) {
-            panic!("Add documents are not in order");
-        }
-
         let mut uncommitted = self.uncommitted.write("add_documents").await;
         uncommitted.extend(
             docs.into_iter()

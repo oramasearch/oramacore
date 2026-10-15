@@ -14,7 +14,7 @@ use crate::{
     },
     lock::{OramaAsyncLock, OramaSyncLock},
     metrics::{commit::COLLECTION_DOCUMENT_COMMIT_CALCULATION_TIME, CollectionCommitLabels},
-    types::{CollectionId, DocumentId, RawJSONDocument},
+    types::{sort_and_dedup_by_id, CollectionId, DocumentId, RawJSONDocument},
 };
 
 // 1GB
@@ -141,10 +141,6 @@ impl CollectionDocumentStorage {
                 self.uncommitted.insert(doc_id, Arc::new(doc.0))?;
             }
             DocumentStorageWriteOperation::InsertDocuments(docs) => {
-                if cfg!(test) && !docs.is_sorted_by(|a, b| a.0 < b.0) {
-                    panic!("Add documents are not in order");
-                }
-
                 self.uncommitted.insert_many(
                     docs.into_iter()
                         .map(|(doc_id, doc)| (doc_id, Arc::new(doc.0))),
@@ -168,10 +164,6 @@ impl CollectionDocumentStorage {
                     .context("Cannot update doc_id_str_map")?;
             }
             DocumentStorageWriteOperation::InsertDocumentsWithDocIdStr(docs) => {
-                if cfg!(test) && !docs.is_sorted_by(|a, b| a.0 < b.0) {
-                    panic!("Add documents are not in order");
-                }
-
                 self.doc_id_map
                     .update_doc_id_str_map(&docs)
                     .await
@@ -330,10 +322,11 @@ impl CollectionDocumentStorage {
 
         // Write to zebo — no locks held on uncommitted storage, so inserts can proceed.
         let mut zebo = self.zebo.write("commit").await;
-        let docs: Vec<_> = uncommitted_docs
+        let mut docs: Vec<_> = uncommitted_docs
             .into_iter()
             .map(|(doc_id, doc)| (doc_id, ZeboDocument::FromJSONDoc(doc)))
             .collect();
+        sort_and_dedup_by_id(&mut docs);
         if !docs.is_empty() {
             zebo.reserve_space_for(&docs)
                 .context("Cannot reserve space for documents")?
