@@ -140,6 +140,16 @@ impl<'collection> Search<'collection> {
         )
         .await?;
 
+        // Scoring, pin rules, facets and groups are done: release the index read locks
+        // before fetching documents. Retrieval can wait on disk, and holding the locks
+        // across it would block `commit` and the operation receive loop (both take the
+        // index write lock) and, since Tokio's RwLock is fair, every search queued behind
+        // them. Retrieval needs only the document IDs computed above. A document deleted
+        // between scoring and retrieval is not returned by the document storage (pending
+        // deletions are filtered out, committed ones are gone from disk), and hits or
+        // group entries without a document are dropped below.
+        drop(indexes);
+
         let collection_document_storage = collection.get_document_storage();
         let group = groups
             .as_ref()

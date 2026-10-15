@@ -49,6 +49,27 @@ impl<T> OramaAsyncLock<T> {
         OramaAsyncLockReadGuard { guard, m: Some(m) }
     }
 
+    /// Blocking variant of [`Self::read`] for code running on Tokio's blocking pool
+    /// (inside `tokio::task::spawn_blocking`), where the guarded value does blocking I/O.
+    /// Panics if called from an async context.
+    pub fn blocking_read(&self, reason: &'static str) -> OramaAsyncLockReadGuard<'_, T> {
+        let m = LOCKING_TIME.create(LockNameLabels {
+            name: self.name,
+            reason,
+            lock_type: LockType::Read,
+        });
+        let guard = self.inner.blocking_read();
+        drop(m);
+
+        let m = LOCKED_FOR_TIME.create(LockNameLabels {
+            name: self.name,
+            reason,
+            lock_type: LockType::Read,
+        });
+
+        OramaAsyncLockReadGuard { guard, m: Some(m) }
+    }
+
     pub async fn write(&self, reason: &'static str) -> OramaAsyncLockWriteGuard<'_, T> {
         let m = LOCKING_TIME.create(LockNameLabels {
             name: self.name,
