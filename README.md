@@ -33,6 +33,19 @@ An NVIDIA GPU is highly recommended for running the application. For production
 usage, we recommend using minimum one NVIDIA A100. Optimal configuration would
 include four NVIDIA H100.
 
+## Document storage
+
+Document storage normalizes each batch before reserving Zebo space: IDs are
+sorted in release builds and duplicate IDs keep the last write in that batch.
+This applies to global read commits, collection read commits, and collection
+write inserts. Read commits normalize the whole uncommitted snapshot, including
+documents accumulated across several updates. Before a commit, existing read
+paths still return the first uncommitted copy of a repeated ID.
+
+The Zebo dependency is pinned to an immutable git revision with release-mode
+batch ordering checks. Replayed IDs across batches remain accepted with a
+warning; a copy below a page's starting ID still routes to an earlier page.
+
 ## Available Dockerfiles
 
 Depending on your machine, you may want to use different Docker images.

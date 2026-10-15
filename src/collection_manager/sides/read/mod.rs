@@ -8,6 +8,9 @@ mod index;
 pub mod notify;
 mod search;
 pub mod sort;
+#[cfg(test)]
+#[path = "../../../tests/storage_batch_ordering.rs"]
+mod storage_batch_ordering;
 
 use axum::extract::State;
 use futures::Stream;
