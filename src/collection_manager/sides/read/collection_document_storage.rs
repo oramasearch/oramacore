@@ -9,12 +9,12 @@ use zebo::Zebo;
 
 use crate::{
     collection_manager::sides::{
-        read::document_storage::{DocumentStorage, ZeboDocument},
+        read::document_storage::{read_zebo_documents, DocumentStorage, ZeboDocument},
         DocumentStorageWriteOperation, Offset,
     },
     lock::{OramaAsyncLock, OramaSyncLock},
     metrics::{commit::COLLECTION_DOCUMENT_COMMIT_CALCULATION_TIME, CollectionCommitLabels},
-    types::{CollectionId, DocumentId, RawJSONDocument},
+    types::{sort_and_dedup_by_id, CollectionId, DocumentId, RawJSONDocument},
 };
 
 // 1GB
@@ -109,6 +109,41 @@ pub struct CollectionDocumentStorage {
     // DocIdStr -> DocumentId mapping for per-collection storage
     // NB: the lock is needed for a correct concurrent access
     doc_id_map: DocumentIdStrMap,
+    // Lets tests pause document retrieval to stand in for slow storage.
+    #[cfg(test)]
+    fetch_gate: Arc<FetchGate>,
+}
+
+/// Test-only pause point at the start of `get_documents_by_ids`.
+/// After `arm`, the next fetch signals `wait_entered` and then waits for `release`.
+#[cfg(test)]
+#[derive(Default)]
+pub struct FetchGate {
+    armed: std::sync::atomic::AtomicBool,
+    entered: tokio::sync::Notify,
+    released: tokio::sync::Notify,
+}
+
+#[cfg(test)]
+impl FetchGate {
+    pub fn arm(&self) {
+        self.armed.store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    pub async fn wait_entered(&self) {
+        self.entered.notified().await;
+    }
+
+    pub fn release(&self) {
+        self.released.notify_one();
+    }
+
+    async fn pass(&self) {
+        if self.armed.swap(false, std::sync::atomic::Ordering::SeqCst) {
+            self.entered.notify_one();
+            self.released.notified().await;
+        }
+    }
 }
 
 impl CollectionDocumentStorage {
@@ -131,7 +166,14 @@ impl CollectionDocumentStorage {
             deleted_documents: OramaAsyncLock::new("deleted_documents", Vec::new()),
             collection_id,
             doc_id_map: DocumentIdStrMap::try_new(base_dir.join("doc_id_str_map.bin"))?,
+            #[cfg(test)]
+            fetch_gate: Default::default(),
         })
+    }
+
+    #[cfg(test)]
+    pub fn fetch_gate(&self) -> Arc<FetchGate> {
+        self.fetch_gate.clone()
     }
 
     pub async fn update(&self, op: DocumentStorageWriteOperation) -> Result<()> {
@@ -141,10 +183,6 @@ impl CollectionDocumentStorage {
                 self.uncommitted.insert(doc_id, Arc::new(doc.0))?;
             }
             DocumentStorageWriteOperation::InsertDocuments(docs) => {
-                if cfg!(test) && !docs.is_sorted_by(|a, b| a.0 < b.0) {
-                    panic!("Add documents are not in order");
-                }
-
                 self.uncommitted.insert_many(
                     docs.into_iter()
                         .map(|(doc_id, doc)| (doc_id, Arc::new(doc.0))),
@@ -168,10 +206,6 @@ impl CollectionDocumentStorage {
                     .context("Cannot update doc_id_str_map")?;
             }
             DocumentStorageWriteOperation::InsertDocumentsWithDocIdStr(docs) => {
-                if cfg!(test) && !docs.is_sorted_by(|a, b| a.0 < b.0) {
-                    panic!("Add documents are not in order");
-                }
-
                 self.doc_id_map
                     .update_doc_id_str_map(&docs)
                     .await
@@ -240,6 +274,9 @@ impl CollectionDocumentStorage {
         &self,
         mut ids: Vec<DocumentId>,
     ) -> Result<Vec<(DocumentId, Arc<RawJSONDocument>)>> {
+        #[cfg(test)]
+        self.fetch_gate.pass().await;
+
         let mut results: Vec<(DocumentId, Arc<RawJSONDocument>)> = Vec::with_capacity(ids.len());
 
         let uncommitted_document_deletions =
@@ -258,18 +295,10 @@ impl CollectionDocumentStorage {
                 .await?;
         }
 
-        // Get local documents
+        // Get local documents (read on the blocking pool)
         {
-            let zebo_lock = self.zebo.read("get_documents_by_ids").await;
-            let local_documents = zebo_lock.get_documents(local_ids)?.filter_map(|r| {
-                let (id, doc) = r.ok()?;
-                let doc = ZeboDocument::from_bytes(doc).ok()?;
-                let raw = doc.as_raw_json_doc().ok()?;
-
-                Some((id, raw))
-            });
+            let local_documents = read_zebo_documents(self.zebo.clone(), local_ids).await?;
             results.extend(local_documents);
-            drop(zebo_lock);
         }
 
         // Get uncommitted documents
@@ -330,10 +359,11 @@ impl CollectionDocumentStorage {
 
         // Write to zebo — no locks held on uncommitted storage, so inserts can proceed.
         let mut zebo = self.zebo.write("commit").await;
-        let docs: Vec<_> = uncommitted_docs
+        let mut docs: Vec<_> = uncommitted_docs
             .into_iter()
             .map(|(doc_id, doc)| (doc_id, ZeboDocument::FromJSONDoc(doc)))
             .collect();
+        sort_and_dedup_by_id(&mut docs);
         if !docs.is_empty() {
             zebo.reserve_space_for(&docs)
                 .context("Cannot reserve space for documents")?

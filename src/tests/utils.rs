@@ -27,8 +27,8 @@ use crate::{
     build_orama,
     collection_manager::sides::{
         read::{
-            CollectionCommitConfig, CollectionStats, IndexesConfig, ReadSide, ReadSideConfig,
-            SearchRequest, ShelfWithDocuments,
+            CollectionCommitConfig, CollectionStats, ExitHook, IndexesConfig, ReadSide,
+            ReadSideConfig, ReplicationConfig, SearchRequest, ShelfWithDocuments,
         },
         write::{
             CollectionsWriterConfig, TempIndexCleanupConfig, WriteError, WriteSide, WriteSideConfig,
@@ -157,6 +157,13 @@ pub fn create_oramacore_config() -> OramacoreConfig {
             analytics: None,
             jwt: None,
             secrets_manager: None,
+            replication: ReplicationConfig {
+                // A test binary must not exit when a reader's receive loop ends.
+                exit_hook: ExitHook::new(|code| {
+                    warn!(code, "Read side requested a process exit. Ignored in tests")
+                }),
+                ..Default::default()
+            },
         },
     }
 }

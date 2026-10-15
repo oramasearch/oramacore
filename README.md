@@ -33,6 +33,19 @@ An NVIDIA GPU is highly recommended for running the application. For production
 usage, we recommend using minimum one NVIDIA A100. Optimal configuration would
 include four NVIDIA H100.
 
+## Document storage
+
+Document storage normalizes each batch before reserving Zebo space: IDs are
+sorted in release builds and duplicate IDs keep the last write in that batch.
+This applies to global read commits, collection read commits, and collection
+write inserts. Read commits normalize the whole uncommitted snapshot, including
+documents accumulated across several updates. Before a commit, existing read
+paths still return the first uncommitted copy of a repeated ID.
+
+The Zebo dependency is pinned to an immutable git revision with release-mode
+batch ordering checks. Replayed IDs across batches remain accepted with a
+warning; a copy below a page's starting ID still routes to an earlier page.
+
 ## Available Dockerfiles
 
 Depending on your machine, you may want to use different Docker images.
@@ -154,6 +167,46 @@ const answerSession = collection.createAnswerSession({
 ```
 
 Read more on the [official documentation](https://docs.oramacore.com/docs).
+
+## Health checks
+
+| Endpoint        | Purpose   | Response                                                                                       |
+| --------------- | --------- | ---------------------------------------------------------------------------------------------- |
+| `/health`       | Liveness  | Always `200` with `"up"` while the HTTP server runs.                                           |
+| `/health/ready` | Readiness | `200` when the reader keeps up with the operation stream and commits on schedule, `503` if not. |
+
+`/health/ready` returns `503` when the stream has an operation newer than the
+last applied one and nothing has been applied for
+`reader_side.replication.apply_stall_threshold` (default `5m`), or when the
+last commit failed or is older than twice `reader_side.config.commit_interval`.
+The body is the same for both status codes:
+
+```json
+{
+  "applied_offset": 1042,
+  "last_applied_offset": 1042,
+  "last_received_offset": 1042,
+  "last_applied_at": "2026-01-01T12:00:00.000Z",
+  "last_received_at": "2026-01-01T12:00:00.000Z",
+  "last_commit_at": "2026-01-01T11:59:00.000Z",
+  "ready": true
+}
+```
+
+Timestamps are `null` until the event first happens after startup. A node
+running without the reader side always reports ready, with null progress fields.
+`applied_offset` and `last_applied_offset` report the same successfully applied
+position. See [the API notes](docs/api.md) for supervision and configuration.
+
+Document retrieval runs on Tokio's blocking pool. Search releases its index read
+locks after scoring, pin rules, facets and groups, before retrieving documents.
+Documents deleted in that gap are omitted from hits and groups.
+
+All collection languages are supported. Japanese, Korean and Chinese preserve
+their locale identity and use the shared Unicode word tokenizer, splitting on
+whitespace and punctuation without dictionary segmentation or stemming. The
+writer resolves the same parser before publishing regular or temporary index
+creation, and unknown language values are rejected when parsing API requests.
 
 ## License
 

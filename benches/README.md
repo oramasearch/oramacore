@@ -189,3 +189,6 @@ The benchmarks are designed to be integrated into continuous integration pipelin
 ```
 
 This enables automated performance regression detection across pull requests and releases.
+
+Reader configurations use default replication health settings, matching the application.
+See [health API notes](../docs/api.md) for readiness and consumer supervision.
