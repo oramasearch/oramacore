@@ -14,7 +14,7 @@ use tokio::{
 
 use crate::collection_manager::sides::{
     read::{spawn_receive_loop, ExitHook, OperationSource, ReplicationConfig, ReplicationStatus},
-    Offset, WriteOperation,
+    Offset, ReplicationRefusal, WriteOperation,
 };
 use crate::tests::utils::init_log;
 use crate::types::CollectionId;
@@ -31,6 +31,10 @@ struct FakeStream {
     fail_apply: AtomicBool,
     fail_recreate: AtomicBool,
     head_unavailable: AtomicBool,
+    // While set, `recv` reports the consumer as closed.
+    closed: AtomicBool,
+    // Recreating fails as if the stream no longer retained the requested offset.
+    refuse_recreate: AtomicBool,
     recreated_from: Mutex<Vec<Offset>>,
 }
 
@@ -45,6 +49,9 @@ impl OperationSource for FakeSource {
         loop {
             if self.stream.panic_on_recv.load(Ordering::SeqCst) {
                 panic!("receiver failure injected by the test");
+            }
+            if self.stream.closed.load(Ordering::SeqCst) {
+                return None;
             }
             if !self.stream.stuck.load(Ordering::SeqCst)
                 && self.cursor <= self.stream.head.load(Ordering::SeqCst)
@@ -68,6 +75,13 @@ impl OperationSource for FakeSource {
             !self.stream.fail_recreate.load(Ordering::SeqCst),
             "injected reconnect failure"
         );
+        if self.stream.refuse_recreate.load(Ordering::SeqCst) {
+            return Err(ReplicationRefusal::HistoryExpired {
+                required: from.0,
+                first: from.0 + 10,
+            }
+            .into());
+        }
         if self.stream.recreate_fixes.load(Ordering::SeqCst) {
             self.stream.stuck.store(false, Ordering::SeqCst);
         }
@@ -282,4 +296,27 @@ async fn test_failed_apply_does_not_advance_applied_offset() {
     harness.wait_stop_done().await;
     assert_eq!(harness.status.applied_offset(), Offset(1));
     assert_eq!(harness.status.report().last_received_offset, 2);
+}
+
+/// A refusal is permanent: the loop exits on the first attempt instead of retrying the
+/// reconnect until it times out.
+#[tokio::test(flavor = "multi_thread")]
+async fn test_receive_loop_exits_without_retrying_a_refused_reconnect() {
+    init_log();
+
+    let stream = Arc::new(FakeStream::default());
+    let mut harness = Harness::start(stream, Duration::from_secs(120));
+
+    harness.stream.head.store(2, Ordering::SeqCst);
+    harness.wait_applied(&[1, 2]).await;
+
+    harness.stream.refuse_recreate.store(true, Ordering::SeqCst);
+    harness.stream.closed.store(true, Ordering::SeqCst);
+
+    assert_eq!(harness.wait_exit().await, 1);
+    assert_eq!(
+        *harness.stream.recreated_from.lock().unwrap(),
+        vec![Offset(3)]
+    );
+    harness.wait_stop_done().await;
 }
