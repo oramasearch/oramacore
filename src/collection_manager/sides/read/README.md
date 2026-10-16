@@ -12,5 +12,7 @@ request cannot leave a borrowed guard behind in a running blocking task.
 
 `replication.rs` owns receive/apply/commit progress, readiness, receive-task
 supervision and silent-consumer recovery. Only successful operations advance
-apply progress. See `docs/api.md` at the repository root for readiness settings
+apply progress. Readiness also waits until the stream head observed at startup
+has been applied. `stop` commits once both loops have ended, so `read.info`
+never stores an offset whose operations are missing from the committed index. See `docs/api.md` at the repository root for readiness settings
 and exit behavior. Tests inject the exit callable and receiver source.

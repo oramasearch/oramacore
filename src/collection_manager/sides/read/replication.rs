@@ -10,7 +10,7 @@ use std::{
     future::Future,
     sync::{
         atomic::{AtomicBool, AtomicU64, Ordering},
-        Arc,
+        Arc, OnceLock,
     },
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
@@ -27,7 +27,9 @@ use tokio::{
 };
 use tracing::{error, info, trace, warn};
 
-use crate::collection_manager::sides::{Offset, OperationReceiver, WriteOperation};
+use crate::collection_manager::sides::{
+    Offset, OperationReceiver, ReplicationRefusal, WriteOperation,
+};
 
 /// Replication settings of the read side (`reader_side.replication`).
 /// Every field has a default, so config files without this section keep working.
@@ -104,6 +106,9 @@ impl Default for ExitHook {
 /// Timestamps are Unix milliseconds; 0 means "never".
 pub struct ReplicationStatus {
     applied_offset: AtomicU64,
+    // Stream head observed when the receiver was created. Readiness waits until the
+    // reader has applied up to it, so a restarted reader never serves a stale index.
+    startup_head: OnceLock<Offset>,
     last_applied_at: AtomicU64,
     received_offset: AtomicU64,
     last_received_at: AtomicU64,
@@ -141,6 +146,7 @@ impl ReplicationStatus {
     ) -> Self {
         Self {
             applied_offset: AtomicU64::new(applied_offset.0),
+            startup_head: OnceLock::new(),
             last_applied_at: AtomicU64::new(0),
             received_offset: AtomicU64::new(applied_offset.0),
             last_received_at: AtomicU64::new(0),
@@ -171,6 +177,11 @@ impl ReplicationStatus {
         self.stream_head_observed.store(true, Ordering::Release);
     }
 
+    /// Holds readiness back until `head` has been applied. Only the first call counts.
+    pub fn require_initial_catchup(&self, head: Offset) {
+        let _ = self.startup_head.set(head);
+    }
+
     pub fn record_commit(&self, succeeded: bool) {
         if succeeded {
             self.last_commit_at.store(now_millis(), Ordering::Release);
@@ -187,7 +198,13 @@ impl ReplicationStatus {
             || self.last_applied_at.load(Ordering::Acquire) != 0
     }
 
-    /// Offset a recreated consumer starts from. Mirrors the receiver creation:
+    fn caught_up_to_startup_head(&self, applied_offset: u64) -> bool {
+        self.startup_head
+            .get()
+            .is_none_or(|head| self.has_applied() && applied_offset >= head.0)
+    }
+
+    /// First offset not yet applied, where a created or recreated consumer starts:
     /// offset 0 without an apply timestamp means nothing has been applied yet.
     pub fn next_offset(&self) -> Offset {
         let applied = self.applied_offset();
@@ -198,9 +215,10 @@ impl ReplicationStatus {
         }
     }
 
-    /// Ready unless the stream has operations newer than the applied offset and nothing
-    /// has been applied for `apply_stall_threshold`, or the last commit failed or is older
-    /// than twice the commit interval.
+    /// Ready once the startup head (if any) has been applied, unless the stream has
+    /// operations newer than the applied offset and nothing has been applied for
+    /// `apply_stall_threshold`, or the last commit failed or is older than twice the
+    /// commit interval.
     pub fn report(&self) -> ReadinessReport {
         let now = now_millis();
         let applied_offset = self.applied_offset.load(Ordering::Acquire);
@@ -229,7 +247,9 @@ impl ReplicationStatus {
             last_applied_at: to_datetime(last_applied_at),
             last_received_at: to_datetime(last_received_at),
             last_commit_at: to_datetime(last_commit_at),
-            ready: !apply_stalled && !commit_stale,
+            ready: self.caught_up_to_startup_head(applied_offset)
+                && !apply_stalled
+                && !commit_stale,
         }
     }
 }
@@ -418,6 +438,10 @@ async fn reconnect<S: OperationSource>(source: &mut S, from: Offset) -> Result<(
                 Ok(()) => {
                     info!("Reconnected to operation receiver");
                     return Ok(());
+                }
+                // Retention will not bring the history back: retrying cannot help.
+                Err(e) if e.downcast_ref::<ReplicationRefusal>().is_some() => {
+                    return Err(format!("{e:#}"));
                 }
                 Err(e) => match backoff.next_backoff() {
                     Some(wait) => {

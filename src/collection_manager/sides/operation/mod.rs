@@ -115,6 +115,15 @@ pub enum OperationReceiver {
 }
 
 impl OperationReceiver {
+    /// Stream head observed when the receiver was created. The reader is not ready until it
+    /// has applied up to it. `None` when there is nothing to catch up on.
+    pub fn startup_head(&self) -> Option<Offset> {
+        match self {
+            Self::InMemory { .. } => None,
+            Self::RabbitMQ(receiver) => receiver.startup_head(),
+        }
+    }
+
     pub fn should_reconnect(&self) -> bool {
         matches!(self, Self::RabbitMQ(_))
     }
@@ -224,14 +233,15 @@ pub enum OperationReceiverCreator {
 }
 
 impl OperationReceiverCreator {
-    pub async fn create(self, last_offset: Offset) -> Result<OperationReceiver> {
+    /// `starting_offset` is the first operation not yet applied by the reader.
+    pub async fn create(self, starting_offset: Offset) -> Result<OperationReceiver> {
         match self {
             OperationReceiverCreator::InMemory { receiver } => {
                 Ok(OperationReceiver::InMemory { receiver })
             }
             OperationReceiverCreator::RabbitMQ(creator) => {
                 let receiver = creator
-                    .create(last_offset)
+                    .create(starting_offset)
                     .await
                     .context("Cannot create RabbitMQ receiver")?;
                 Ok(OperationReceiver::RabbitMQ(receiver))
