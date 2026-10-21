@@ -1,11 +1,15 @@
 use std::time::Duration;
 
+use anyhow::bail;
+use futures::FutureExt;
 use serde_json::json;
 use tokio::time::sleep;
 
+use crate::collection_manager::sides::read::IndexFieldStatsType;
 use crate::collection_manager::sides::write::WriteError;
 use crate::python::embeddings::Model;
 use crate::tests::utils::init_log;
+use crate::tests::utils::wait_for;
 use crate::tests::utils::TestContext;
 use crate::types::CreateCollection;
 use crate::types::DocumentList;
@@ -114,6 +118,112 @@ async fn test_delete_collection() {
         )
         .await;
     assert!(err.is_err());
+
+    drop(test_context);
+}
+
+/// A collection deleted and created again with the same ID before the read side commits
+/// must keep its documents across the commit and a restart.
+#[tokio::test(flavor = "multi_thread")]
+async fn test_recreate_collection_before_commit() {
+    init_log();
+
+    let test_context = TestContext::new().await;
+
+    let collection_id = TestContext::generate_collection_id();
+    let write_api_key = TestContext::generate_api_key();
+    let read_api_key = TestContext::generate_api_key();
+    let documents = json!([
+        { "id": "1", "text": "first document" },
+        { "id": "2", "text": "second document" },
+        { "id": "3", "text": "third document" },
+    ]);
+    let doc_ids: Vec<String> = vec!["1".to_string(), "2".to_string(), "3".to_string()];
+
+    let collection_client = test_context
+        .create_collection_with_id(collection_id, write_api_key, read_api_key, None)
+        .await
+        .unwrap();
+    let index_client = collection_client.create_index().await.unwrap();
+    index_client
+        .insert_documents(documents.clone().try_into().unwrap())
+        .await
+        .unwrap();
+    // Embeddings are computed asynchronously: wait for them, so no operation for the
+    // deleted index reaches the read side after the collection is created again.
+    wait_for(&collection_client, |collection_client| {
+        let index_id = index_client.index_id;
+        async move {
+            let mut index_stats = collection_client
+                .reader_stats()
+                .await?
+                .indexes_stats
+                .into_iter()
+                .find(|i| i.id == index_id)
+                .ok_or_else(|| anyhow::anyhow!("Index not found"))?;
+            let IndexFieldStatsType::EmbeddingFieldStorage(stats) =
+                index_stats.fields_stats.remove(0).stats
+            else {
+                bail!("Expected embedding field stats");
+            };
+            if stats.vector_count < 3 {
+                bail!("Expected 3 embeddings, found {}", stats.vector_count);
+            }
+            Ok(())
+        }
+        .boxed()
+    })
+    .await
+    .unwrap();
+    collection_client.delete().await.unwrap();
+
+    // No commit in between: the read side still holds the deleted collection.
+    let collection_client = test_context
+        .create_collection_with_id(collection_id, write_api_key, read_api_key, None)
+        .await
+        .unwrap();
+    let index_client = collection_client.create_index().await.unwrap();
+    index_client
+        .insert_documents(documents.try_into().unwrap())
+        .await
+        .unwrap();
+
+    // The read side only logs a failed collection commit, so the storage is
+    // checked through batch-get after the commit and after a restart.
+    test_context.commit_all().await.unwrap();
+
+    let found = collection_client
+        .batch_get_documents(doc_ids.clone())
+        .await
+        .expect("batch-get after commit should succeed");
+    assert_eq!(found.len(), 3);
+
+    let test_context = test_context.reload().await;
+    let collection_client = test_context
+        .get_test_collection_client(
+            collection_id,
+            WriteApiKey::from_api_key(write_api_key),
+            ReadApiKey::from_api_key(read_api_key),
+        )
+        .unwrap();
+
+    let result = collection_client
+        .search(
+            json!({
+                "term": "document",
+            })
+            .try_into()
+            .unwrap(),
+        )
+        .await
+        .expect("search after reload should succeed");
+    assert_eq!(result.count, 3);
+
+    let found = collection_client
+        .batch_get_documents(doc_ids)
+        .await
+        .expect("batch-get after reload should succeed");
+    assert_eq!(found.len(), 3);
 
     drop(test_context);
 }
