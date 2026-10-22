@@ -43,5 +43,23 @@ require operator intervention; the reader does not silently skip it. Reconnect
 uses in-memory apply progress, while process restart replays from the persisted
 commit offset.
 
+A RabbitMQ reader starts from the first operation it has not applied: offset 0
+when `read.info` is missing or stores 0, otherwise the stored offset plus one.
+Before creating its consumer it probes the stream's first retained offset and
+head, and refuses to start if the stream cannot replay from that offset, instead
+of serving an index with a gap. The refusal is a startup error: the process exits
+nonzero with the message on stderr. The message begins with a stable code:
+
+- `REPLICATION_HISTORY_EXPIRED`: retention removed the required offset, or the
+  broker delivered an offset other than the next expected one.
+- `REPLICATION_STREAM_BEHIND`: the required offset is past the stream head, or the
+  stream is empty and the reader has already applied operations.
+
+An empty stream is accepted for a reader that has applied nothing. Recreating a
+consumer runs the same checks, and a refused reconnect exits without retrying.
+After starting, the reader stays unready until it has applied the stream head
+observed at startup. Shutdown commits after the receive and commit loops stop,
+so the stored offset never covers operations missing from the committed index.
+
 Configure load-balancer health paths separately when deploying; this API change
 does not change any target-group or probe configuration.

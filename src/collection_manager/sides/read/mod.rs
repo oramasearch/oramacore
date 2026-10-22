@@ -351,7 +351,15 @@ impl ReadSide {
             )),
         };
 
-        let operation_receiver = operation_receiver_creator.create(last_offset).await?;
+        // `read.info` stores the last applied offset; the receiver needs the first one not
+        // yet applied. A RabbitMQ receiver refuses to start if the stream no longer
+        // retains it, so the reader never serves a partial index.
+        let operation_receiver = operation_receiver_creator
+            .create(read_side.replication_status.next_offset())
+            .await?;
+        if let Some(head) = operation_receiver.startup_head() {
+            read_side.replication_status.require_initial_catchup(head);
+        }
 
         let read_side = Arc::new(read_side);
 
@@ -382,13 +390,6 @@ impl ReadSide {
     pub async fn stop(&self) -> Result<()> {
         info!("Stopping read side");
 
-        // Force commit all pending data before stopping to avoid data loss
-        info!("Performing forced commit before shutdown");
-        if let Err(e) = self.commit(true).await {
-            error!(error = ?e, "Cannot commit read side during shutdown");
-            // Continue with shutdown even if commit fails
-        }
-
         // Broadcast stop signal
         self.stop_sender
             .send(())
@@ -403,18 +404,13 @@ impl ReadSide {
                 .context("Cannot receive stop-done signal from background task")?;
         }
 
-        // Write the final offset to read.info to capture any messages
-        // dequeued between the forced commit and the stop signal.
-        let final_offset = Offset(self.live_offset.load(Ordering::Acquire));
-        if let Err(e) =
-            BufferedFile::create_or_overwrite(self.data_dir.join("read.info")).and_then(|f| {
-                f.write_json_data(&ReadInfo::V1(ReadInfoV1 {
-                    offset: final_offset,
-                }))
-            })
-        {
-            error!(error = ?e, "Cannot write final read.info during shutdown");
-        }
+        // Both loops have stopped, so this commit covers every applied operation. Storing
+        // `live_offset` in read.info without committing would make a restarted reader skip
+        // operations whose index was never persisted.
+        info!("Performing forced commit before shutdown");
+        self.commit(true)
+            .await
+            .context("Cannot commit read side after stopping")?;
 
         info!("Read side stopped");
 
