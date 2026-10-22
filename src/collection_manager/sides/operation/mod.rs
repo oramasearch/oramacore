@@ -170,10 +170,21 @@ impl OperationReceiver {
         }
     }
 
-    pub async fn reconnect(&mut self) -> Result<()> {
+    /// Recreates the stream consumer so that it starts at `from`.
+    /// The in-memory channel cannot be recreated, so this is a no-op for it.
+    pub async fn recreate(&mut self, from: Offset) -> Result<()> {
         match self {
             Self::InMemory { .. } => Ok(()),
-            Self::RabbitMQ(receiver) => receiver.reconnect().await,
+            Self::RabbitMQ(receiver) => receiver.recreate(from).await,
+        }
+    }
+
+    /// Offset of the newest operation in the stream, when the channel can tell.
+    /// The in-memory channel cannot fall behind silently, so it reports `None`.
+    pub async fn stream_head(&self) -> Result<Option<Offset>> {
+        match self {
+            Self::InMemory { .. } => Ok(None),
+            Self::RabbitMQ(receiver) => receiver.query_stream_head().await,
         }
     }
 }

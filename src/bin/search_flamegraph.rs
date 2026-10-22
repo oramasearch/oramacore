@@ -146,6 +146,7 @@ fn create_test_config(build: bool) -> OramacoreConfig {
             analytics: None,
             jwt: None,
             secrets_manager: None,
+            replication: Default::default(),
         },
     }
 }

@@ -402,11 +402,14 @@ impl CollectionWriter {
         let embeddings_model = runtime_config.embeddings_model;
         drop(runtime_config);
 
+        // Resolve the shared tokenizer before publishing a locale to readers. Every
+        // Locale is supported, including the Unicode fallback for JP, KO and ZH.
+        let text_parser = self.get_text_parser(default_locale);
         let index = Index::empty(
             index_id,
             self.id,
             None,
-            self.get_text_parser(default_locale),
+            text_parser,
             self.context.clone(),
             enum_strategy,
         )
@@ -471,11 +474,14 @@ impl CollectionWriter {
         let embeddings_model = runtime_config.embeddings_model;
         drop(runtime_config);
 
+        // Resolve the shared tokenizer before publishing a locale to readers. Every
+        // Locale is supported, including the Unicode fallback for JP, KO and ZH.
+        let text_parser = self.get_text_parser(default_locale);
         let index = Index::empty(
             new_index_id,
             self.id,
             Some(copy_from),
-            self.get_text_parser(default_locale),
+            text_parser,
             self.context.clone(),
             copy_from_index.get_enum_strategy(),
         )
