@@ -112,6 +112,7 @@ pub fn create_oramacore_config() -> OramacoreConfig {
             hooks: Default::default(),
             jwt: None,
             secrets_manager: None,
+            replication: Default::default(),
         },
     }
 }

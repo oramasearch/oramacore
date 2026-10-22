@@ -4,6 +4,11 @@ HTTP 200
 GET {{base_url}}/health
 HTTP 200
 
+GET {{base_url}}/health/ready
+HTTP 200
+[Asserts]
+jsonpath "$.ready" == true
+
 GET http://www.randomnumberapi.com/api/v1.0/randomuuid
 HTTP 200
 [Captures]

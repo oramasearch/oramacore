@@ -217,3 +217,6 @@ wait_for(client, |c| {
   folder.
 - No hardcoded paths (use `std::env::temp_dir()` for temporary files)
 - Use descriptive names for test files and functions.
+
+For readiness API or reader supervision changes, read [docs/api.md](docs/api.md)
+and the [read-side notes](src/collection_manager/sides/read/README.md).

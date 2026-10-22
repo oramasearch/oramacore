@@ -27,8 +27,8 @@ use crate::{
     build_orama,
     collection_manager::sides::{
         read::{
-            CollectionCommitConfig, CollectionStats, IndexesConfig, ReadSide, ReadSideConfig,
-            SearchRequest, ShelfWithDocuments,
+            CollectionCommitConfig, CollectionStats, ExitHook, IndexesConfig, ReadSide,
+            ReadSideConfig, ReplicationConfig, SearchRequest, ShelfWithDocuments,
         },
         write::{
             CollectionsWriterConfig, TempIndexCleanupConfig, WriteError, WriteSide, WriteSideConfig,
@@ -157,6 +157,13 @@ pub fn create_oramacore_config() -> OramacoreConfig {
             analytics: None,
             jwt: None,
             secrets_manager: None,
+            replication: ReplicationConfig {
+                // A test binary must not exit when a reader's receive loop ends.
+                exit_hook: ExitHook::new(|code| {
+                    warn!(code, "Read side requested a process exit. Ignored in tests")
+                }),
+                ..Default::default()
+            },
         },
     }
 }
@@ -327,9 +334,23 @@ impl TestContext {
         &self,
         language: Option<LanguageDTO>,
     ) -> Result<TestCollectionClient<'_>> {
-        let id = Self::generate_collection_id();
-        let write_api_key = Self::generate_api_key();
-        let read_api_key_raw = Self::generate_api_key();
+        self.create_collection_with_id(
+            Self::generate_collection_id(),
+            Self::generate_api_key(),
+            Self::generate_api_key(),
+            language,
+        )
+        .await
+    }
+
+    /// Creates a collection with the given ID and keys, e.g. to recreate a deleted collection.
+    pub async fn create_collection_with_id(
+        &self,
+        id: CollectionId,
+        write_api_key: ApiKey,
+        read_api_key_raw: ApiKey,
+        language: Option<LanguageDTO>,
+    ) -> Result<TestCollectionClient<'_>> {
         let read_api_key = ReadApiKey::from_api_key(read_api_key_raw);
 
         self.writer

@@ -115,6 +115,15 @@ pub enum OperationReceiver {
 }
 
 impl OperationReceiver {
+    /// Stream head observed when the receiver was created. The reader is not ready until it
+    /// has applied up to it. `None` when there is nothing to catch up on.
+    pub fn startup_head(&self) -> Option<Offset> {
+        match self {
+            Self::InMemory { .. } => None,
+            Self::RabbitMQ(receiver) => receiver.startup_head(),
+        }
+    }
+
     pub fn should_reconnect(&self) -> bool {
         matches!(self, Self::RabbitMQ(_))
     }
@@ -170,10 +179,21 @@ impl OperationReceiver {
         }
     }
 
-    pub async fn reconnect(&mut self) -> Result<()> {
+    /// Recreates the stream consumer so that it starts at `from`.
+    /// The in-memory channel cannot be recreated, so this is a no-op for it.
+    pub async fn recreate(&mut self, from: Offset) -> Result<()> {
         match self {
             Self::InMemory { .. } => Ok(()),
-            Self::RabbitMQ(receiver) => receiver.reconnect().await,
+            Self::RabbitMQ(receiver) => receiver.recreate(from).await,
+        }
+    }
+
+    /// Offset of the newest operation in the stream, when the channel can tell.
+    /// The in-memory channel cannot fall behind silently, so it reports `None`.
+    pub async fn stream_head(&self) -> Result<Option<Offset>> {
+        match self {
+            Self::InMemory { .. } => Ok(None),
+            Self::RabbitMQ(receiver) => receiver.query_stream_head().await,
         }
     }
 }
@@ -213,14 +233,15 @@ pub enum OperationReceiverCreator {
 }
 
 impl OperationReceiverCreator {
-    pub async fn create(self, last_offset: Offset) -> Result<OperationReceiver> {
+    /// `starting_offset` is the first operation not yet applied by the reader.
+    pub async fn create(self, starting_offset: Offset) -> Result<OperationReceiver> {
         match self {
             OperationReceiverCreator::InMemory { receiver } => {
                 Ok(OperationReceiver::InMemory { receiver })
             }
             OperationReceiverCreator::RabbitMQ(creator) => {
                 let receiver = creator
-                    .create(last_offset)
+                    .create(starting_offset)
                     .await
                     .context("Cannot create RabbitMQ receiver")?;
                 Ok(OperationReceiver::RabbitMQ(receiver))

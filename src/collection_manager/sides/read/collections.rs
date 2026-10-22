@@ -152,7 +152,6 @@ impl CollectionsReader {
         for (id, collection) in col.iter() {
             if collection.is_deleted() {
                 to_delete.push(*id);
-                // TODO: should we delete the collection from the disk?
                 continue;
             }
 
@@ -197,8 +196,14 @@ impl CollectionsReader {
         if !to_delete.is_empty() {
             let mut guard = self.collections.write("commit").await;
             for id in to_delete.iter() {
+                // A collection with the same ID may have been created since the read lock
+                // was released: only the deleted one is dropped.
+                if !guard.get(id).is_some_and(|c| c.is_deleted()) {
+                    continue;
+                }
                 guard.remove(id);
-                // TODO: should we delete the collection from the disk?
+                // The directory stays on disk: `create_collection` removes it before
+                // a collection with the same ID is created again.
                 info!(collection_id=?id, "Collection deleted from memory {:?}", id);
             }
         }
@@ -260,12 +265,29 @@ impl CollectionsReader {
     ) -> Result<()> {
         info!(collection_id=?id, "ReadSide: Creating collection {:?}", id);
 
+        // The directory must be cleaned before the new collection builds its storage in it.
+        // A collection deleted but not yet dropped by `commit` still has an entry here, and
+        // a collection already dropped by `commit` leaves its directory on disk: either way
+        // the old data is removed first, so the new collection always starts empty.
+        let mut guard = self.collections.write("create_collection").await;
+        if let Some(collection) = guard.get(&id) {
+            if !collection.is_deleted() {
+                warn!(collection_id=?id, "Collection already exists");
+                return Err(anyhow::anyhow!("Collection already exists"));
+            }
+            guard.remove(&id);
+        }
+        self.clean_fs_for_collection(id).await?;
+        drop(guard);
+
         let collection_dir = self
             .indexes_config
             .data_dir
             .join("collections")
             .join(id.as_str());
 
+        // Built without the lock, as before, so searches on other collections are not blocked
+        // while the JS pool starts. The lock is taken again to insert, re-checking the entry.
         let collection = CollectionReader::empty(
             collection_dir,
             id,
@@ -280,18 +302,10 @@ impl CollectionsReader {
         .await?;
 
         let mut guard = self.collections.write("create_collection").await;
-
-        if let Some(collection) = guard.get(&id) {
-            if !collection.is_deleted() {
-                warn!(collection_id=?id, "Collection already exists");
-                return Err(anyhow::anyhow!("Collection already exists"));
-            }
-
-            // If the collection is previously deleted, we ignore the previous data
-            // and clean the FS
-            self.clean_fs_for_collection(collection).await.ok();
+        if guard.get(&id).is_some_and(|c| !c.is_deleted()) {
+            warn!(collection_id=?id, "Collection already exists");
+            return Err(anyhow::anyhow!("Collection already exists"));
         }
-
         guard.insert(id, collection);
         drop(guard);
 
@@ -312,21 +326,20 @@ impl CollectionsReader {
     }
     */
 
-    pub async fn clean_fs_for_collection(&self, collection: &CollectionReader) -> Result<()> {
-        info!(collection_id=?collection.id(), "Cleaning FS collection");
+    /// Removes the collection's directory, if any. Used before a collection is created,
+    /// so no data of a previous collection with the same ID survives.
+    pub async fn clean_fs_for_collection(&self, id: CollectionId) -> Result<()> {
+        info!(collection_id=?id, "Cleaning FS collection");
 
         let data_dir = &self.indexes_config.data_dir;
         let collections_dir = data_dir.join("collections");
 
-        let collection_dir = collections_dir.join(collection.id().as_str());
+        let collection_dir = collections_dir.join(id.as_str());
         if collection_dir.exists() {
             tokio::fs::remove_dir_all(&collection_dir)
                 .await
                 .with_context(|| {
-                    format!(
-                        "Cannot remove directory for collection '{}'",
-                        collection.id().as_str()
-                    )
+                    format!("Cannot remove directory for collection '{}'", id.as_str())
                 })?;
         }
 

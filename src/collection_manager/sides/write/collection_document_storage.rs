@@ -1,4 +1,5 @@
 use std::{
+    borrow::Cow,
     path::PathBuf,
     sync::{atomic::AtomicU64, Arc},
 };
@@ -16,7 +17,7 @@ use zebo::Zebo;
 use crate::{
     collection_manager::sides::write::document_storage::{DocumentStorage, ZeboDocument},
     lock::OramaAsyncLock,
-    types::{DocumentId, RawJSONDocument},
+    types::{sort_and_dedup_by_id, DocumentId, RawJSONDocument},
 };
 
 // 1GB
@@ -81,6 +82,25 @@ impl CollectionDocumentStorage {
         if docs.is_empty() {
             return Ok(());
         }
+
+        // Zebo needs a strictly ascending batch: reorder a borrowed copy only when needed.
+        let sorted: Vec<_>;
+        let docs = if docs.is_sorted_by(|a, b| a.0 < b.0) {
+            docs
+        } else {
+            let mut copy: Vec<_> = docs
+                .iter()
+                .map(|(id, doc)| {
+                    (
+                        *id,
+                        ZeboDocument::new(Cow::Borrowed(&doc.0), Cow::Borrowed(&doc.1)),
+                    )
+                })
+                .collect();
+            sort_and_dedup_by_id(&mut copy);
+            sorted = copy;
+            &sorted
+        };
 
         let mut zebo = self.zebo.write("insert_many").await;
         let space = zebo

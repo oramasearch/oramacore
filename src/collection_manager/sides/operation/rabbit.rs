@@ -14,7 +14,7 @@ use std::{
     task::Poll,
 };
 use tokio::sync::Notify;
-use tokio::time::sleep;
+use tokio::time::{sleep, timeout, timeout_at, Instant};
 use tracing::{debug, error, info, trace, warn};
 
 use crate::lock::OramaAsyncLock;
@@ -159,15 +159,11 @@ impl RabbitOperationReceiverCreator {
         })
     }
 
-    pub async fn create(self, last_offset: Offset) -> Result<RabbitOperationReceiver> {
-        // We save the last offset in the consumer config
-        // So, what we want to do is to start from the next offset
-        let starting_offset = if last_offset.is_zero() {
-            last_offset
-        } else {
-            last_offset.next()
-        };
-
+    /// `starting_offset` is the first operation not yet in the durable index.
+    /// Fails with a [`ReplicationRefusal`] if the stream no longer retains it.
+    pub async fn create(self, starting_offset: Offset) -> Result<RabbitOperationReceiver> {
+        let startup_head =
+            validate_stream_start(&self.environment, &self.config, starting_offset).await?;
         let consumer = create_consumer(&self.environment, &self.config, starting_offset)
             .await
             .context("Cannot create consumer")?;
@@ -176,7 +172,8 @@ impl RabbitOperationReceiverCreator {
             consumer,
             environment: self.environment,
             config: self.config,
-            last_offset,
+            expected_offset: starting_offset,
+            startup_head,
         })
     }
 }
@@ -314,19 +311,55 @@ pub struct RabbitOperationReceiver {
     consumer: Consumer,
     environment: Box<Environment>,
     config: RabbitMQConsumerConfig,
-    last_offset: Offset,
+    // Offset the next delivery must have. Anything else means the broker skipped
+    // operations, and applying it would leave a partial index.
+    expected_offset: Offset,
+    // Stream head observed at creation; `None` if the stream was empty.
+    startup_head: Option<Offset>,
 }
 
+// Bounds the broker round trips made while closing a consumer or probing the stream head,
+// so a dead connection cannot hang the caller.
+const CONSUMER_CLOSE_TIMEOUT: Duration = Duration::from_secs(5);
+const HEAD_PROBE_TIMEOUT: Duration = Duration::from_secs(10);
+// The probe has read the last chunk once no message arrives for this long.
+const HEAD_PROBE_IDLE: Duration = Duration::from_millis(500);
+
 impl RabbitOperationReceiver {
-    pub async fn reconnect(&mut self) -> Result<()> {
-        self.consumer = create_consumer(
+    /// Stream head observed when the receiver was created, or `None` if the stream was empty.
+    pub fn startup_head(&self) -> Option<Offset> {
+        self.startup_head
+    }
+
+    /// Closes the current consumer and creates a new one that starts at `from`.
+    /// Used both after the consumer ends and when it goes silent.
+    pub async fn recreate(&mut self, from: Offset) -> Result<()> {
+        // The old connection may be dead: closing it is best effort.
+        match timeout(CONSUMER_CLOSE_TIMEOUT, self.consumer.handle().close()).await {
+            Ok(Ok(())) => {}
+            Ok(Err(e)) => debug!(error = ?e, "Cannot close the previous consumer"),
+            Err(_) => warn!("Timed out closing the previous consumer"),
+        }
+
+        validate_stream_start(&self.environment, &self.config, from).await?;
+        self.expected_offset = from;
+        self.consumer = create_consumer(&self.environment, &self.config, from)
+            .await
+            .context("Cannot recreate consumer")?;
+        Ok(())
+    }
+
+    /// Returns the offset of the newest message in the stream, or `None` if the stream is empty.
+    /// The stream client has no call for the stream head, so this opens a short-lived consumer
+    /// on its own connection at the last chunk and reads that chunk to the end.
+    pub async fn query_stream_head(&self) -> Result<Option<Offset>> {
+        probe_stream_edge(
             &self.environment,
             &self.config,
-            Offset(self.last_offset.0 + 1),
+            OffsetSpecification::Last,
+            true,
         )
         .await
-        .context("Cannot reconnect")?;
-        Ok(())
     }
 }
 
@@ -348,11 +381,15 @@ impl Stream for RabbitOperationReceiver {
             Poll::Ready(Some(Ok(delivery))) => delivery,
         };
 
-        let message = delivery.message();
         let offset = Offset(delivery.offset());
-
-        // Save last offset in case of reconnect
-        self.last_offset = offset;
+        if let Err(refusal) = validate_delivery_offset(self.expected_offset, offset) {
+            return Poll::Ready(Some(Err(refusal.into())));
+        }
+        let Some(next) = offset.0.checked_add(1) else {
+            return Poll::Ready(Some(Err(anyhow::anyhow!("Stream offset overflow"))));
+        };
+        self.expected_offset = Offset(next);
+        let message = delivery.message();
 
         let data = match message.data() {
             None => {
@@ -427,6 +464,146 @@ async fn create_producer(
     )
     .await
     .context("Failed to create HA producer")
+}
+
+/// Why a reader refuses to replicate from the stream. Each message starts with a stable
+/// code that tools match on to report the cause; keep the codes unchanged.
+#[derive(Debug, thiserror::Error, PartialEq, Eq)]
+pub enum ReplicationRefusal {
+    #[error("REPLICATION_HISTORY_EXPIRED: reader requires offset {required} but first retained offset is {first}")]
+    HistoryExpired { required: u64, first: u64 },
+    #[error(
+        "REPLICATION_STREAM_BEHIND: reader requires offset {required} ahead of stream head {head}"
+    )]
+    AheadOfHead { required: u64, head: u64 },
+    #[error(
+        "REPLICATION_STREAM_BEHIND: reader requires offset {required} but the stream is empty"
+    )]
+    EmptyStream { required: u64 },
+    #[error("REPLICATION_HISTORY_EXPIRED: reader requires offset {expected} but broker delivered {delivered}")]
+    UnexpectedDelivery { expected: u64, delivered: u64 },
+}
+
+/// Checks that the stream still retains `required` before a consumer starts there. When the
+/// requested offset is gone, the broker silently starts the consumer at the first retained
+/// offset, so this must be checked up front. Returns the observed stream head, or `None`
+/// for an empty stream.
+///
+/// A probe that times out on a non-empty stream looks empty. That is only accepted for
+/// `required == 0`, and then the broker delivers the first retained offset, which
+/// `validate_delivery_offset` refuses.
+async fn validate_stream_start(
+    environment: &Environment,
+    config: &RabbitMQConsumerConfig,
+    required: Offset,
+) -> Result<Option<Offset>> {
+    let Some(first) =
+        probe_stream_edge(environment, config, OffsetSpecification::First, false).await?
+    else {
+        validate_empty_stream(required)?;
+        return Ok(None);
+    };
+    let head = probe_stream_edge(environment, config, OffsetSpecification::Last, true)
+        .await?
+        .context("Cannot observe the stream head")?;
+    validate_retained_range(required, first, head)?;
+    Ok(Some(head))
+}
+
+/// A reader may start at `required` if the stream holds `first..=head`
+/// and `required` is in `first..=head + 1`.
+pub(crate) fn validate_retained_range(
+    required: Offset,
+    first: Offset,
+    head: Offset,
+) -> Result<(), ReplicationRefusal> {
+    if required < first {
+        return Err(ReplicationRefusal::HistoryExpired {
+            required: required.0,
+            first: first.0,
+        });
+    }
+    if required.0 > head.0.saturating_add(1) {
+        return Err(ReplicationRefusal::AheadOfHead {
+            required: required.0,
+            head: head.0,
+        });
+    }
+    Ok(())
+}
+
+/// Retention never removes the active segment, so a stream that ever had a message is never
+/// empty. An empty stream can only serve a reader that has applied nothing.
+pub(crate) fn validate_empty_stream(required: Offset) -> Result<(), ReplicationRefusal> {
+    if required.is_zero() {
+        Ok(())
+    } else {
+        Err(ReplicationRefusal::EmptyStream {
+            required: required.0,
+        })
+    }
+}
+
+/// Catches retention that moved between `validate_stream_start` and the consumer start,
+/// and any other gap in the deliveries.
+pub(crate) fn validate_delivery_offset(
+    expected: Offset,
+    delivered: Offset,
+) -> Result<(), ReplicationRefusal> {
+    if expected == delivered {
+        Ok(())
+    } else {
+        Err(ReplicationRefusal::UnexpectedDelivery {
+            expected: expected.0,
+            delivered: delivered.0,
+        })
+    }
+}
+
+/// Opens a short-lived consumer on its own connection at `offset` and returns the offset of
+/// the first message it receives, or with `read_to_end` the last one before it goes idle.
+/// `None` means nothing arrived. The stream client has no call for the stream bounds.
+async fn probe_stream_edge(
+    environment: &Environment,
+    config: &RabbitMQConsumerConfig,
+    offset: OffsetSpecification,
+    read_to_end: bool,
+) -> Result<Option<Offset>> {
+    let mut probe = timeout(
+        HEAD_PROBE_TIMEOUT,
+        environment
+            .consumer()
+            .client_provided_name(&format!("{}-stream-probe", config.consumer_name))
+            .offset(offset)
+            .build(&config.stream_name),
+    )
+    .await
+    .context("Timed out creating the stream probe")?
+    .context("Cannot create the stream probe")?;
+
+    let mut observed: Option<u64> = None;
+    let deadline = Instant::now() + HEAD_PROBE_TIMEOUT;
+    let result = loop {
+        let idle_deadline = (Instant::now() + HEAD_PROBE_IDLE).min(deadline);
+        match timeout_at(idle_deadline, probe.next()).await {
+            Ok(Some(Ok(delivery))) => {
+                observed = Some(observed.map_or(delivery.offset(), |o| o.max(delivery.offset())));
+                if !read_to_end {
+                    break Ok(observed.map(Offset));
+                }
+            }
+            Ok(Some(Err(e))) => break Err(anyhow::Error::from(e)),
+            Ok(None) => break Err(anyhow::anyhow!("Stream probe closed unexpectedly")),
+            // No new messages within the idle window: the chunk has been read.
+            Err(_) => break Ok(observed.map(Offset)),
+        }
+    };
+
+    if let Err(e) = timeout(CONSUMER_CLOSE_TIMEOUT, probe.handle().close()).await {
+        debug!(error = ?e, "Timed out closing the stream probe");
+    }
+
+    result.context("Cannot read from the stream probe")
 }
 
 async fn create_consumer(
@@ -528,3 +705,7 @@ mod tests {
         assert_send_sync::<RabbitOperationReceiver>();
     }
 }
+
+#[cfg(test)]
+#[path = "../../../tests/replication_retention_broker.rs"]
+mod replication_retention_broker;

@@ -10,7 +10,7 @@ use crate::{
     collection_manager::sides::DocumentToInsert,
     lock::OramaAsyncLock,
     metrics::{commit::DOCUMENT_COMMIT_CALCULATION_TIME, Empty},
-    types::{DocumentId, RawJSONDocument},
+    types::{sort_and_dedup_by_id, DocumentId, RawJSONDocument},
 };
 use anyhow::{Context, Result};
 use oramacore_lib::fs::{create_if_not_exists, read_file};
@@ -51,18 +51,8 @@ impl CommittedDiskDocumentStorage {
     ) -> Result<()> {
         trace!(doc_len=?doc_ids.len(), "Read document");
 
-        let zebo = self.zebo.read("get_documents_by_ids").await;
-        let output = zebo
-            .get_documents(doc_ids.to_vec())
-            .context("Cannot get documents from zebo")?
-            .filter_map(|r| {
-                let (id, doc) = r.ok()?;
-                let doc = ZeboDocument::from_bytes(doc).ok()?;
-                let doc = doc.as_raw_json_doc().ok()?;
-                Some((id, doc))
-            });
+        let output = read_zebo_documents(self.zebo.clone(), doc_ids.to_vec()).await?;
         result.extend(output);
-        drop(zebo);
 
         Ok(())
     }
@@ -104,10 +94,11 @@ impl CommittedDiskDocumentStorage {
                     .await;
             }
         };
-        let docs: Vec<_> = new_docs
+        let mut docs: Vec<_> = new_docs
             .into_iter()
             .map(|(doc_id, doc)| (doc_id, ZeboDocument::FromJSONDoc(doc)))
             .collect();
+        sort_and_dedup_by_id(&mut docs);
         if !docs.is_empty() {
             zebo.reserve_space_for(&docs)
                 .context("Cannot reserve space for documents")?
@@ -145,12 +136,14 @@ impl DocumentStorage {
             .await
             .context("Cannot create CommittedDiskDocumentStorage")?;
 
-        let last = committed
-            .zebo
-            .read("try_new")
-            .await
-            .get_last_inserted_document_id()
-            .context("Cannot get last inserted document id from zebo")?;
+        let zebo = committed.zebo.clone();
+        let last = tokio::task::spawn_blocking(move || {
+            zebo.blocking_read("try_new")
+                .get_last_inserted_document_id()
+        })
+        .await
+        .context("Zebo initial ID task failed")?
+        .context("Cannot get last inserted document id from zebo")?;
 
         Ok(Self {
             uncommitted: OramaAsyncLock::new("uncommitted", Default::default()),
@@ -212,10 +205,6 @@ impl DocumentStorage {
     }
 
     async fn add_documents(&self, docs: Vec<(DocumentId, DocumentToInsert)>) {
-        if cfg!(test) && !docs.is_sorted_by(|a, b| a.0 < b.0) {
-            panic!("Add documents are not in order");
-        }
-
         let mut uncommitted = self.uncommitted.write("add_documents").await;
         uncommitted.extend(
             docs.into_iter()
@@ -238,8 +227,11 @@ impl DocumentStorage {
     }
 
     pub async fn get_zebo_info(&self) -> Result<ZeboInfo> {
-        let zebo = self.committed.zebo.read("get_zebo_info").await;
-        zebo.get_info().context("Cannot get zebo info")
+        let zebo = self.committed.zebo.clone();
+        tokio::task::spawn_blocking(move || zebo.blocking_read("get_zebo_info").get_info())
+            .await
+            .context("Zebo info task failed")?
+            .context("Cannot get zebo info")
     }
 
     pub async fn get_last_inserted_document_id(&self) -> Result<Option<DocumentId>> {
@@ -252,14 +244,15 @@ impl DocumentStorage {
         }
         drop(lock);
 
-        let zebo = self
-            .committed
-            .zebo
-            .read("get_last_inserted_document_id")
-            .await;
-        let last_inserted_document_id = zebo
-            .get_last_inserted_document_id()
-            .context("Cannot get last inserted document ID")?;
+        // Zebo loads page headers from disk here: keep it off the runtime workers.
+        let zebo = self.committed.zebo.clone();
+        let last_inserted_document_id = tokio::task::spawn_blocking(move || {
+            zebo.blocking_read("get_last_inserted_document_id")
+                .get_last_inserted_document_id()
+        })
+        .await
+        .context("Zebo read task failed")?
+        .context("Cannot get last inserted document ID")?;
 
         let last_uncommitted_inserted_document_id = self
             .uncommitted
@@ -364,6 +357,36 @@ impl DocumentStorage {
 
         Ok(())
     }
+}
+
+/// Reads `doc_ids` from `zebo` on Tokio's blocking pool and returns the documents found.
+/// Zebo reads are synchronous `pread`s: on a runtime worker a slow disk would park that
+/// worker, starving the searches and the operation receive loop that share the runtime.
+/// Missing documents, and documents that cannot be decoded, are skipped.
+pub(super) async fn read_zebo_documents<const MAX_DOC_PER_PAGE: u32, const ZEBO_PAGE_SIZE: u64>(
+    zebo: Arc<OramaAsyncLock<Zebo<MAX_DOC_PER_PAGE, ZEBO_PAGE_SIZE, DocumentId>>>,
+    doc_ids: Vec<DocumentId>,
+) -> Result<Vec<(DocumentId, Arc<RawJSONDocument>)>> {
+    if doc_ids.is_empty() {
+        return Ok(vec![]);
+    }
+
+    tokio::task::spawn_blocking(move || {
+        let zebo = zebo.blocking_read("get_documents_by_ids");
+        let documents = zebo
+            .get_documents(doc_ids)
+            .context("Cannot get documents from zebo")?
+            .filter_map(|r| {
+                let (id, doc) = r.ok()?;
+                let doc = ZeboDocument::from_bytes(doc).ok()?;
+                let doc = doc.as_raw_json_doc().ok()?;
+                Some((id, doc))
+            })
+            .collect();
+        Ok(documents)
+    })
+    .await
+    .context("Zebo read task failed")?
 }
 
 async fn migrate_to_zebo(data_dir: &PathBuf) -> Result<Zebo<1_000_000, PAGE_SIZE, DocumentId>> {
