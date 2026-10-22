@@ -334,9 +334,23 @@ impl TestContext {
         &self,
         language: Option<LanguageDTO>,
     ) -> Result<TestCollectionClient<'_>> {
-        let id = Self::generate_collection_id();
-        let write_api_key = Self::generate_api_key();
-        let read_api_key_raw = Self::generate_api_key();
+        self.create_collection_with_id(
+            Self::generate_collection_id(),
+            Self::generate_api_key(),
+            Self::generate_api_key(),
+            language,
+        )
+        .await
+    }
+
+    /// Creates a collection with the given ID and keys, e.g. to recreate a deleted collection.
+    pub async fn create_collection_with_id(
+        &self,
+        id: CollectionId,
+        write_api_key: ApiKey,
+        read_api_key_raw: ApiKey,
+        language: Option<LanguageDTO>,
+    ) -> Result<TestCollectionClient<'_>> {
         let read_api_key = ReadApiKey::from_api_key(read_api_key_raw);
 
         self.writer
